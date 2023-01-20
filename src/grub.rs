@@ -2,11 +2,12 @@ use color_eyre::Result;
 use std::process::Command;
 use tracing::error;
 
-use crate::{run, cfg::Config};
+use crate::{cfg::Config, run};
 
 /// Assume: `target` ends with `/`
 pub fn grub_mkconfig(target: &str) -> Result<()> {
-	run!("grub2-mkconfig", "-o", &format!("{target}boot/grub2/grub.cfg"))
+	run!("grub2-mkconfig", "-o", &format!("{target}boot/grub2/grub.cfg"))?;
+	Ok(())
 }
 pub fn grub_install(disk: &str, arch: &str) -> Result<()> {
 	let stat = Command::new("grub2-install").args([disk, "--target", arch]).status();
@@ -17,7 +18,7 @@ pub fn grub_install(disk: &str, arch: &str) -> Result<()> {
 	}
 }
 
-trait LiveImageCreator {
+pub trait LiveImageCreator {
 	/// src, dest, required
 	const EFI_FILES: &'static [(&'static str, &'static str, bool)];
 	const ARCH: crate::util::Arch;
@@ -39,9 +40,13 @@ trait LiveImageCreator {
 		}
 		Ok(fail)
 	}
+
+	fn exec(&self) -> Result<()> {
+		Ok(())
+	}
 }
 
-struct LiveImageCreatorX86 {
+pub struct LiveImageCreatorX86 {
 	cfg: Config,
 }
 
@@ -64,7 +69,7 @@ impl LiveImageCreator for LiveImageCreatorX86 {
 		&self.cfg
 	}
 }
-struct LiveImageCreatorX86_64 {
+pub struct LiveImageCreatorX86_64 {
 	cfg: Config,
 }
 
@@ -84,6 +89,6 @@ impl LiveImageCreator for LiveImageCreatorX86_64 {
 	];
 
 	fn get_cfg(&self) -> &Config {
-	&	self.cfg
+		&self.cfg
 	}
 }

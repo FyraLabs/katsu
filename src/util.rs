@@ -5,7 +5,7 @@ macro_rules! run {
 		.args([$($arr,)*])
 		.output()?;
 		if out.status.success() {
-			Ok(())
+			Ok(out.stdout)
 		} else {
 			use color_eyre::{eyre::eyre, SectionExt, Help};
 			let stdout = String::from_utf8_lossy(&out.stdout);

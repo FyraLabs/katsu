@@ -1,18 +1,24 @@
+mod cfg;
 mod grub;
 mod util;
-mod cfg;
 
 use cfg::Config;
 use color_eyre::Result;
+use util::Arch;
 use std::process::Command;
 
 use tracing::{debug, instrument, trace};
 
-/// Gets the kernel version using `uname -r`
-/// Works with `systemd-nspawn`, or alternatively `chroot` + `mount --bind` in docker
+use crate::grub::{LiveImageCreatorX86, LiveImageCreatorX86_64, LiveImageCreator};
+
 fn get_krnl_ver(target: &str) -> Result<String> {
 	let out = Command::new("rpm").args(["-q", "kernel", "--root", target]).output()?;
 	Ok(String::from_utf8(out.stdout)?.strip_prefix("kernel-").unwrap().to_string())
+}
+
+fn get_arch() -> Result<Arch> {
+	let out = run!("uname", "-p")?;
+	Ok(Arch::from(String::from_utf8(out)?.as_str()))
 }
 
 /// ```
@@ -42,7 +48,8 @@ fn dracut(cfg: &Config, target: &str) -> Result<()> {
 		" multipath ",
 		&format!("{}.{arch}-{krnlver}.initrd", cfg.distro),
 		&format!("{krnlver}-{others}"),
-	)
+	)?;
+	Ok(())
 }
 
 fn main() -> Result<()> {
@@ -57,7 +64,12 @@ fn main() -> Result<()> {
 		trace!(cfg_file, "Reading/Parsing config");
 		let config: Config = toml::from_str(&std::fs::read_to_string(cfg_file)?)?;
 		trace!("Config read done: {config:#?}");
-		// then we do stuff with it
+		match get_arch()? {
+			Arch::X86 => LiveImageCreatorX86::from(config).exec()?,
+			Arch::X86_64 => LiveImageCreatorX86_64::from(config).exec()?,
+			Arch::Nyani => panic!("Unknown architecture"),
+		}
+		
 	}
 	debug!("Escalate sudo :3");
 	sudo::escalate_if_needed().unwrap(); // `Box<dyn Error>` unwrap
