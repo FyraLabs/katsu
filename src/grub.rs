@@ -29,6 +29,8 @@ pub trait LiveImageCreator {
 		let mut fail = false;
 		std::fs::create_dir_all(std::path::Path::new(isodir).join("EFI/BOOT/fonts"))?;
 		for (src, dest, req) in Self::EFI_FILES {
+			let src = src.replace("%arch", Self::ARCH.into());
+			let dest = dest.replace("%arch", Self::ARCH.into());
 			let p = format!("{}{src}", self.get_cfg().instroot);
 			let p = std::path::Path::new(&p);
 			if !p.exists() && *req {
@@ -59,10 +61,11 @@ impl From<Config> for LiveImageCreatorX86 {
 impl LiveImageCreator for LiveImageCreatorX86 {
 	const ARCH: crate::util::Arch = crate::util::Arch::X86;
 	const EFI_FILES: &'static [(&'static str, &'static str, bool)] = &[
-		("boot/efi/EFI/*/gcd%arch%.efi", "/EFI/BOOT/grub%arc%.efi", true),
-		("boot/efi/EFI/*/shimia32.efi", "/EFI/BOOT/BOOTIA32.EFI", false),
-		("boot/efi/EFI/*/gcdia32.efi", "/EFI/BOOT/grubia32.efi", false),
-		("usr/share/grub/unicode.pf2", "/EFI/BOOT/fonts/", true),
+		("/boot/efi/EFI/*/shim%arch%.efi", "/EFI/BOOT/BOOT%arch%.EFI", true),
+		("/boot/efi/EFI/*/gcd%arch%.efi", "/EFI/BOOT/grub%arch%.efi", true),
+		("/boot/efi/EFI/*/shimia32.efi", "/EFI/BOOT/BOOTIA32.EFI", false),
+		("/boot/efi/EFI/*/gcdia32.efi", "/EFI/BOOT/grubia32.efi", false),
+		("/usr/share/grub/unicode.pf2", "/EFI/BOOT/fonts/", true),
 	];
 
 	fn get_cfg(&self) -> &Config {
@@ -82,10 +85,11 @@ impl From<Config> for LiveImageCreatorX86_64 {
 impl LiveImageCreator for LiveImageCreatorX86_64 {
 	const ARCH: crate::util::Arch = crate::util::Arch::X86_64;
 	const EFI_FILES: &'static [(&'static str, &'static str, bool)] = &[
-		("boot/efi/EFI/*/gcd%arch%.efi", "/EFI/BOOT/grub%arc%.efi", true),
-		("boot/efi/EFI/*/shimia32.efi", "/EFI/BOOT/BOOTIA32.EFI", false),
-		("boot/efi/EFI/*/gcdia32.efi", "/EFI/BOOT/grubia32.efi", false),
-		("usr/share/grub/unicode.pf2", "/EFI/BOOT/fonts/", true),
+		("/boot/efi/EFI/*/shim%arch%.efi", "/EFI/BOOT/BOOT%arch%.EFI", true),
+		("/boot/efi/EFI/*/gcd%arch%.efi", "/EFI/BOOT/grub%arch%.efi", true),
+		("/boot/efi/EFI/*/shimia32.efi", "/EFI/BOOT/BOOTIA32.EFI", false),
+		("/boot/efi/EFI/*/gcdia32.efi", "/EFI/BOOT/grubia32.efi", false),
+		("/usr/share/grub/unicode.pf2", "/EFI/BOOT/fonts/", true),
 	];
 
 	fn get_cfg(&self) -> &Config {

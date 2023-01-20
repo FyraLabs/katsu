@@ -34,3 +34,13 @@ impl From<&str> for Arch {
 		}
 	}
 }
+
+impl Into<&str> for Arch {
+	fn into(self) -> &'static str {
+		match self {
+			Self::X86 => "i386",
+			Self::X86_64 => "x86_64",
+			_ => panic!("Unknown architecture"),
+		}
+	}
+}
