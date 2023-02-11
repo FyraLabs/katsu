@@ -1,5 +1,5 @@
 mod cfg;
-mod grub;
+mod creator;
 mod util;
 
 use cfg::Config;
@@ -9,7 +9,7 @@ use std::process::Command;
 
 use tracing::{debug, instrument, trace};
 
-use crate::grub::{LiveImageCreatorX86, LiveImageCreatorX86_64, LiveImageCreator};
+use crate::creator::{LiveImageCreatorX86, LiveImageCreatorX86_64, LiveImageCreator};
 
 fn get_krnl_ver(target: &str) -> Result<String> {
 	let out = Command::new("rpm").args(["-q", "kernel", "--root", target]).output()?;

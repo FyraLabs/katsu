@@ -1,8 +1,12 @@
 #[macro_export]
 macro_rules! run {
 	($n:expr $(, $arr:expr)* $(,)?) => {{
+		run!($n; [$($arr,)*])
+	}};
+	($n:expr; $arr:expr) => {{
+		tracing::debug!("# {} {:?}", $n, $arr);
 		let out = std::process::Command::new($n)
-		.args([$($arr,)*])
+		.args($arr)
 		.output()?;
 		if out.status.success() {
 			Ok(out.stdout)
@@ -10,11 +14,11 @@ macro_rules! run {
 			use color_eyre::{eyre::eyre, SectionExt, Help};
 			let stdout = String::from_utf8_lossy(&out.stdout);
 			let stderr = String::from_utf8_lossy(&out.stderr);
-			Err(eyre!("Command returned non-zero code"))
+			Err(eyre!("Command returned code: {}", out.status.code().unwrap_or_default()))
 				.with_section(move || stdout.trim().to_string().header("Stdout:"))
 				.with_section(move || stderr.trim().to_string().header("Stdout:"))
 		}
-	}};
+	}}
 }
 
 #[derive(Default)]
