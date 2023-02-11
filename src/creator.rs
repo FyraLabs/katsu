@@ -1,17 +1,10 @@
 use color_eyre::Result;
-use smartstring::alias::String as SStr;
-use std::{path::Path, process::Command};
-use tracing::{error, info, instrument, warn};
+use std::{path::Path};
+use tracing::{error, instrument, warn};
 
-use crate::{cfg::Config, run};
+use crate::{cfg::Config, run, donburi::{dracut, grub_mkconfig}};
 
 const ISO_L3_MAX_FILE_SIZE: u64 = 4 * 1024_u64.pow(3);
-
-/// Assume: `target` ends with `/`
-pub fn grub_mkconfig(target: &str) -> Result<()> {
-	run!("grub2-mkconfig", "-o", &format!("{target}boot/grub2/grub.cfg"))?;
-	Ok(())
-}
 
 pub trait LiveImageCreator {
 	/// src, dest, required
@@ -39,6 +32,14 @@ pub trait LiveImageCreator {
 	}
 
 	fn exec(&self) -> Result<()> {
+		// bootstrap chroot
+		self.initsys()?;
+		let cfg = self.get_cfg();
+		dracut(cfg)?;
+		self.copy_efi_files(&cfg.isodir)?;
+		// squashfs
+		grub_mkconfig(&cfg.isodir)?;
+		self.create_iso()?;
 		Ok(())
 	}
 

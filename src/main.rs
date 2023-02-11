@@ -1,56 +1,16 @@
 mod cfg;
 mod creator;
 mod util;
+mod donburi;
 
 use cfg::Config;
 use color_eyre::Result;
 use util::Arch;
-use std::process::Command;
 
-use tracing::{debug, instrument, trace};
+use tracing::{debug, trace};
 
-use crate::creator::{LiveImageCreatorX86, LiveImageCreatorX86_64, LiveImageCreator};
+use crate::{creator::{LiveImageCreatorX86, LiveImageCreatorX86_64, LiveImageCreator}, donburi::get_arch};
 
-fn get_krnl_ver(target: &str) -> Result<String> {
-	let out = Command::new("rpm").args(["-q", "kernel", "--root", target]).output()?;
-	Ok(String::from_utf8(out.stdout)?.strip_prefix("kernel-").unwrap().to_string())
-}
-
-fn get_arch() -> Result<Arch> {
-	let out = run!("uname", "-p")?;
-	Ok(Arch::from(String::from_utf8(out)?.as_str()))
-}
-
-/// ```
-/// /usr/bin/dracut --verbose --no-hostonly --no-hostonly-cmdline --install /.profile --add " kiwi-live pollcdrom " --omit " multipath " Ultramarine-Linux.x86_64-0.0.0.initrd 6.0.15-300.fc37.x86_64
-/// ```
-#[instrument]
-fn dracut(cfg: &Config, target: &str) -> Result<()> {
-	let raw = &get_krnl_ver(target)?;
-	let mut ver = raw.split("-");
-	let krnlver = ver.next().unwrap();
-	let others = ver.next().unwrap();
-	let arch = others.split(".").nth(2).expect("Can't read arch???");
-	run!(
-		"dracut",
-		"--kernel-ver",
-		raw,
-		"--sysroot",
-		target,
-		"--verbose",
-		"--no-hostonly",
-		"--no-hostonly-cmdline",
-		"--install",
-		"/.profile",
-		"--add",
-		" kiwi-live pollcdrom ",
-		"--omit",
-		" multipath ",
-		&format!("{}.{arch}-{krnlver}.initrd", cfg.distro),
-		&format!("{krnlver}-{others}"),
-	)?;
-	Ok(())
-}
 
 fn main() -> Result<()> {
 	tracing_log::LogTracer::init()?;
