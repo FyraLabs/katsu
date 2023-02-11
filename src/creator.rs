@@ -111,6 +111,14 @@ pub trait LiveImageCreator {
 		run!("dnf"; args)?;
 		Ok(())
 	}
+	#[instrument(skip(self))]
+	fn instpkgs(&self) -> Result<()> {
+		let cfg = self.get_cfg();
+		let mut args = vec!["install"];
+		args.extend(cfg.packages.pkgs.iter().map(|a| a.as_str()));
+		run!("dnf"; args)?;
+		Ok(())
+	}
 }
 
 pub struct LiveImageCreatorX86 {
