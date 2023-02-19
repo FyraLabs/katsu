@@ -9,7 +9,14 @@ pub struct Config {
 	pub out: String,
 	pub packages: Packages,
 	pub sys: System,
-	pub fslabel: String,
+	pub fs: FileSystem,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct FileSystem {
+	pub skip: Option<bool>,
+	pub fstype: String,
+	pub label: String,
 }
 
 #[derive(Deserialize, Debug)]

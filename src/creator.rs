@@ -1,8 +1,12 @@
-use color_eyre::Result;
-use std::{path::Path};
-use tracing::{error, instrument, warn};
+use color_eyre::{eyre::eyre, Result};
+use std::path::Path;
+use tracing::{debug, error, instrument, trace, warn};
 
-use crate::{cfg::Config, run, donburi::{dracut, grub_mkconfig}};
+use crate::{
+	cfg::Config,
+	donburi::{dracut, grub_mkconfig},
+	run,
+};
 
 const ISO_L3_MAX_FILE_SIZE: u64 = 4 * 1024_u64.pow(3);
 
@@ -17,8 +21,8 @@ pub trait LiveImageCreator {
 		let mut fail = false;
 		std::fs::create_dir_all(Path::new(isodir).join("EFI/BOOT/fonts"))?;
 		for (src, dest, req) in Self::EFI_FILES {
-			let src = src.replace("%arch", Self::ARCH.into());
-			let dest = dest.replace("%arch", Self::ARCH.into());
+			let src = src.replace("%arch%", Self::ARCH.into());
+			let dest = dest.replace("%arch%", Self::ARCH.into());
 			let p = format!("{}{src}", self.get_cfg().instroot);
 			let p = Path::new(&p);
 			if !p.exists() && *req {
@@ -32,8 +36,9 @@ pub trait LiveImageCreator {
 	}
 
 	fn exec(&self) -> Result<()> {
-		// bootstrap chroot
+		self.mkmountpt()?;
 		self.initsys()?;
+		self.instpkgs()?;
 		let cfg = self.get_cfg();
 		dracut(cfg)?;
 		self.copy_efi_files(&cfg.isodir)?;
@@ -41,6 +46,18 @@ pub trait LiveImageCreator {
 		grub_mkconfig(&cfg.isodir)?;
 		self.create_iso()?;
 		Ok(())
+	}
+
+	fn squashfs(&self) -> Result<()> {
+		let cfg = self.get_cfg();
+		let os_image = Path::new(&cfg.isodir)
+			.join("LiveOS")
+			.join("squashfs.img")
+			.to_string_lossy()
+			.to_string();
+
+		run!("mksquashfs", &cfg.instroot, &os_image, "-comp", "gzip")?;
+		todo!()
 	}
 
 	fn _is_iso_level_3<P: AsRef<Path>>(&self, dir: P) -> Result<bool> {
@@ -58,8 +75,35 @@ pub trait LiveImageCreator {
 		}
 		Ok(false)
 	}
-
-	fn _get_xorrisofs_options<'a>(&'a self) -> Vec<&'a str>;
+	
+	fn _get_xorrisofs_options<'a>(&'a self) -> Vec<&'a str> {
+		let cfg = self.get_cfg();
+		let mut options = vec![
+			"-eltorito-boot",
+			"isolinux/isolinux.bin",
+			"-no-emul-boot",
+			"-boot-info-table",
+			"-boot-load-size",
+			"4",
+			"-eltorito-catalog",
+			"isolinux/boot.cat",
+			"-isohybrid-mbr",
+			"/usr/share/syslinux/isohdpfx.bin",
+		];
+		let mut dirs = vec!["images", "isolinux"];
+		for (i0, i1) in [("efiboot.img", "basdat"), ("macboot.img", "hfsplus")] {
+			for d in &dirs {
+				if Path::new(cfg.isodir.as_str()).join(d).join(i0).exists() {
+					let s: &'static String = Box::leak(Box::new(format!("{d}/{i0}")));
+					let ss: &'static String = Box::leak(Box::new(format!("-isohybrid-gpt-{i1}")));
+					options.append(&mut vec!["-eltorito-alt-boot", "-e", &s, "-no-emul-boot", &ss]);
+					dirs = vec![d];
+					break;
+				}
+			}
+		}
+		[options, vec!["-rational-rock", "-joliet", "-volid", &cfg.fs.label]].concat()
+	}
 
 	fn create_iso(&self) -> Result<()> {
 		let cfg = self.get_cfg();
@@ -72,7 +116,7 @@ pub trait LiveImageCreator {
 		args.push(&cfg.isodir);
 		if let Err(e) = run!("xorrisofs"; args) {
 			error!("ISO creation failed!");
-			return Err(e);
+			return Err(e.wrap_err("Fail to create ISO using `xorrisofs`"));
 		}
 		self._implant_md5sum(&cfg.out)?;
 		Ok(())
@@ -86,7 +130,7 @@ pub trait LiveImageCreator {
 						continue;
 					}
 				}
-				return Err(e);
+				return Err(e.wrap_err("Cannot implant md5sum"));
 			} else {
 				return Ok(());
 			}
@@ -97,7 +141,29 @@ pub trait LiveImageCreator {
 
 	#[inline]
 	fn _rel(&self) -> String {
-		format!("{}", self.get_cfg().sys.releasever)
+		self.get_cfg().sys.releasever.to_string()
+	}
+
+	#[instrument(skip(self))]
+	fn mkmountpt(&self) -> Result<()> {
+		let cfg = self.get_cfg();
+		if cfg.fs.skip.unwrap_or_default() {
+			return Ok(());
+		}
+		let instroot = Path::new(&cfg.instroot);
+		trace!("Checking for {instroot:?}");
+		if instroot.is_dir() {
+			debug!("Using preexisting dir as instroot: {instroot:?}");
+			if let Some(Ok(_)) = std::fs::read_dir(instroot)?.next() {
+				return Err(eyre!("{instroot:?} is not empty."));
+			}
+		} else {
+			if instroot.is_file() {
+				return Err(eyre!("Cannot make new fs on {instroot:?} because it's a file."));
+			}
+			std::fs::create_dir(instroot)?;
+		}
+		Ok(())
 	}
 
 	/// Initialise a system on `instroot`.
@@ -142,42 +208,7 @@ impl LiveImageCreator for LiveImageCreatorX86 {
 		("/usr/share/grub/unicode.pf2", "/EFI/BOOT/fonts/", true),
 	];
 
-	fn _get_xorrisofs_options<'a>(&'a self) -> Vec<&'a str> {
-		let mut options = vec![
-			"-eltorito-boot",
-			"isolinux/isolinux.bin",
-			"-no-emul-boot",
-			"-boot-info-table",
-			"-boot-load-size",
-			"4",
-			"-eltorito-catalog",
-			"isolinux/boot.cat",
-			"-isohybrid-mbr",
-			"/usr/share/syslinux/isohdpfx.bin",
-		];
-		let mut dirs = vec!["images", "isolinux"];
-		for (i0, i1) in [("efiboot.img", "basdat"), ("macboot.img", "hfsplus")] {
-			for d in &dirs {
-				if Path::new(self.cfg.isodir.as_str()).join(d).join(i0).exists() {
-					let s: &'static String = Box::leak(Box::new(format!("{d}/{i0}")));
-					let ss: &'static String = Box::leak(Box::new(format!("-isohybrid-gpt-{i1}")));
-					options.append(&mut vec![
-						"-eltorito-alt-boot",
-						"-e",
-						&s,
-						"-no-emul-boot",
-						&ss,
-					]);
-					dirs = vec![d];
-					break;
-				}
-			}
-		}
-		options.append(&mut vec!["-rational-rock", "-joliet", "-volid", &self.cfg.fslabel]);
-		options
-	}
-
-
+	#[inline]
 	fn get_cfg(&self) -> &Config {
 		&self.cfg
 	}
@@ -201,41 +232,6 @@ impl LiveImageCreator for LiveImageCreatorX86_64 {
 		("/boot/efi/EFI/*/gcdia32.efi", "/EFI/BOOT/grubia32.efi", false),
 		("/usr/share/grub/unicode.pf2", "/EFI/BOOT/fonts/", true),
 	];
-
-	fn _get_xorrisofs_options<'a>(&'a self) -> Vec<&'a str> {
-		let mut options = vec![
-			"-eltorito-boot",
-			"isolinux/isolinux.bin",
-			"-no-emul-boot",
-			"-boot-info-table",
-			"-boot-load-size",
-			"4",
-			"-eltorito-catalog",
-			"isolinux/boot.cat",
-			"-isohybrid-mbr",
-			"/usr/share/syslinux/isohdpfx.bin",
-		];
-		let mut dirs = vec!["images", "isolinux"];
-		for (i0, i1) in [("efiboot.img", "basdat"), ("macboot.img", "hfsplus")] {
-			for d in &dirs {
-				if Path::new(self.cfg.isodir.as_str()).join(d).join(i0).exists() {
-					let s: &'static String = Box::leak(Box::new(format!("{d}/{i0}")));
-					let ss: &'static String = Box::leak(Box::new(format!("-isohybrid-gpt-{i1}")));
-					options.append(&mut vec![
-						"-eltorito-alt-boot",
-						"-e",
-						&s,
-						"-no-emul-boot",
-						&ss,
-					]);
-					dirs = vec![d];
-					break;
-				}
-			}
-		}
-		options.append(&mut vec!["-rational-rock", "-joliet", "-volid", &self.cfg.fslabel]);
-		options
-	}
 
 	fn get_cfg(&self) -> &Config {
 		&self.cfg

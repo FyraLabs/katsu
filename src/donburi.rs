@@ -1,7 +1,6 @@
 use crate::cfg::Config;
 use crate::util::Arch;
 use color_eyre::Result;
-use std::process::Command;
 
 use tracing::instrument;
 
