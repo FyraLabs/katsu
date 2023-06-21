@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use serde_derive::Deserialize;
 use smartstring::alias::String as SStr;
 
@@ -5,12 +7,12 @@ use smartstring::alias::String as SStr;
 pub struct Config {
 	pub isodir: String,
 	pub distro: String, // "Ultramarine-Linux"
-	pub instroot: String,
+	pub instroot: PathBuf,
 	pub out: String,
-	pub packages: Packages,
+	pub packages: Vec<SStr>,
 	pub sys: System,
 	pub fs: FileSystem,
-	pub script: std::path::PathBuf,
+	pub script: Script,
 }
 
 #[derive(Deserialize, Debug)]
@@ -21,14 +23,15 @@ pub struct FileSystem {
 }
 
 #[derive(Deserialize, Debug)]
-pub struct Packages {
-	pub pkgs: Vec<SStr>,
-	pub grps: Vec<SStr>,
-}
-
-#[derive(Deserialize, Debug)]
 pub struct System {
 	pub releasever: u8, // 38
+}
+
+
+#[derive(Deserialize, Debug)]
+pub struct Script {
+	pub postinit: Option<PathBuf>,
+	pub postinst: Option<PathBuf>,
 }
 
 // we copy stuff from instroot to isodir

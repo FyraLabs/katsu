@@ -17,8 +17,8 @@ pub fn get_krnl_ver(target: &str) -> Result<String> {
 }
 
 pub fn get_arch() -> Result<Arch> {
-	let out = run!("uname", "-p")?;
-	Ok(Arch::from(String::from_utf8(out)?.as_str()))
+	let out = run!("uname", "-m")?;
+	Ok(Arch::from(String::from_utf8(out)?.trim()))
 }
 
 /// ```
@@ -26,7 +26,9 @@ pub fn get_arch() -> Result<Arch> {
 /// ```
 #[instrument]
 pub fn dracut(cfg: &Config) -> Result<()> {
-	let raw = &get_krnl_ver(&cfg.instroot)?;
+	let root = cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
+	let root = root.to_str().unwrap();
+	let raw = &get_krnl_ver(root)?;
 	let mut ver = raw.split("-");
 	let krnlver = ver.next().unwrap();
 	let others = ver.next().unwrap();
@@ -36,7 +38,7 @@ pub fn dracut(cfg: &Config) -> Result<()> {
 		"--kernel-ver",
 		raw,
 		"--sysroot",
-		&cfg.instroot,
+		&root,
 		"--verbose",
 		"--no-hostonly",
 		"--no-hostonly-cmdline",

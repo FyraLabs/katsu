@@ -23,7 +23,10 @@ pub trait LiveImageCreator {
 		for (src, dest, req) in Self::EFI_FILES {
 			let src = src.replace("%arch%", Self::ARCH.into());
 			let dest = dest.replace("%arch%", Self::ARCH.into());
-			let p = format!("{}{src}", self.get_cfg().instroot);
+			let root =
+				&self.get_cfg().instroot.canonicalize().expect("Cannot canonicalize instroot.");
+			let root = root.to_str().unwrap();
+			let p = format!("{root}{src}");
 			let p = Path::new(&p);
 			if !p.exists() && *req {
 				error!(src, "Missing EFI File");
@@ -38,21 +41,35 @@ pub trait LiveImageCreator {
 	fn exec(&self) -> Result<()> {
 		self.mkmountpt()?;
 		self.initsys()?;
+		self.postinit_script()?;
 		self.instpkgs()?;
 		let cfg = self.get_cfg();
 		dracut(cfg)?;
 		self.copy_efi_files(&cfg.isodir)?;
 		self.squashfs()?;
 		grub_mkconfig(&cfg.isodir)?;
-		self.script()?;
+		self.postinst_script()?;
 		self.create_iso()?;
 		Ok(())
 	}
 
-	fn script(&self) -> Result<()> {
+	fn postinit_script(&self) -> Result<()> {
 		let cfg = self.get_cfg();
-		let (script, root) = (&cfg.script, &cfg.instroot);
-		run!("systemd-nspawn", "-D", &root, &format!("{}", script.canonicalize()?.display()))?;
+		let root = &cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
+		let root = root.to_str().unwrap();
+		if let Some(script) = &cfg.script.postinit {
+			run!("systemd-nspawn", "-D", &root, &format!("{}", script.canonicalize()?.display()))?;
+		}
+		Ok(())
+	}
+
+	fn postinst_script(&self) -> Result<()> {
+		let cfg = self.get_cfg();
+		let root = &cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
+		let root = root.to_str().unwrap();
+		if let Some(script) = &cfg.script.postinst {
+			run!("systemd-nspawn", "-D", &root, &format!("{}", script.canonicalize()?.display()))?;
+		}
 		Ok(())
 	}
 
@@ -64,7 +81,10 @@ pub trait LiveImageCreator {
 			.to_string_lossy()
 			.to_string();
 
-		run!("mksquashfs", &cfg.instroot, &os_image, "-comp", "gzip")?;
+		let root = &cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
+		let root = root.to_str().unwrap();
+
+		run!("mksquashfs", root, &*os_image, "-comp", "gzip")?;
 		Ok(())
 	}
 
@@ -175,23 +195,23 @@ pub trait LiveImageCreator {
 	}
 
 	/// Initialise a system on `instroot`.
-	/// This also installs the groups listed in cfg.
 	#[instrument(skip(self))]
 	fn initsys(&self) -> Result<()> {
 		let cfg = self.get_cfg();
 		let rel = self._rel();
-		let mut args =
-			vec!["--releasever", &rel, "--installroot", &cfg.instroot, "groupinstall", "core"];
-		args.extend(cfg.packages.grps.iter().map(|a| a.as_str()));
-		run!("dnf"; args)?;
+		let root = &cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
+		let root = root.to_str().unwrap();
+		run!("dnf", "-y", "--releasever", &rel, "--installroot", root, "groupinstall", "core")?;
 		Ok(())
 	}
 	#[instrument(skip(self))]
 	fn instpkgs(&self) -> Result<()> {
 		let cfg = self.get_cfg();
 		let rel = self._rel();
-		let mut args = vec!["install", "--releasever", &rel, "--installroot", &cfg.instroot];
-		args.extend(cfg.packages.pkgs.iter().map(|a| a.as_str()));
+		let root = &cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
+		let root = root.to_str().unwrap();
+		let mut args = vec!["install", "-y", "--releasever", &rel, "--installroot", root];
+		args.extend(cfg.packages.iter().map(|a| a.as_str()));
 		run!("dnf"; args)?;
 		Ok(())
 	}

@@ -15,6 +15,7 @@ use crate::{
 };
 
 fn main() -> Result<()> {
+	color_eyre::install()?;
 	tracing_log::LogTracer::init()?;
 	let subscriber = tracing_subscriber::FmtSubscriber::builder()
 		.with_max_level(get_log_lvl())
@@ -22,7 +23,7 @@ fn main() -> Result<()> {
 		.finish();
 	tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 	trace!("カツ丼は最高！");
-	for cfg_file in std::env::args() {
+	for cfg_file in std::env::args().skip(1) {
 		trace!(cfg_file, "Reading/Parsing config");
 		let config: Config = toml::from_str(&std::fs::read_to_string(cfg_file)?)?;
 		trace!("Config read done: {config:#?}");

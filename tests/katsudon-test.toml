@@ -1,0 +1,17 @@
+isodir = "isodir/"
+distro = "Ultramarine-Linux"
+instroot = "instroot/"
+out = "out"
+packages = ["anda", "@pantheon-desktop"]
+
+[sys]
+releasever = 38
+
+[fs]
+fstype = "ext4"
+label = "WAAW"
+
+
+[script]
+postinit = "postinit.sh"
+postinst = "postinst.sh"
