@@ -10,6 +10,7 @@ pub struct Config {
 	pub packages: Packages,
 	pub sys: System,
 	pub fs: FileSystem,
+	pub script: std::path::PathBuf,
 }
 
 #[derive(Deserialize, Debug)]

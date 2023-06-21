@@ -1,7 +1,7 @@
 mod cfg;
 mod creator;
-mod util;
 mod donburi;
+mod util;
 
 use cfg::Config;
 use color_eyre::Result;
@@ -9,8 +9,10 @@ use util::Arch;
 
 use tracing::{debug, trace};
 
-use crate::{creator::{LiveImageCreatorX86, LiveImageCreatorX86_64, LiveImageCreator}, donburi::get_arch};
-
+use crate::{
+	creator::{LiveImageCreator, LiveImageCreatorX86, LiveImageCreatorX86_64},
+	donburi::get_arch,
+};
 
 fn main() -> Result<()> {
 	tracing_log::LogTracer::init()?;
@@ -29,7 +31,6 @@ fn main() -> Result<()> {
 			Arch::X86_64 => LiveImageCreatorX86_64::from(config).exec()?,
 			Arch::Nyani => panic!("Unknown architecture"),
 		}
-		
 	}
 	debug!("Escalate sudo :3");
 	sudo::escalate_if_needed().unwrap(); // `Box<dyn Error>` unwrap

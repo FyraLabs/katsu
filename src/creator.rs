@@ -44,7 +44,15 @@ pub trait LiveImageCreator {
 		self.copy_efi_files(&cfg.isodir)?;
 		self.squashfs()?;
 		grub_mkconfig(&cfg.isodir)?;
+		self.script()?;
 		self.create_iso()?;
+		Ok(())
+	}
+
+	fn script(&self) -> Result<()> {
+		let cfg = self.get_cfg();
+		let (script, root) = (&cfg.script, &cfg.instroot);
+		run!("systemd-nspawn", "-D", &root, &format!("{}", script.canonicalize()?.display()))?;
 		Ok(())
 	}
 
@@ -75,7 +83,7 @@ pub trait LiveImageCreator {
 		}
 		Ok(false)
 	}
-	
+
 	fn _get_xorrisofs_options<'a>(&'a self) -> Vec<&'a str> {
 		let cfg = self.get_cfg();
 		let mut options = vec![
@@ -181,7 +189,8 @@ pub trait LiveImageCreator {
 	#[instrument(skip(self))]
 	fn instpkgs(&self) -> Result<()> {
 		let cfg = self.get_cfg();
-		let mut args = vec!["install"];
+		let rel = self._rel();
+		let mut args = vec!["install", "--releasever", &rel, "--installroot", &cfg.instroot];
 		args.extend(cfg.packages.pkgs.iter().map(|a| a.as_str()));
 		run!("dnf"; args)?;
 		Ok(())
