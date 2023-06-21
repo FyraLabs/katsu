@@ -42,7 +42,7 @@ pub trait LiveImageCreator {
 		let cfg = self.get_cfg();
 		dracut(cfg)?;
 		self.copy_efi_files(&cfg.isodir)?;
-		// squashfs
+		self.squashfs()?;
 		grub_mkconfig(&cfg.isodir)?;
 		self.create_iso()?;
 		Ok(())
@@ -57,7 +57,7 @@ pub trait LiveImageCreator {
 			.to_string();
 
 		run!("mksquashfs", &cfg.instroot, &os_image, "-comp", "gzip")?;
-		todo!()
+		Ok(())
 	}
 
 	fn _is_iso_level_3<P: AsRef<Path>>(&self, dir: P) -> Result<bool> {
