@@ -55,20 +55,38 @@ pub trait LiveImageCreator {
 
 	fn postinit_script(&self) -> Result<()> {
 		let cfg = self.get_cfg();
-		let root = &cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
-		let root = root.to_str().unwrap();
 		if let Some(script) = &cfg.script.postinit {
-			run!("systemd-nspawn", "-D", &root, &format!("{}", script.canonicalize()?.display()))?;
+			let root = &cfg.instroot.canonicalize()?;
+			let rootname = root.to_str().unwrap();
+			let name = script
+				.file_name()
+				.ok_or(eyre!("postinst script is not a file"))?
+				.to_str()
+				.ok_or(eyre!("Cannot get postinst filename in &str"))?;
+			let dest = Path::join(root, name);
+			std::fs::copy(script, &dest)?;
+			run!(~"systemd-nspawn", "-D", &rootname, &format!("/{name}"))
+				.map_err(|e| e.wrap_err("postinit script failed"))?;
+			std::fs::remove_file(dest)?;
 		}
 		Ok(())
 	}
 
 	fn postinst_script(&self) -> Result<()> {
 		let cfg = self.get_cfg();
-		let root = &cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
-		let root = root.to_str().unwrap();
 		if let Some(script) = &cfg.script.postinst {
-			run!("systemd-nspawn", "-D", &root, &format!("{}", script.canonicalize()?.display()))?;
+			let root = &cfg.instroot.canonicalize()?;
+			let rootname = root.to_str().unwrap();
+			let name = script
+				.file_name()
+				.ok_or(eyre!("postinst script is not a file"))?
+				.to_str()
+				.ok_or(eyre!("Cannot get postinst filename in &str"))?;
+			let dest = Path::join(root, name);
+			std::fs::copy(script, &dest)?;
+			run!(~"systemd-nspawn", "-D", &rootname, &format!("/{name}"))
+				.map_err(|e| e.wrap_err("postinst script failed"))?;
+			std::fs::remove_file(dest)?;
 		}
 		Ok(())
 	}
@@ -84,7 +102,7 @@ pub trait LiveImageCreator {
 		let root = &cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
 		let root = root.to_str().unwrap();
 
-		run!("mksquashfs", root, &*os_image, "-comp", "gzip")?;
+		run!(~"mksquashfs", root, &*os_image, "-comp", "gzip")?;
 		Ok(())
 	}
 
@@ -142,7 +160,7 @@ pub trait LiveImageCreator {
 		args.append(&mut vec!["-output", &cfg.out, "-no-emul-boot"]);
 		args.append(&mut self._get_xorrisofs_options());
 		args.push(&cfg.isodir);
-		if let Err(e) = run!("xorrisofs"; args) {
+		if let Err(e) = run!(~"xorrisofs"; args) {
 			error!("ISO creation failed!");
 			return Err(e.wrap_err("Fail to create ISO using `xorrisofs`"));
 		}
@@ -153,7 +171,11 @@ pub trait LiveImageCreator {
 		for c in ["implantisomd5", "/usr/lib/anaconda-runtime/implantisomd5"] {
 			if let Err(e) = run!(c, out) {
 				if let Some(scode) = e.to_string().strip_prefix("Command returned code: ") {
-					if scode.parse::<i16>().expect("code not i16?") == 2 {
+					if scode.parse::<i16>().map_err(|e| {
+						eyre!(e).wrap_err("Cannot parse implantisomd5 error: code not i16?")
+					})? == 2
+					{
+						warn!("Faced ENOENT from `{c}`");
 						// ENOENT?
 						continue;
 					}
@@ -174,6 +196,7 @@ pub trait LiveImageCreator {
 
 	#[instrument(skip(self))]
 	fn mkmountpt(&self) -> Result<()> {
+		tracing::debug!("Checking for mount point");
 		let cfg = self.get_cfg();
 		if cfg.fs.skip.unwrap_or_default() {
 			return Ok(());
@@ -183,7 +206,8 @@ pub trait LiveImageCreator {
 		if instroot.is_dir() {
 			debug!("Using preexisting dir as instroot: {instroot:?}");
 			if let Some(Ok(_)) = std::fs::read_dir(instroot)?.next() {
-				return Err(eyre!("{instroot:?} is not empty."));
+				// return Err(eyre!("{instroot:?} is not empty."));
+				warn!("{instroot:?} is not empty.");
 			}
 		} else {
 			if instroot.is_file() {
@@ -197,11 +221,12 @@ pub trait LiveImageCreator {
 	/// Initialise a system on `instroot`.
 	#[instrument(skip(self))]
 	fn initsys(&self) -> Result<()> {
+		tracing::info!("Initializing system using DNF");
 		let cfg = self.get_cfg();
 		let rel = self._rel();
 		let root = &cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
 		let root = root.to_str().unwrap();
-		run!("dnf", "-y", "--releasever", &rel, "--installroot", root, "groupinstall", "core")?;
+		run!(~"dnf", "-y", "--releasever", &rel, "--installroot", root, "in", "@core", "fedora-repos", "kernel")?;
 		Ok(())
 	}
 	#[instrument(skip(self))]
@@ -210,9 +235,9 @@ pub trait LiveImageCreator {
 		let rel = self._rel();
 		let root = &cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
 		let root = root.to_str().unwrap();
-		let mut args = vec!["install", "-y", "--releasever", &rel, "--installroot", root];
+		let mut args = vec!["in", "-y", "--releasever", &rel, "--installroot", root];
 		args.extend(cfg.packages.iter().map(|a| a.as_str()));
-		run!("dnf"; args)?;
+		run!(~"dnf"; args)?;
 		Ok(())
 	}
 }

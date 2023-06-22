@@ -35,8 +35,6 @@ pub fn dracut(cfg: &Config) -> Result<()> {
 	let arch = others.split(".").nth(2).expect("Can't read arch???");
 	run!(
 		"dracut",
-		"--kernel-ver",
-		raw,
 		"--sysroot",
 		&root,
 		"--verbose",

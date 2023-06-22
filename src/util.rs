@@ -4,26 +4,44 @@ macro_rules! run {
 		run!($n; [$($arr,)*])
 	}};
 	($n:expr; $arr:expr) => {{
-		crate::util::exec($n, &$arr.to_vec())
-	}}
+		crate::util::exec($n, &$arr.to_vec(), true)
+	}};
+	(~$n:expr $(, $arr:expr)* $(,)?) => {{
+		run!(~$n; [$($arr,)*])
+	}};
+	(~$n:expr; $arr:expr) => {{
+		crate::util::exec($n, &$arr.to_vec(), false)
+	}};
 }
 
 #[tracing::instrument]
-pub fn exec(cmd: &str, args: &[&str]) -> color_eyre::Result<Vec<u8>> {
-	tracing::debug!("Executing command");
-	let out = std::process::Command::new(cmd).args(args).output()?;
+pub fn exec(cmd: &str, args: &[&str], pipe: bool) -> color_eyre::Result<Vec<u8>> {
+	tracing::info!("Executing command");
+	let out = std::process::Command::new(cmd)
+		.args(args)
+		.stdout(if pipe { std::process::Stdio::piped() } else { std::process::Stdio::inherit() })
+		.stderr(if pipe { std::process::Stdio::piped() } else { std::process::Stdio::inherit() })
+		.output()?;
 	if out.status.success() {
-		let stdout = String::from_utf8_lossy(&out.stdout);
-		let stderr = String::from_utf8_lossy(&out.stderr);
-		tracing::debug!(?stdout, ?stderr, "Command succeeded");
-		Ok(out.stdout)
-	} else {
-		use color_eyre::{eyre::eyre, Help, SectionExt};
+		return if pipe {
+			let stdout = String::from_utf8_lossy(&out.stdout);
+			let stderr = String::from_utf8_lossy(&out.stderr);
+			tracing::trace!(?stdout, ?stderr, "Command succeeded");
+			Ok(out.stdout)
+		} else {
+			tracing::trace!("Command succeeded");
+			Ok(vec![])
+		};
+	}
+	use color_eyre::{eyre::eyre, Help, SectionExt};
+	if pipe {
 		let stdout = String::from_utf8_lossy(&out.stdout);
 		let stderr = String::from_utf8_lossy(&out.stderr);
 		Err(eyre!("Command returned code: {}", out.status.code().unwrap_or_default()))
 			.with_section(move || stdout.trim().to_string().header("Stdout:"))
 			.with_section(move || stderr.trim().to_string().header("Stderr:"))
+	} else {
+		Err(eyre!("Command returned code: {}", out.status.code().unwrap_or_default()))
 	}
 }
 

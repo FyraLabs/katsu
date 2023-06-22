@@ -5,9 +5,10 @@ mod util;
 
 use cfg::Config;
 use color_eyre::Result;
+use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, Layer};
 use util::Arch;
 
-use tracing::{debug, trace};
+use tracing::trace;
 
 use crate::{
 	creator::{LiveImageCreator, LiveImageCreatorX86, LiveImageCreatorX86_64},
@@ -15,13 +16,16 @@ use crate::{
 };
 
 fn main() -> Result<()> {
+	dotenv::dotenv()?;
 	color_eyre::install()?;
-	tracing_log::LogTracer::init()?;
-	let subscriber = tracing_subscriber::FmtSubscriber::builder()
-		.with_max_level(get_log_lvl())
-		.event_format(tracing_subscriber::fmt::format().pretty())
-		.finish();
+	let subscriber =
+		tracing_subscriber::Registry::default().with(tracing_error::ErrorLayer::default()).with(
+			tracing_subscriber::fmt::layer()
+				.pretty()
+				.with_filter(tracing_subscriber::EnvFilter::from_env("KATSU_TABEN")),
+		);
 	tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+	sudo::escalate_if_needed().unwrap();
 	trace!("カツ丼は最高！");
 	for cfg_file in std::env::args().skip(1) {
 		trace!(cfg_file, "Reading/Parsing config");
@@ -33,21 +37,5 @@ fn main() -> Result<()> {
 			Arch::Nyani => panic!("Unknown architecture"),
 		}
 	}
-	debug!("Escalate sudo :3");
-	sudo::escalate_if_needed().unwrap(); // `Box<dyn Error>` unwrap
 	Ok(())
-}
-
-fn get_log_lvl() -> tracing_subscriber::filter::LevelFilter {
-	use tracing_subscriber::filter::LevelFilter;
-	let filter = std::env::var("KATSU_TABEN").unwrap_or("INFO".to_string());
-	match filter.as_str() {
-		"OFF" => LevelFilter::OFF,
-		"ERROR" => LevelFilter::ERROR,
-		"WARN" => LevelFilter::WARN,
-		"INFO" => LevelFilter::INFO,
-		"DEBUG" => LevelFilter::DEBUG,
-		"TRACE" => LevelFilter::TRACE,
-		_ => LevelFilter::INFO,
-	}
 }
