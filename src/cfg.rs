@@ -5,7 +5,6 @@ use smartstring::alias::String as SStr;
 
 #[derive(Deserialize, Debug)]
 pub struct Config {
-	pub isodir: String,
 	pub distro: String, // "Ultramarine-Linux"
 	pub instroot: PathBuf,
 	pub out: String,
@@ -13,6 +12,7 @@ pub struct Config {
 	pub sys: System,
 	pub fs: FileSystem,
 	pub script: Script,
+	pub dnf: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -27,10 +27,9 @@ pub struct System {
 	pub releasever: u8, // 38
 }
 
-
 #[derive(Deserialize, Debug)]
 pub struct Script {
-	pub postinit: Option<PathBuf>,
+	pub init: Option<PathBuf>,
 	pub postinst: Option<PathBuf>,
 }
 

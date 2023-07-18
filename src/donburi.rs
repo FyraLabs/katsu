@@ -6,14 +6,9 @@ use tracing::instrument;
 
 use crate::run;
 
-/// Assume: `target` ends with `/`
-pub fn grub_mkconfig(target: &str) -> Result<()> {
-	run!("grub2-mkconfig", "-o", &format!("{target}boot/grub2/grub.cfg"))?;
-	Ok(())
-}
 pub fn get_krnl_ver(target: &str) -> Result<String> {
 	let out = run!("rpm", "-q", "kernel", "--root", target)?;
-	Ok(String::from_utf8(out)?.strip_prefix("kernel-").unwrap().to_string())
+	Ok(String::from_utf8(out)?.strip_prefix("kernel-").unwrap().trim().to_string())
 }
 
 pub fn get_arch() -> Result<Arch> {
@@ -32,21 +27,22 @@ pub fn dracut(cfg: &Config) -> Result<()> {
 	let mut ver = raw.split("-");
 	let krnlver = ver.next().unwrap();
 	let others = ver.next().unwrap();
-	let arch = others.split(".").nth(2).expect("Can't read arch???");
-	run!(
+	// let arch = others.split(".").nth(2).expect("Can't read arch???");
+	run!(~
 		"dracut",
 		"--sysroot",
 		&root,
 		"--verbose",
+		"--force",
 		"--no-hostonly",
 		"--no-hostonly-cmdline",
-		"--install",
-		"/.profile",
+		// "--install",
+		// "/.profile",
 		"--add",
 		" kiwi-live pollcdrom ",
 		"--omit",
 		" multipath ",
-		&format!("{}.{arch}-{krnlver}.initrd", cfg.distro),
+		&format!("{root}/boot/initramfs-{krnlver}-{others}.img"),
 		&format!("{krnlver}-{others}"),
 	)?;
 	Ok(())

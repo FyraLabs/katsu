@@ -1,1 +1,2 @@
+set +x
 echo postinst
