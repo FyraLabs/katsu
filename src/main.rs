@@ -1,6 +1,6 @@
 mod cfg;
 mod creator;
-mod donburi;
+
 mod util;
 
 use cfg::Config;
@@ -10,10 +10,7 @@ use util::Arch;
 
 use tracing::trace;
 
-use crate::{
-	creator::{LiveImageCreator, LiveImageCreatorX86, LiveImageCreatorX86_64},
-	donburi::get_arch,
-};
+use crate::creator::{LiveImageCreator, LiveImageCreatorX86, LiveImageCreatorX86_64};
 
 fn main() -> Result<()> {
 	dotenv::dotenv()?;
@@ -31,7 +28,7 @@ fn main() -> Result<()> {
 		trace!(cfg_file, "Reading/Parsing config");
 		let config: Config = toml::from_str(&std::fs::read_to_string(cfg_file)?)?;
 		trace!("Config read done: {config:#?}");
-		match get_arch()? {
+		match Arch::get()? {
 			Arch::X86 => LiveImageCreatorX86::from(config).exec()?,
 			Arch::X86_64 => LiveImageCreatorX86_64::from(config).exec()?,
 			Arch::Nyani => panic!("Unknown architecture"),

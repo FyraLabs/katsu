@@ -45,12 +45,19 @@ pub fn exec(cmd: &str, args: &[&str], pipe: bool) -> color_eyre::Result<Vec<u8>>
 	}
 }
 
+// ? https://stackoverflow.com/questions/45125516/possible-values-for-uname-m
 #[derive(Default)]
 pub enum Arch {
 	X86,
 	X86_64,
 	#[default]
 	Nyani, // にゃんに？？ｗ
+}
+
+impl Arch {
+	pub fn get() -> color_eyre::Result<Self> {
+		Ok(Self::from(&*cmd_lib::run_fun!(uname - m)?))
+	}
 }
 
 impl From<&str> for Arch {

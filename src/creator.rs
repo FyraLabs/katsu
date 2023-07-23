@@ -2,7 +2,7 @@ use color_eyre::{eyre::eyre, Help, Result};
 use std::path::Path;
 use tracing::{debug, error, info, instrument, trace, warn};
 
-use crate::{cfg::Config, donburi::dracut, run};
+use crate::{cfg::Config, run};
 
 const ISO_L3_MAX_FILE_SIZE: u64 = 4 * 1024_u64.pow(3);
 const DEFAULT_DNF: &str = "dnf5";
@@ -13,6 +13,20 @@ pub trait LiveImageCreator {
 	const ARCH: crate::util::Arch;
 
 	fn get_cfg(&self) -> &Config;
+
+	fn get_krnl_ver(target: &str) -> Result<String> {
+		Ok(cmd_lib::run_fun!(rpm -q kernel --root $target)?)
+	}
+
+	fn dracut(&self) -> Result<()> {
+		let cfg = self.get_cfg();
+		let root = cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
+		let root = root.to_str().unwrap();
+		let kver = &Self::get_krnl_ver(root)?;
+		// -I /.profile
+		cmd_lib::run_cmd!(dracut -r $root -vfNa " kiwi-live pollcdrom " --no-hostonly-cmdline -o " multipath " $root/boot/initramfs-$kver.img $kver)?;
+		Ok(())
+	}
 
 	fn copy_efi_files(&self, instroot: &Path) -> Result<bool> {
 		info!("Copying EFI files");
@@ -57,13 +71,11 @@ pub trait LiveImageCreator {
 
 	fn exec(&self) -> Result<()> {
 		self.mkmountpt()?;
-		self.mount_rbind()?;
 		self.init_script()?;
 		self.instpkgs()?;
+		self.dracut()?;
 		let cfg = self.get_cfg();
-		dracut(cfg)?;
 		self.copy_efi_files(&cfg.instroot)?;
-		self.umount_rbind()?;
 		self.grub_mkconfig(cfg)?;
 		self.postinst_script()?;
 		self.squashfs()?;
@@ -72,14 +84,15 @@ pub trait LiveImageCreator {
 	}
 
 	fn grub_mkconfig(&self, cfg: &Config) -> Result<()> {
-		let target = cfg
-			.instroot
-			.canonicalize()
-			.expect("Cannot canonocalize instroot")
-			.display()
-			.to_string();
-		run!("systemd-nspawn", "-D", &target, "grub2-mkconfig", "-o", "/boot/grub2/grub.cfg")?;
-		Ok(())
+		todo!();
+		// let target = cfg
+		// 	.instroot
+		// 	.canonicalize()
+		// 	.expect("Cannot canonocalize instroot")
+		// 	.display()
+		// 	.to_string();
+		// run!("systemd-nspawn", "-D", &target, "grub2-mkconfig", "-o", "/boot/grub2/grub.cfg")?;
+		// Ok(())
 	}
 
 	fn init_script(&self) -> Result<()> {
@@ -256,26 +269,6 @@ pub trait LiveImageCreator {
 			}
 			std::fs::create_dir(instroot)?;
 		}
-		Ok(())
-	}
-
-	fn mount_rbind(&self) -> Result<()> {
-		info!("Mounting /sys, /proc, /dev");
-		let instroot = self.get_cfg().instroot.display().to_string();
-		cmd_lib::run_cmd!(
-			mkdir -p ${instroot}sys ${instroot}proc ${instroot}dev ${instroot}var/tmp;
-			mount -o bind /dev ${instroot}dev;
-			mount -t sysfs /sys ${instroot}sys;
-			mount -t proc /proc ${instroot}proc;
-			mount -t tmpfs -o size=100Mi,mode=1777 vartmp ${instroot}var/tmp;
-		)?; // --make-rslave?
-		Ok(())
-	}
-
-	fn umount_rbind(&self) -> Result<()> {
-		info!("Unmounting /sys, /proc, /dev");
-		let instroot = self.get_cfg().instroot.display().to_string();
-		cmd_lib::run_fun!(umount -vR $instroot)?;
 		Ok(())
 	}
 
