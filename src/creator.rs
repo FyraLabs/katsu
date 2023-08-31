@@ -24,7 +24,7 @@ pub trait LiveImageCreator {
 		let root = root.to_str().unwrap();
 		let kver = &Self::get_krnl_ver(root)?;
 		// -I /.profile
-		cmd_lib::run_cmd!(dracut -r $root -vfNa " kiwi-live pollcdrom " --no-hostonly-cmdline -o " multipath " $root/boot/initramfs-$kver.img $kver)?;
+		cmd_lib::run_cmd!(dracut -r $root -vfNa " pollcdrom dmsquash-live " --no-hostonly-cmdline -o " multipath " $root/boot/initramfs-$kver.img $kver)?;
 		Ok(())
 	}
 
@@ -79,7 +79,25 @@ pub trait LiveImageCreator {
 		self.grub_mkconfig(cfg)?;
 		self.postinst_script()?;
 		self.squashfs()?;
-		self.create_iso()?;
+		self.liveos()?;
+		self.xorriso()?;
+		Ok(())
+	}
+
+	fn liveos(&self) -> Result<()> {
+		let cfg = self.get_cfg();
+		let distro = &cfg.distro;
+		let out = &cfg.out;
+		std::fs::create_dir_all(format!("./{distro}/LiveOS"))?;
+		std::fs::rename(format!("{out}.img"), format!("./{distro}/LiveOS/{out}.img"))?;
+		Ok(())
+	}
+
+	fn xorriso(&self) -> Result<()> {
+		let cfg = self.get_cfg();
+		let distro = &cfg.distro;
+		let out = &cfg.out;
+		cmd_lib::run_cmd!(xorriso -as mkisofs -b $distro/boot/limine/limine-bios-cd.bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $distro/boot/limine/limine-uefi-cd.bin -efi-boot-part --efi-boot-image --protective-msdos-label iso -volid ISO -o $out.iso)?;
 		Ok(())
 	}
 
