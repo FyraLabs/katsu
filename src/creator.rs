@@ -180,7 +180,7 @@ pub trait LiveImageCreator {
 
 		info!("Squashing fs");
 
-		run!(~"mkfs.erofs", root, &name, "-zlz4hc")?;
+		run!(~"mkfs.erofs", &name, root, "-zlz4hc")?;
 		Ok(())
 	}
 
