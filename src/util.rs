@@ -50,6 +50,8 @@ pub fn exec(cmd: &str, args: &[&str], pipe: bool) -> color_eyre::Result<Vec<u8>>
 pub enum Arch {
 	X86,
 	X86_64,
+	ArmV7l, // armv7l
+	AArch64, // aarch64
 	#[default]
 	Nyani, // にゃんに？？ｗ
 }
@@ -65,6 +67,8 @@ impl From<&str> for Arch {
 		match value {
 			"i386" => Self::X86,
 			"x86_64" => Self::X86_64,
+			"armv7l" => Self::ArmV7l,
+			"aarch64" => Self::AArch64,
 			_ => Self::Nyani,
 		}
 	}
@@ -75,6 +79,8 @@ impl Into<&str> for Arch {
 		match self {
 			Self::X86 => "i386",
 			Self::X86_64 => "x86_64",
+			Self::ArmV7l => "armv7l",
+			Self::AArch64 => "aarch64",
 			_ => panic!("Unknown architecture"),
 		}
 	}
