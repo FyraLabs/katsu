@@ -172,6 +172,18 @@ pub trait LiveImageCreator {
 		Ok(())
 	}
 
+	fn erofs(&self) -> Result<()> {
+		let cfg = self.get_cfg();
+		let name = format!("{}.efs.img", cfg.out);
+		let root = &cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
+		let root = root.to_str().unwrap();
+
+		info!("Squashing fs");
+
+		run!(~"mkfs.erofs", root, &name, "-zlz4hc")?;
+		Ok(())
+	}
+
 	fn _is_iso_level_3<P: AsRef<Path>>(&self, dir: P) -> Result<bool> {
 		for entry in std::fs::read_dir(dir)? {
 			let entry = entry?;
