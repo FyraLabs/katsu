@@ -28,7 +28,7 @@ fn main() -> Result<()> {
 		match Arch::get()? {
 			Arch::X86 => LiveImageCreatorX86::from(config).exec()?,
 			Arch::X86_64 => LiveImageCreatorX86_64::from(config).exec()?,
-			Arch::Nyani => panic!("Unknown architecture"),
+			_ => panic!("Unknown architecture"),
 		}
 	}
 	Ok(())
