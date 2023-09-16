@@ -1,7 +1,9 @@
 dnf: dnf5
 distro: Ultramarine-Linux
 instroot: instroot/
+# this is the name of the iso
 out: out
+volid: ULTRAMARINE
 packages:
   # - anda
   # dracut stuff below
@@ -13,7 +15,7 @@ packages:
   - dmraid
   - nvme-cli
   - biosdevname
-  - dracut-kiwi-live
+  - dracut-live
   - wicked
   - nbd
   - iscsi-initiator-utils
@@ -33,10 +35,6 @@ packages:
 
 sys:
   releasever: 38
-
-fs:
-  fstype: ext4
-  label: WAAW
 
 script:
   init: init.sh

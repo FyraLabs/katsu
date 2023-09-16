@@ -58,7 +58,7 @@ pub enum Arch {
 
 impl Arch {
 	pub fn get() -> color_eyre::Result<Self> {
-		Ok(Self::from(&*cmd_lib::run_fun!(uname - m)?))
+		Ok(Self::from(&*cmd_lib::run_fun!(uname -m)?))
 	}
 }
 

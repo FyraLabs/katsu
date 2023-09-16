@@ -10,16 +10,9 @@ pub struct Config {
 	pub out: String,
 	pub packages: Vec<SStr>,
 	pub sys: System,
-	pub fs: FileSystem,
 	pub script: Script,
 	pub dnf: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct FileSystem {
-	pub skip: Option<bool>,
-	pub fstype: String,
-	pub label: String,
+	pub volid: String,
 }
 
 #[derive(Deserialize, Debug)]

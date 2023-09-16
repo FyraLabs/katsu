@@ -1,10 +1,9 @@
 use color_eyre::{eyre::eyre, Help, Result};
-use std::path::Path;
+use std::{io::Write, path::Path};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{cfg::Config, run};
 
-const ISO_L3_MAX_FILE_SIZE: u64 = 4 * 1024_u64.pow(3);
 const DEFAULT_DNF: &str = "dnf5";
 
 pub trait LiveImageCreator {
@@ -16,15 +15,41 @@ pub trait LiveImageCreator {
 
 	fn get_krnl_ver(target: &str) -> Result<String> {
 		Ok(cmd_lib::run_fun!(rpm -q kernel --root $target)?)
+	} 
+
+	fn fstab(&self) -> Result<()> {
+		let cfg = self.get_cfg();
+		let root = cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
+		let mut f = std::fs::File::create(format!("{}/etc/fstab", root.display()))?;
+		f.write(b"/squashfs.img\t/\tsquashfs\tdefaults\t0\t0")?;
+		Ok(())
 	}
 
 	fn dracut(&self) -> Result<()> {
+		self.fstab()?;
 		let cfg = self.get_cfg();
 		let root = cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
 		let root = root.to_str().unwrap();
 		let kver = &Self::get_krnl_ver(root)?;
+		let kver = kver.trim_start_matches("kernel-");
 		// -I /.profile
-		cmd_lib::run_cmd!(dracut -r $root -vfNa " pollcdrom dmsquash-live " --no-hostonly-cmdline -o " multipath " $root/boot/initramfs-$kver.img $kver)?;
+		crate::run!(
+			"dracut",
+			"-r",
+			root,
+			"-vfNa",
+			" pollcdrom dmsquash-live livenet network ",
+			"--no-hostonly-cmdline",
+			"-i",
+			"fstab",
+			&*format!("{root}/etc/fstab"),
+			"--add-drivers",
+			"overlay,squashfs",
+			"-o",
+			" multipath ",
+			&*format!("{root}/boot/initramfs-{kver}.img"),
+			kver
+		)?;
 		Ok(())
 	}
 
@@ -76,20 +101,60 @@ pub trait LiveImageCreator {
 		self.dracut()?;
 		let cfg = self.get_cfg();
 		self.copy_efi_files(&cfg.instroot)?;
-		self.grub_mkconfig(cfg)?;
 		self.postinst_script()?;
 		self.squashfs()?;
 		self.liveos()?;
 		self.xorriso()?;
+		self.bootloader()?;
+		info!("Done: {}.iso", cfg.out);
 		Ok(())
 	}
 
+	fn bootloader(&self) -> Result<()> {
+		info!("Installing Limine bootloader");
+		let out = &self.get_cfg().out;
+		run!("limine", "bios-install", &*format!("{out}.iso"))?;
+		Ok(())
+	}
+
+	/// Returns volid
 	fn liveos(&self) -> Result<()> {
 		let cfg = self.get_cfg();
 		let distro = &cfg.distro;
 		let out = &cfg.out;
 		std::fs::create_dir_all(format!("./{distro}/LiveOS"))?;
-		std::fs::rename(format!("{out}.img"), format!("./{distro}/LiveOS/{out}.img"))?;
+		std::fs::copy(
+			"/usr/share/limine/limine-uefi-cd.bin",
+			format!("./{distro}/LiveOS/boot/limine-uefi-cd.bin"),
+		)?;
+		std::fs::copy(
+			"/usr/share/limine/limine-bios-cd.bin",
+			format!("./{distro}/LiveOS/boot/limine-bios-cd.bin"),
+		)?;
+		std::fs::copy(
+			"/usr/share/limine/limine-bios.sys",
+			format!("./{distro}/LiveOS/boot/limine-bios.sys"),
+		)?;
+		self.limine_cfg(&*format!("./{distro}/LiveOS/boot/limine.cfg"), distro)?;
+
+		std::fs::rename(format!("{out}.img"), format!("./{distro}/LiveOS/squashfs.img"))?;
+		Ok(())
+	}
+
+	/// Returns volid
+	fn limine_cfg(&self, path: &str, distro: &str) -> Result<()> {
+		let cfg = self.get_cfg();
+		let root = cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
+		let kver = &Self::get_krnl_ver(root.to_str().unwrap())?;
+		let kver = kver.trim_start_matches("kernel-");
+		let volid = &cfg.volid;
+		let mut f = std::fs::File::create(path)
+			.map_err(|e| eyre!(e).wrap_err("Cannot create limine.cfg"))?;
+
+		f.write_fmt(format_args!("TIMEOUT=5\n\n:{distro}\n\tPROTOCOL=linux\n\t"))?;
+		f.write_fmt(format_args!("KERNEL_PATH=boot:///boot/vmlinuz-{kver}\n\t"))?;
+		f.write_fmt(format_args!("MODULE_PATH=boot:///boot/initramfs-{kver}.img\n\t"))?;
+		f.write_fmt(format_args!("CMDLINE=root=live:LABEL={volid} rd.live.image"))?;
 		Ok(())
 	}
 
@@ -97,20 +162,29 @@ pub trait LiveImageCreator {
 		let cfg = self.get_cfg();
 		let distro = &cfg.distro;
 		let out = &cfg.out;
-		cmd_lib::run_cmd!(xorriso -as mkisofs -b $distro/boot/limine/limine-bios-cd.bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $distro/boot/limine/limine-uefi-cd.bin -efi-boot-part --efi-boot-image --protective-msdos-label iso -volid ISO -o $out.iso)?;
+		let volid = &cfg.volid;
+		run!(
+			"xorriso",
+			"-as",
+			"mkisofs",
+			"-b",
+			&format!("boot/limine-bios-cd.bin"),
+			"-no-emul-boot",
+			"-boot-load-size",
+			"4",
+			"-boot-info-table",
+			"--efi-boot",
+			&format!("boot/limine-uefi-cd.bin"),
+			"-efi-boot-part",
+			"--efi-boot-image",
+			"--protective-msdos-label",
+			Path::new(&format!("./{distro}/LiveOS/")).canonicalize()?.to_str().unwrap(),
+			"-volid",
+			volid,
+			"-o",
+			&format!("./{out}.iso"),
+		)?;
 		Ok(())
-	}
-
-	fn grub_mkconfig(&self, cfg: &Config) -> Result<()> {
-		todo!();
-		// let target = cfg
-		// 	.instroot
-		// 	.canonicalize()
-		// 	.expect("Cannot canonocalize instroot")
-		// 	.display()
-		// 	.to_string();
-		// run!("systemd-nspawn", "-D", &target, "grub2-mkconfig", "-o", "/boot/grub2/grub.cfg")?;
-		// Ok(())
 	}
 
 	fn init_script(&self) -> Result<()> {
@@ -165,6 +239,13 @@ pub trait LiveImageCreator {
 		let name = format!("{}.img", cfg.out);
 		let root = &cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
 		let root = root.to_str().unwrap();
+		let instroot = &cfg.instroot;
+		let distro = &cfg.distro;
+
+		cmd_lib::run_cmd!(
+			mkdir -p $distro/LiveOS/boot;
+			sh -c "cp $instroot/boot/vmlinuz-* $instroot/boot/initramfs-* $distro/LiveOS/boot/";
+		)?;
 
 		info!("Squashing fs");
 
@@ -184,95 +265,6 @@ pub trait LiveImageCreator {
 		Ok(())
 	}
 
-	fn _is_iso_level_3<P: AsRef<Path>>(&self, dir: P) -> Result<bool> {
-		for entry in std::fs::read_dir(dir)? {
-			let entry = entry?;
-			if entry.file_type()?.is_dir() {
-				if self._is_iso_level_3(entry.path())? {
-					return Ok(true);
-				}
-			} else {
-				if entry.metadata()?.len() >= ISO_L3_MAX_FILE_SIZE {
-					return Ok(true);
-				}
-			}
-		}
-		Ok(false)
-	}
-
-	fn _get_xorrisofs_options<'a>(&'a self) -> Vec<&'a str> {
-		let cfg = self.get_cfg();
-		let mut options = vec![
-			"-eltorito-boot",
-			"isolinux/isolinux.bin",
-			"-no-emul-boot",
-			"-boot-info-table",
-			"-boot-load-size",
-			"4",
-			"-eltorito-catalog",
-			"isolinux/boot.cat",
-			"-isohybrid-mbr",
-			"/usr/share/syslinux/isohdpfx.bin",
-		];
-		let mut dirs = vec!["images", "isolinux"];
-		for (i0, i1) in [("efiboot.img", "basdat"), ("macboot.img", "hfsplus")] {
-			for d in &dirs {
-				if Path::new(&cfg.instroot.display().to_string()).join(d).join(i0).exists() {
-					let s: &'static String = Box::leak(Box::new(format!("{d}/{i0}")));
-					let ss: &'static String = Box::leak(Box::new(format!("-isohybrid-gpt-{i1}")));
-					options.append(&mut vec!["-eltorito-alt-boot", "-e", &s, "-no-emul-boot", &ss]);
-					dirs = vec![d];
-					break;
-				}
-			}
-		}
-		[options, vec!["-rational-rock", "-joliet", "-volid", &cfg.fs.label]].concat()
-	}
-
-	fn create_iso(&self) -> Result<()> {
-		let cfg = self.get_cfg();
-		let mut args = vec![];
-		if self._is_iso_level_3(
-			&cfg.instroot
-				.canonicalize()
-				.map_err(|e| eyre!(e).wrap_err("Cannot canonicalize instroot"))?,
-		)? {
-			args.append(&mut vec!["-iso-level", "3"]);
-		}
-		let out = format!("{}.iso", cfg.out);
-		args.append(&mut vec!["-output", &out, "-no-emul-boot"]);
-		args.append(&mut self._get_xorrisofs_options());
-		let binding = cfg.instroot.display().to_string();
-		args.push(&binding);
-		if let Err(e) = run!(~"xorrisofs"; args) {
-			error!("ISO creation failed!");
-			return Err(e.wrap_err("Fail to create ISO using `xorrisofs`"));
-		}
-		self._implant_md5sum(&cfg.out)?;
-		Ok(())
-	}
-	fn _implant_md5sum(&self, out: &str) -> Result<()> {
-		for c in ["implantisomd5", "/usr/lib/anaconda-runtime/implantisomd5"] {
-			if let Err(e) = run!(c, out) {
-				if let Some(scode) = e.to_string().strip_prefix("Command returned code: ") {
-					if scode.parse::<i16>().map_err(|e| {
-						eyre!(e).wrap_err("Cannot parse implantisomd5 error: code not i16?")
-					})? == 2
-					{
-						warn!("Faced ENOENT from `{c}`");
-						// ENOENT?
-						continue;
-					}
-				}
-				return Err(e.wrap_err("Cannot implant md5sum"));
-			} else {
-				return Ok(());
-			}
-		}
-		warn!("isomd5sum not installed; not setting up mediacheck");
-		Ok(())
-	}
-
 	#[inline]
 	fn _rel(&self) -> String {
 		self.get_cfg().sys.releasever.to_string()
@@ -282,9 +274,6 @@ pub trait LiveImageCreator {
 	fn mkmountpt(&self) -> Result<()> {
 		debug!("Checking for mount point");
 		let cfg = self.get_cfg();
-		if cfg.fs.skip.unwrap_or_default() {
-			return Ok(());
-		}
 		let instroot = Path::new(&cfg.instroot);
 		trace!("Checking for {instroot:?}");
 		if instroot.is_dir() {
