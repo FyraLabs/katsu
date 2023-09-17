@@ -18,6 +18,7 @@ pub struct Config {
 #[derive(Deserialize, Debug)]
 pub struct System {
 	pub releasever: u8, // 38
+	pub rootpw: SStr,
 }
 
 #[derive(Deserialize, Debug)]

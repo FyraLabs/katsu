@@ -16,7 +16,7 @@ macro_rules! run {
 
 #[tracing::instrument]
 pub fn exec(cmd: &str, args: &[&str], pipe: bool) -> color_eyre::Result<Vec<u8>> {
-	tracing::info!("Executing command");
+	tracing::debug!("Executing command");
 	let out = std::process::Command::new(cmd)
 		.args(args)
 		.stdout(if pipe { std::process::Stdio::piped() } else { std::process::Stdio::inherit() })

@@ -15,7 +15,7 @@ pub trait LiveImageCreator {
 
 	fn get_krnl_ver(target: &str) -> Result<String> {
 		Ok(cmd_lib::run_fun!(rpm -q kernel --root $target)?)
-	} 
+	}
 
 	fn fstab(&self) -> Result<()> {
 		let cfg = self.get_cfg();
@@ -32,19 +32,23 @@ pub trait LiveImageCreator {
 		let root = root.to_str().unwrap();
 		let kver = &Self::get_krnl_ver(root)?;
 		let kver = kver.trim_start_matches("kernel-");
+		info!(kver, root, "Generating initramfs");
 		// -I /.profile
-		crate::run!(
+		crate::run!(~
 			"dracut",
-			"-r",
-			root,
+			"--xz",
+			// "-r",
+			// root,
 			"-vfNa",
-			" pollcdrom dmsquash-live livenet network ",
-			"--no-hostonly-cmdline",
-			"-i",
-			"fstab",
-			&*format!("{root}/etc/fstab"),
-			"--add-drivers",
-			"overlay,squashfs",
+			"livenet dmsquash-live dmsquash-live-ntfs convertfs pollcdrom qemu qemu-net",
+			"--omit",
+			"plymouth",
+			"--no-early-microcode",
+			// "-i",
+			// "fstab",
+			// &*format!("{root}/etc/fstab"),
+			// "--add-drivers",
+			// "overlay,squashfs",
 			"-o",
 			" multipath ",
 			&*format!("{root}/boot/initramfs-{kver}.img"),
@@ -100,7 +104,8 @@ pub trait LiveImageCreator {
 		self.instpkgs()?;
 		self.dracut()?;
 		let cfg = self.get_cfg();
-		self.copy_efi_files(&cfg.instroot)?;
+		// self.copy_efi_files(&cfg.instroot)?;
+		self.rootpw()?;
 		self.postinst_script()?;
 		self.squashfs()?;
 		self.liveos()?;
@@ -125,23 +130,22 @@ pub trait LiveImageCreator {
 		std::fs::create_dir_all(format!("./{distro}/LiveOS"))?;
 		std::fs::copy(
 			"/usr/share/limine/limine-uefi-cd.bin",
-			format!("./{distro}/LiveOS/boot/limine-uefi-cd.bin"),
+			format!("./{distro}/boot/limine-uefi-cd.bin"),
 		)?;
 		std::fs::copy(
 			"/usr/share/limine/limine-bios-cd.bin",
-			format!("./{distro}/LiveOS/boot/limine-bios-cd.bin"),
+			format!("./{distro}/boot/limine-bios-cd.bin"),
 		)?;
 		std::fs::copy(
 			"/usr/share/limine/limine-bios.sys",
-			format!("./{distro}/LiveOS/boot/limine-bios.sys"),
+			format!("./{distro}/boot/limine-bios.sys"),
 		)?;
-		self.limine_cfg(&*format!("./{distro}/LiveOS/boot/limine.cfg"), distro)?;
+		self.limine_cfg(&*format!("./{distro}/boot/limine.cfg"), distro)?;
 
 		std::fs::rename(format!("{out}.img"), format!("./{distro}/LiveOS/squashfs.img"))?;
 		Ok(())
 	}
 
-	/// Returns volid
 	fn limine_cfg(&self, path: &str, distro: &str) -> Result<()> {
 		let cfg = self.get_cfg();
 		let root = cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
@@ -154,7 +158,7 @@ pub trait LiveImageCreator {
 		f.write_fmt(format_args!("TIMEOUT=5\n\n:{distro}\n\tPROTOCOL=linux\n\t"))?;
 		f.write_fmt(format_args!("KERNEL_PATH=boot:///boot/vmlinuz-{kver}\n\t"))?;
 		f.write_fmt(format_args!("MODULE_PATH=boot:///boot/initramfs-{kver}.img\n\t"))?;
-		f.write_fmt(format_args!("CMDLINE=root=live:LABEL={volid} rd.live.image"))?;
+		f.write_fmt(format_args!("CMDLINE=root=live:LABEL={volid} rd.live.image selinux=0"))?; // maybe enforcing=0
 		Ok(())
 	}
 
@@ -163,7 +167,8 @@ pub trait LiveImageCreator {
 		let distro = &cfg.distro;
 		let out = &cfg.out;
 		let volid = &cfg.volid;
-		run!(
+		info!(out, "Creating ISO");
+		run!(~
 			"xorriso",
 			"-as",
 			"mkisofs",
@@ -178,11 +183,11 @@ pub trait LiveImageCreator {
 			"-efi-boot-part",
 			"--efi-boot-image",
 			"--protective-msdos-label",
-			Path::new(&format!("./{distro}/LiveOS/")).canonicalize()?.to_str().unwrap(),
+			Path::new(distro).canonicalize()?.to_str().unwrap(),
 			"-volid",
 			volid,
 			"-o",
-			&format!("./{out}.iso"),
+			&format!("{out}.iso"),
 		)?;
 		Ok(())
 	}
@@ -214,23 +219,50 @@ pub trait LiveImageCreator {
 
 	fn postinst_script(&self) -> Result<()> {
 		let cfg = self.get_cfg();
-		if let Some(script) = &cfg.script.postinst {
-			let root = &cfg.instroot.canonicalize()?;
-			let rootname = root.to_str().unwrap();
-			let name = script
-				.file_name()
-				.ok_or(eyre!("postinst script is not a file"))?
-				.to_str()
-				.ok_or(eyre!("Cannot get postinst filename in &str"))?;
-			let dest = Path::join(root, name);
-			debug!(?script, ?dest, "Copying postinst script");
-			std::fs::copy(script, &dest)?;
-			info!(?script, "Running postinst script");
-			run!(~"systemd-nspawn", "-D", &rootname, &format!("/{name}"))
-				.map_err(|e| e.wrap_err("postinst script failed"))?;
-			debug!(?dest, "Removing postinst script");
-			std::fs::remove_file(dest)?;
-		}
+		let Some(script) = &cfg.script.postinst else { return Ok(()) };
+		let root = &cfg.instroot.canonicalize()?;
+		let rootname = root.to_str().unwrap();
+		let name = script
+			.file_name()
+			.ok_or(eyre!("postinst script is not a file"))?
+			.to_str()
+			.ok_or(eyre!("Cannot get postinst filename in &str"))?;
+		let dest = root.join(name);
+		debug!(?script, ?dest, "Copying postinst script");
+		std::fs::copy(script, &dest)?;
+		// debug!("Mounting /dev, /proc, /sys");
+		// cmd_lib::run_cmd! (
+		// 	mount --bind /dev $rootname/dev;
+		// 	mount --bind /proc $rootname/proc;
+		// 	mount --bind /sys $rootname/sys;
+		// 	sh -c "mv $rootname/etc/resolv.conf $rootname/etc/resolv.conf.bak || true";
+		// 	cp /etc/resolv.conf $rootname/etc/resolv.conf;
+		// )?;
+		info!(?script, "Running postinst script");
+		run!(~"chroot", &rootname, &*format!("/{name}"))
+			.map_err(|e| e.wrap_err("postinst script failed"))?;
+		debug!(?dest, "Removing postinst script");
+		std::fs::remove_file(dest)?;
+		// debug!("Unmounting /dev, /proc, /sys");
+		// cmd_lib::run_cmd! (
+		// 	umount $rootname/dev;
+		// 	umount $rootname/proc;
+		// 	umount $rootname/sys;
+		// 	sh -c "mv $rootname/etc/resolv.conf.bak $rootname/etc/resolv.conf || true";
+		// )?;
+		Ok(())
+	}
+
+	fn rootpw(&self) -> Result<()> {
+		let cfg = self.get_cfg();
+		let root = &cfg.instroot.canonicalize()?;
+		let pw = &*cfg.sys.rootpw;
+		info!(pw, "Setting root password");
+		let mut fpw = std::fs::File::create(root.join("etc/passwd"))?;
+		fpw.write(b"root:x:0:0:root:/root:/bin/sh")?;
+		let pw = cmd_lib::run_fun!(mkpasswd $pw)?;
+		let mut fsh = std::fs::File::create(root.join("etc/shadow"))?;
+		fsh.write_fmt(format_args!("root:{pw}::0:99999:7:::"))?;
 		Ok(())
 	}
 
@@ -243,11 +275,11 @@ pub trait LiveImageCreator {
 		let distro = &cfg.distro;
 
 		cmd_lib::run_cmd!(
-			mkdir -p $distro/LiveOS/boot;
-			sh -c "cp $instroot/boot/vmlinuz-* $instroot/boot/initramfs-* $distro/LiveOS/boot/";
+			mkdir -p $distro/boot;
+			sh -c "cp $instroot/boot/vmlinuz-* $instroot/boot/initramfs-* $distro/boot/";
 		)?;
 
-		info!("Squashing fs");
+		info!(name, root, "Squashing fs");
 
 		run!(~"mksquashfs", root, &name, "-comp", "gzip", "-noappend")?;
 		Ok(())

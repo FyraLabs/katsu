@@ -5,25 +5,24 @@ instroot: instroot/
 out: out
 volid: ULTRAMARINE
 packages:
-  # - anda
   # dracut stuff below
-  - keyutils
-  - busybox
-  - rng-tools
+  # - keyutils
+  # - busybox
+  # - rng-tools
   - lvm2
   - btrfs-progs
   - dmraid
   - nvme-cli
   - biosdevname
   - dracut-live
-  - wicked
-  - nbd
-  - iscsi-initiator-utils
-  - cifs-utils
-  - fcoe-utils
+  # - wicked
+  # - nbd
+  # - iscsi-initiator-utils
+  # - cifs-utils
+  # - fcoe-utils
   - dbus-daemon
-  - rpcbind
-  - nfs-utils
+  # - rpcbind
+  # - nfs-utils
   # necessary stuff
   - "@core"
   - fedora-repos
@@ -32,9 +31,11 @@ packages:
   - dnf5
   - terra-release
   - dracut
+  - NetworkManager
 
 sys:
   releasever: 38
+  rootpw: ultramarine
 
 script:
   init: init.sh
