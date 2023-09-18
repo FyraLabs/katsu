@@ -1,4 +1,4 @@
-dnf: dnf5
+dnf: dnf
 distro: Ultramarine-Linux
 instroot: instroot/
 # this is the name of the iso
