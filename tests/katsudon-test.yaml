@@ -9,6 +9,8 @@ packages:
   # - keyutils
   # - busybox
   # - rng-tools
+  - filesystem
+  - setup
   - lvm2
   - btrfs-progs
   - dmraid
@@ -27,9 +29,9 @@ packages:
   - "@core"
   - fedora-repos
   - kernel
-  - ultramarine-release
-  - dnf5
-  - terra-release
+  # - ultramarine-release
+  - dnf
+  # - terra-release
   - dracut
   - NetworkManager
   - mkpasswd
