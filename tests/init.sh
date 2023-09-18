@@ -120,7 +120,6 @@ skip_if_unavailable=True
 defaultyes=True
 max_parallel_downloads=20
 countme=False
-install_weak_deps=False
 EOF
 
 echo "bai"

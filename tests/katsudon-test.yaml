@@ -29,9 +29,12 @@ packages:
   - "@core"
   - fedora-repos
   - kernel
-  # - ultramarine-release
+  - glibc
+  - glibc-common
+  - "@standard"
+  - ultramarine-release
   - dnf
-  # - terra-release
+  - terra-release
   - dracut
   - NetworkManager
   - mkpasswd
