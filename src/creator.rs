@@ -337,9 +337,9 @@ pub trait LiveImageCreator {
 		let root = &cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
 		let root = root.to_str().unwrap();
 		let pkgs: Vec<&str> = cfg.packages.iter().map(|x| x.as_str()).collect();
-		prepare_chroot(root)?;
+		// prepare_chroot(root)?;
 		cmd_lib::run_cmd!($dnf in -y --releasever=$rel --installroot $root $[pkgs])?;
-		unmount_chroot(root)?;
+		// unmount_chroot(root)?;
 		Ok(())
 	}
 }
