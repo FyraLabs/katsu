@@ -37,8 +37,8 @@ pub trait LiveImageCreator {
 		crate::run!(~
 			"dracut",
 			"--xz",
-			// "-r",
-			// root,
+			"-r",
+			root,
 			"-vfNa",
 			"livenet dmsquash-live dmsquash-live-ntfs convertfs pollcdrom qemu qemu-net",
 			"--omit",
@@ -230,26 +230,31 @@ pub trait LiveImageCreator {
 		let dest = root.join(name);
 		debug!(?script, ?dest, "Copying postinst script");
 		std::fs::copy(script, &dest)?;
-		// debug!("Mounting /dev, /proc, /sys");
+		debug!("Mounting /dev, /proc, /sys");
 		// cmd_lib::run_cmd! (
-		// 	mount --bind /dev $rootname/dev;
-		// 	mount --bind /proc $rootname/proc;
-		// 	mount --bind /sys $rootname/sys;
+		// 	mount -t proc proc $rootname/proc;
+		// 	mount -t sysfs sys $rootname/sys;
+		// 	mount -o bind /dev $rootname/dev;
+		// 	mount -o bind /dev $rootname/dev/pts;
 		// 	sh -c "mv $rootname/etc/resolv.conf $rootname/etc/resolv.conf.bak || true";
 		// 	cp /etc/resolv.conf $rootname/etc/resolv.conf;
 		// )?;
+		// prepare_chroot(rootname)?;
 		info!(?script, "Running postinst script");
+		// TODO: use unshare
 		run!(~"chroot", &rootname, &*format!("/{name}"))
 			.map_err(|e| e.wrap_err("postinst script failed"))?;
 		debug!(?dest, "Removing postinst script");
 		std::fs::remove_file(dest)?;
-		// debug!("Unmounting /dev, /proc, /sys");
+		debug!("Unmounting /dev, /proc, /sys");
 		// cmd_lib::run_cmd! (
+		// 	umount $rootname/dev/pts;
 		// 	umount $rootname/dev;
-		// 	umount $rootname/proc;
 		// 	umount $rootname/sys;
+		// 	umount $rootname/proc;
 		// 	sh -c "mv $rootname/etc/resolv.conf.bak $rootname/etc/resolv.conf || true";
 		// )?;
+		// unmount_chroot(rootname)?;
 		Ok(())
 	}
 
@@ -332,13 +337,43 @@ pub trait LiveImageCreator {
 		let root = &cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
 		let root = root.to_str().unwrap();
 		let pkgs: Vec<&str> = cfg.packages.iter().map(|x| x.as_str()).collect();
+		prepare_chroot(root)?;
 		cmd_lib::run_cmd!($dnf in -y --releasever=$rel --installroot $root $[pkgs])?;
+		unmount_chroot(root)?;
 		Ok(())
 	}
 }
 
 pub struct LiveImageCreatorX86 {
 	cfg: Config,
+}
+/// Prepare chroot by mounting /dev, /proc, /sys
+fn prepare_chroot(root: &str) -> Result<()> {
+	cmd_lib::run_cmd! (
+		mkdir -p $root/proc;
+		mount -t proc proc $root/proc;
+		mkdir -p $root/sys;
+		mount -t sysfs sys $root/sys;
+		mkdir -p $root/dev;
+		mount -o bind /dev $root/dev;
+		mkdir -p $root/dev/pts;
+		mount -o bind /dev $root/dev/pts;
+		sh -c "mv $root/etc/resolv.conf $root/etc/resolv.conf.bak || true";
+		cp /etc/resolv.conf $root/etc/resolv.conf;
+	)?;
+	Ok(())
+}
+
+/// Unmount /dev, /proc, /sys
+fn unmount_chroot(root: &str) -> Result<()> {
+	cmd_lib::run_cmd! (
+		umount $root/dev/pts;
+		umount $root/dev;
+		umount $root/sys;
+		umount $root/proc;
+		sh -c "mv $root/etc/resolv.conf.bak $root/etc/resolv.conf || true";
+	)?;
+	Ok(())
 }
 
 impl From<Config> for LiveImageCreatorX86 {

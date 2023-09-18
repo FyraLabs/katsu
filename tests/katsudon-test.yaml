@@ -32,6 +32,8 @@ packages:
   - terra-release
   - dracut
   - NetworkManager
+  - mkpasswd
+  - polkit
 
 sys:
   releasever: 38

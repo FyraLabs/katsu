@@ -1,4 +1,5 @@
 #!/bin/bash -x
+set -x
 echo init moment
 
 mkdir -p ./etc/yum.repos.d ./etc/dnf
@@ -109,7 +110,6 @@ EOF
 
 
 cat <<EOF ./etc/dnf/dnf.conf
-# see `man dnf.conf` for defaults and possible options
 
 [main]
 gpgcheck=True
@@ -119,7 +119,8 @@ best=False
 skip_if_unavailable=True
 defaultyes=True
 max_parallel_downloads=20
-countme=True
+countme=False
+install_weak_deps=False
 EOF
 
 echo "bai"
