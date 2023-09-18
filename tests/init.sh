@@ -1,9 +1,10 @@
+#!/bin/bash -x
 echo init moment
 
 mkdir -p ./etc/yum.repos.d ./etc/dnf
 
 
-cat<EOF > ./etc/yum.repos.d/terra.repo
+cat << EOF > ./etc/yum.repos.d/terra.repo
 [terra]
 name=Terra \$releasever
 baseurl=https://repos.fyralabs.com/terra\$releasever
@@ -18,7 +19,7 @@ metadata_expire=4h
 EOF
 
 
-cat<EOF > ./etc/yum.repos.d/fedora.repo
+cat << EOF > ./etc/yum.repos.d/fedora.repo
 [fedora]
 name=Fedora \$releasever - \$basearch
 metalink=https://mirrors.fedoraproject.org/metalink?repo=fedora-\$releasever&arch=\$basearch
@@ -55,7 +56,7 @@ skip_if_unavailable=False
 EOF
 
 
-cat<EOF > ./etc/yum.repos.d/fedora-updates.repo
+cat <<EOF > ./etc/yum.repos.d/fedora-updates.repo
 [updates]
 name=Fedora \$releasever - \$basearch - Updates
 metalink=https://mirrors.fedoraproject.org/metalink?repo=updates-released-f\$releasever&arch=\$basearch
@@ -92,7 +93,7 @@ skip_if_unavailable=False
 EOF
 
 
-cat<EOF > ./etc/yum.repos.d/ultramarine.repo
+cat <<EOF > ./etc/yum.repos.d/ultramarine.repo
 [ultramarine]
 name=Ultramarine Linux \$releasever
 baseurl=https://repos.fyralabs.com/um\$releasever
@@ -107,7 +108,7 @@ enabled_metadata=1
 EOF
 
 
-cat<EOF ./etc/dnf/dnf.conf
+cat <<EOF ./etc/dnf/dnf.conf
 # see `man dnf.conf` for defaults and possible options
 
 [main]
