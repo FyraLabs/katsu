@@ -5,6 +5,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use crate::{cfg::Config, run};
 
 const DEFAULT_DNF: &str = "dnf5";
+const DEFAULT_BOOTLOADER: &str = "limine";
 
 pub trait LiveImageCreator {
 	/// src, dest, required
@@ -26,7 +27,7 @@ pub trait LiveImageCreator {
 	}
 
 	fn dracut(&self) -> Result<()> {
-		self.fstab()?;
+		// self.fstab()?;
 		let cfg = self.get_cfg();
 		let root = cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
 		let root = root.to_str().unwrap();
@@ -103,30 +104,41 @@ pub trait LiveImageCreator {
 		self.init_script()?;
 		self.instpkgs()?;
 		self.dracut()?;
-		let cfg = self.get_cfg();
-		// self.copy_efi_files(&cfg.instroot)?;
 		self.rootpw()?;
 		self.postinst_script()?;
 		self.squashfs()?;
 		self.liveos()?;
 		self.xorriso()?;
 		self.bootloader()?;
+		let cfg = self.get_cfg();
 		info!("Done: {}.iso", cfg.out);
 		Ok(())
 	}
 
 	fn bootloader(&self) -> Result<()> {
+		match self.get_cfg().sys.bootloader.as_ref().map(|x| x.as_str()).unwrap_or(DEFAULT_BOOTLOADER) {
+			"limine" => self.limine(),
+			"grub" => self.grub(),
+			x => Err(eyre!("Unknown bootloader: {x}")),
+		}
+	}
+	fn limine(&self) -> Result<()> {
 		info!("Installing Limine bootloader");
 		let out = &self.get_cfg().out;
 		run!("limine", "bios-install", &*format!("{out}.iso"))?;
 		Ok(())
+	}
+	fn grub(&self) -> Result<()> {
+		info!("Installing GRUB bootloader");
+		// let out = &self.get_cfg().out;
+		// self.copy_efi_files(instroot)
+		unimplemented!()
 	}
 
 	/// Returns volid
 	fn liveos(&self) -> Result<()> {
 		let cfg = self.get_cfg();
 		let distro = &cfg.distro;
-		let out = &cfg.out;
 		std::fs::create_dir_all(format!("./{distro}/LiveOS"))?;
 		std::fs::copy(
 			"/usr/share/limine/limine-uefi-cd.bin",
@@ -141,8 +153,6 @@ pub trait LiveImageCreator {
 			format!("./{distro}/boot/limine-bios.sys"),
 		)?;
 		self.limine_cfg(&*format!("./{distro}/boot/limine.cfg"), distro)?;
-
-		std::fs::rename(format!("{out}.img"), format!("./{distro}/LiveOS/squashfs.img"))?;
 		Ok(())
 	}
 
@@ -152,13 +162,14 @@ pub trait LiveImageCreator {
 		let kver = &Self::get_krnl_ver(root.to_str().unwrap())?;
 		let kver = kver.trim_start_matches("kernel-");
 		let volid = &cfg.volid;
+		let cmdline = cfg.sys.kernel_params.as_ref().map(String::as_str).unwrap_or_default();
 		let mut f = std::fs::File::create(path)
 			.map_err(|e| eyre!(e).wrap_err("Cannot create limine.cfg"))?;
 
 		f.write_fmt(format_args!("TIMEOUT=5\n\n:{distro}\n\tPROTOCOL=linux\n\t"))?;
 		f.write_fmt(format_args!("KERNEL_PATH=boot:///boot/vmlinuz-{kver}\n\t"))?;
 		f.write_fmt(format_args!("MODULE_PATH=boot:///boot/initramfs-{kver}.img\n\t"))?;
-		f.write_fmt(format_args!("CMDLINE=root=live:LABEL={volid} rd.live.image selinux=0"))?; // maybe enforcing=0
+		f.write_fmt(format_args!("CMDLINE=root=live:LABEL={volid} rd.live.image selinux=0 {cmdline}"))?; // maybe enforcing=0
 		Ok(())
 	}
 
@@ -231,15 +242,7 @@ pub trait LiveImageCreator {
 		debug!(?script, ?dest, "Copying postinst script");
 		std::fs::copy(script, &dest)?;
 		debug!("Mounting /dev, /proc, /sys");
-		// cmd_lib::run_cmd! (
-		// 	mount -t proc proc $rootname/proc;
-		// 	mount -t sysfs sys $rootname/sys;
-		// 	mount -o bind /dev $rootname/dev;
-		// 	mount -o bind /dev $rootname/dev/pts;
-		// 	sh -c "mv $rootname/etc/resolv.conf $rootname/etc/resolv.conf.bak || true";
-		// 	cp /etc/resolv.conf $rootname/etc/resolv.conf;
-		// )?;
-		// prepare_chroot(rootname)?;
+		prepare_chroot(rootname)?;
 		info!(?script, "Running postinst script");
 		// TODO: use unshare
 		run!(~"chroot", &rootname, &*format!("/{name}"))
@@ -247,14 +250,7 @@ pub trait LiveImageCreator {
 		debug!(?dest, "Removing postinst script");
 		std::fs::remove_file(dest)?;
 		debug!("Unmounting /dev, /proc, /sys");
-		// cmd_lib::run_cmd! (
-		// 	umount $rootname/dev/pts;
-		// 	umount $rootname/dev;
-		// 	umount $rootname/sys;
-		// 	umount $rootname/proc;
-		// 	sh -c "mv $rootname/etc/resolv.conf.bak $rootname/etc/resolv.conf || true";
-		// )?;
-		// unmount_chroot(rootname)?;
+		unmount_chroot(rootname)?;
 		Ok(())
 	}
 
@@ -273,11 +269,11 @@ pub trait LiveImageCreator {
 
 	fn squashfs(&self) -> Result<()> {
 		let cfg = self.get_cfg();
-		let name = format!("{}.img", cfg.out);
+		let distro = &cfg.distro;
+		let name = format!("./{distro}/LiveOS/squashfs.img");
 		let root = &cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
 		let root = root.to_str().unwrap();
 		let instroot = &cfg.instroot;
-		let distro = &cfg.distro;
 
 		cmd_lib::run_cmd!(
 			mkdir -p $distro/boot;
@@ -286,7 +282,7 @@ pub trait LiveImageCreator {
 
 		info!(name, root, "Squashing fs");
 
-		run!(~"mksquashfs", root, &name, "-comp", "gzip", "-noappend")?;
+		run!(~"mksquashfs", root, &name, "-comp", "xz", "-noappend", "-Xdict-size", "100%", "-b", "1048576")?;
 		Ok(())
 	}
 
@@ -316,7 +312,6 @@ pub trait LiveImageCreator {
 		if instroot.is_dir() {
 			debug!("Using preexisting dir as instroot: {instroot:?}");
 			if let Some(Ok(_)) = std::fs::read_dir(instroot)?.next() {
-				// return Err(eyre!("{instroot:?} is not empty."));
 				warn!("{instroot:?} is not empty.");
 			}
 		} else {
@@ -325,6 +320,8 @@ pub trait LiveImageCreator {
 			}
 			std::fs::create_dir(instroot)?;
 		}
+		trace!("Checking for ISO directory");
+		std::fs::create_dir_all(format!("./{}/LiveOS", cfg.distro))?;
 		Ok(())
 	}
 
@@ -337,9 +334,13 @@ pub trait LiveImageCreator {
 		let root = &cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
 		let root = root.to_str().unwrap();
 		let pkgs: Vec<&str> = cfg.packages.iter().map(|x| x.as_str()).collect();
-		// prepare_chroot(root)?;
-		cmd_lib::run_cmd!($dnf in -y --releasever=$rel --installroot $root $[pkgs])?;
-		// unmount_chroot(root)?;
+		// if dnf == "dnf5" {
+		// 	pkgs.push("--use-host-config");
+		// }
+		cmd_lib::run_cmd!(
+			$dnf in -y --releasever=$rel --installroot $root $[pkgs];
+			$dnf clean all;
+		)?;
 		Ok(())
 	}
 }

@@ -23,4 +23,4 @@ echo "Fixing SELinux labels"
 
 fixfiles -Ra restore
 
-# dnf5 up -y # for downloading keys
+dnf5 up -y # for downloading keys

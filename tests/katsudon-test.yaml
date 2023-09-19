@@ -6,9 +6,6 @@ out: out
 volid: ULTRAMARINE
 packages:
   # dracut stuff below
-  # - keyutils
-  # - busybox
-  # - rng-tools
   - filesystem
   - setup
   - lvm2
@@ -17,14 +14,7 @@ packages:
   - nvme-cli
   - biosdevname
   - dracut-live
-  # - wicked
-  # - nbd
-  # - iscsi-initiator-utils
-  # - cifs-utils
-  # - fcoe-utils
   - dbus-daemon
-  # - rpcbind
-  # - nfs-utils
   # necessary stuff
   - "@core"
   - fedora-repos

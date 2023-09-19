@@ -34,6 +34,16 @@ pub struct System {
 	pub releasever: u8,
 	/// The root password of the new system.
 	pub rootpw: SStr,
+	/// The bootloader to install.
+	/// - `limine` (default)
+	/// - `grub`
+	pub bootloader: Option<String>,
+	/// More kernel parameters.
+	/// By default the kernel parameters are:
+	/// `root=live:LABEL={volid} rd.live.image selinux=0`
+	/// 
+	/// If you want to add more parameters after the default ones, use this option.
+	pub kernel_params: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]

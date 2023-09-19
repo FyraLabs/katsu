@@ -1,8 +1,9 @@
 # katsu
-An experimental image builder
+An experimental image builder for RPM/DNF based systems.
 
 ## Dependencies
 - `xorriso`
 - `dracut`
-- `gurb2`
-- `syslinux-nonlinux`
+- `limine` or `grub2`
+- `rpm`
+- `dnf` or `dnf5`
