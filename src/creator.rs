@@ -444,7 +444,7 @@ pub trait ImageCreator {
 
 				cmd_lib::run_cmd!(
 					lsblk;
-					ls -l /dev/loop*;
+					ls -l /dev;
 				)?;
 
 				// format EFI partition
