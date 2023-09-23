@@ -444,6 +444,7 @@ pub trait ImageCreator {
 
 				cmd_lib::run_cmd!(
 					lsblk;
+					partprobe $loop_dev;
 					ls -l /dev;
 					ls -l /dev/disk/by-partlabel;
 				)?;
