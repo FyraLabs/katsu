@@ -19,8 +19,20 @@ echo defaultyes=True >> /etc/dnf/dnf.conf
 
 systemd-sysusers
 
+cp -P /usr/share/uboot/rpi_3/u-boot.bin /boot/efi/rpi3-u-boot.bin
+cp -P /usr/share/uboot/rpi_4/u-boot.bin /boot/efi/rpi4-u-boot.bin
+rm -f /var/lib/systemd/random-seed
+rm -f /etc/NetworkManager/system-connections/*.nmconnection
+dnf -y remove dracut-config-generic
+
+rm -f /etc/machine-id
+touch /etc/machine-id
+
+rm -f /var/lib/rpm/__db*
+
 echo "Fixing SELinux labels"
 
-fixfiles -Ra restore
+fixfiles -vRa restore
 
-dnf5 up -y # for downloading keys
+
+dnf up -y # for downloading keys

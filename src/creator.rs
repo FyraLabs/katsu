@@ -16,6 +16,13 @@ const DEFAULT_DNF: &str = "dnf5";
 const DEFAULT_BOOTLOADER: &str = "limine";
 const UBOOT_DATA: &str = "/usr/share/uboot";
 
+#[derive(Debug, Clone)]
+pub struct ImageLayout {
+	pub efi_dev: Option<String>,
+	pub root_dev: String,
+	pub boot_dev: String,
+}
+
 pub trait ImageCreator {
 	/// src, dest, required
 	const EFI_FILES: &'static [(&'static str, &'static str, bool)];
@@ -168,7 +175,7 @@ pub trait ImageCreator {
 		self.instpkgs()?;
 		// self.dracut()?;
 		// self.rootpw()?;
-		// self.postinst_script()?;
+		self.postinst_script()?;
 
 		// self.squashfs()?;
 		// self.liveos()?;
@@ -314,16 +321,16 @@ pub trait ImageCreator {
 		let dest = root.join(name);
 		debug!(?script, ?dest, "Copying postinst script");
 		std::fs::copy(script, &dest)?;
-		debug!("Mounting /dev, /proc, /sys");
-		prepare_chroot(rootname)?;
+		// debug!("Mounting /dev, /proc, /sys");
+		// prepare_chroot(rootname)?;
 		info!(?script, "Running postinst script");
 		// TODO: use unshare
-		run!(~"chroot", &rootname, &*format!("/{name}"))
+		run!(~"unshare","-R", &rootname, &*format!("/{name}"))
 			.map_err(|e| e.wrap_err("postinst script failed"))?;
 		debug!(?dest, "Removing postinst script");
 		std::fs::remove_file(dest)?;
-		debug!("Unmounting /dev, /proc, /sys");
-		unmount_chroot(rootname)?;
+		// debug!("Unmounting /dev, /proc, /sys");
+		// unmount_chroot(rootname)?;
 		Ok(())
 	}
 
@@ -396,7 +403,9 @@ pub trait ImageCreator {
 
 			info!("Mounting disk image to loop device");
 
-			let loop_dev = cmd_lib::run_fun!(losetup -f)?;
+			// The reason we run this command instead of just losetup -f is
+			// because rustfmt messes up the formatting of the command
+			let loop_dev = cmd_lib::run_fun!(bash -c "losetup -f")?;
 
 			debug!("Found loop device: {loop_dev:?}");
 
@@ -480,10 +489,7 @@ pub trait ImageCreator {
 
 			info!("Mounting partitions");
 
-			let instroot = &cfg
-				.instroot
-				.to_str()
-				.unwrap_or_default();
+			let instroot = &cfg.instroot.to_str().unwrap_or_default();
 
 			cmd_lib::run_cmd!(
 				mkdir -p $instroot;

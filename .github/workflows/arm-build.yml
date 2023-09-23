@@ -37,6 +37,7 @@ jobs:
           grub2 \
           parted \
           util-linux-core \
+          systemd-container \
           grub2-efi \
           uboot-images-armv8 \
           uboot-tools \

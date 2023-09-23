@@ -1,6 +1,6 @@
 #!/bin/bash -x
 set -x
-echo init moment
+echo "Initializing chroot and repos"
 
 mkdir -p ./etc/yum.repos.d ./etc/dnf
 

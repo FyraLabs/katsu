@@ -30,6 +30,11 @@ packages:
   - NetworkManager
   - mkpasswd
   - polkit
+  - bcm283x-firmware
+  - bcm283x-overlays
+  - chrony
+  - dracut-config-generic
+  - "@arm-tools"
 
 disk:
   bootloader: true
