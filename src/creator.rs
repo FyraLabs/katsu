@@ -449,7 +449,7 @@ pub trait ImageCreator {
 				// format EFI partition
 
 				cmd_lib::run_cmd!(
-					mkfs.fat -F32 ${loop_dev}p$part_num -n EFI;
+					mkfs.fat -F32 ${loop_dev}p$part_num -n 2>&1;
 				)?;
 				efi_num = Some(part_num);
 
