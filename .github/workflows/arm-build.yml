@@ -14,6 +14,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache DNF packages
+        uses: actions/cache@v2
+        with:
+          path: /var/cache/dnf
+          key: dnf-${{ runner.os }}
+          restore-keys: |
+            dnf-${{ runner.os }}-
+            dnf-
+
       - name: Install dependencies
         run: |
           dnf install -y \
@@ -26,6 +35,8 @@ jobs:
           xfsprogs \
           dosfstools \
           grub2 \
+          parted \
+          losetup \
           grub2-efi \
           uboot-images-armv8 \
           uboot-tools \
