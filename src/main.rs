@@ -9,7 +9,8 @@ use tracing::trace;
 use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, Layer};
 
 fn main() -> Result<()> {
-	dotenv::dotenv()?;
+	dotenvy::dotenv()?;
+
 	color_eyre::install()?;
 	let subscriber =
 		tracing_subscriber::Registry::default().with(tracing_error::ErrorLayer::default()).with(

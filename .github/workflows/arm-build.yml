@@ -51,24 +51,19 @@ jobs:
           cargo \
           moby-engine
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+    #   - name: Set up QEMU
+    #     uses: docker/setup-qemu-action@v3
 
       - uses: Swatinem/rust-cache@v2
 
       - name: Build and install katsu
         run: |
           cargo install --path . --debug
-      - name: Prepare loop devices
-        run: |
-          for i in $(seq 0 23);
-          do
-              sudo mknod -m 0660 /dev/loop$i b 7 0  2> /dev/null || true
-          done
+
       - name: Run test
         run: |
           export PATH=$HOME/.cargo/bin:$PATH
-          export KATSU_LOG=trace
           pushd tests
-          COLORBT_SHOW_HIDDEN=1 katsu katsudon-arm.yaml 2>&1
+          echo "COLORBT_SHOW_HIDDEN=1" >> .env
+          katsu katsudon-arm.yaml 2>&1
           popd
