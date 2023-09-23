@@ -446,7 +446,6 @@ pub trait ImageCreator {
 					lsblk;
 					partprobe $loop_dev;
 					ls -l /dev;
-					ls -l /dev/disk/by-partlabel;
 				)?;
 
 				// format EFI partition
