@@ -9,7 +9,7 @@ jobs:
     container:
       image: ghcr.io/terrapkg/builder:f38
       # priv
-      options: --privileged
+      options: --privileged -v /dev:/dev
 
     steps:
       - uses: actions/checkout@v4
