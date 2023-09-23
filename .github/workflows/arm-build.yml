@@ -16,9 +16,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Cache DNF packages
         uses: actions/cache@v2
         with:
@@ -51,7 +48,11 @@ jobs:
           qemu-user-binfmt \
           qemu-kvm \
           qemu-img \
-          cargo
+          cargo \
+          moby-engine
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - uses: Swatinem/rust-cache@v2
 
