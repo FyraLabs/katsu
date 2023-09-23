@@ -440,6 +440,12 @@ pub trait ImageCreator {
 					parted -s $loop_dev name $part_num EFI;
 				)?;
 
+				// debug lsblk
+
+				cmd_lib::run_cmd!(
+					lsblk
+				)?;
+
 				// format EFI partition
 
 				cmd_lib::run_cmd!(
