@@ -15,7 +15,7 @@ fn main() -> Result<()> {
 		tracing_subscriber::Registry::default().with(tracing_error::ErrorLayer::default()).with(
 			tracing_subscriber::fmt::layer()
 				.pretty()
-				.with_filter(tracing_subscriber::EnvFilter::from_env("KATSU_TABEN")),
+				.with_filter(tracing_subscriber::EnvFilter::from_env("KATSU_LOG")),
 		);
 	tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 	sudo::escalate_if_needed().unwrap();

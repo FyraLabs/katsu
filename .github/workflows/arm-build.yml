@@ -8,11 +8,16 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/terrapkg/builder:f38
-      # priv
+      # Pass /dev from host to container
+      # Very hacky, but it works
+      # Microsoft/Github, if you're reading this,
+      # I'm sorry.
       options: --privileged -v /dev:/dev
 
     steps:
       - uses: actions/checkout@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Cache DNF packages
         uses: actions/cache@v2
@@ -42,6 +47,10 @@ jobs:
           uboot-images-armv8 \
           uboot-tools \
           rustc \
+          qemu-user-static-aarch64 \
+          qemu-user-binfmt \
+          qemu-kvm \
+          qemu-img \
           cargo
 
       - uses: Swatinem/rust-cache@v2
@@ -51,14 +60,14 @@ jobs:
           cargo install --path . --debug
       - name: Prepare loop devices
         run: |
-            for i in $(seq 0 23);
-            do
-                sudo mknod -m 0660 /dev/loop$i b 7 0  2> /dev/null || true
-            done
+          for i in $(seq 0 23);
+          do
+              sudo mknod -m 0660 /dev/loop$i b 7 0  2> /dev/null || true
+          done
       - name: Run test
         run: |
           export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_LOG=trace
           pushd tests
           COLORBT_SHOW_HIDDEN=1 katsu katsudon-arm.yaml 2>&1
           popd
-
