@@ -35,4 +35,4 @@ echo "Fixing SELinux labels"
 fixfiles -vRa restore
 
 
-dnf up -y # for downloading keys
+# dnf up -y # for downloading keys
