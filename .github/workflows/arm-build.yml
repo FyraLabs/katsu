@@ -39,6 +39,7 @@ jobs:
           cargo install --path .
       - name: Run test
         run: |
+          export PATH=$HOME/.cargo/bin:$PATH
           pushd tests
           katsu katsudon-arm.yaml
           popd
