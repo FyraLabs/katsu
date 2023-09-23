@@ -9,7 +9,7 @@ jobs:
     container:
       image: ghcr.io/terrapkg/builder:f38
       # priv
-      options: --cap-add=SYS_ADMIN --privileged
+      options: --privileged
 
     steps:
       - uses: actions/checkout@v4

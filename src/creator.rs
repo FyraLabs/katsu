@@ -443,7 +443,8 @@ pub trait ImageCreator {
 				// debug lsblk
 
 				cmd_lib::run_cmd!(
-					lsblk
+					lsblk;
+					ls -l /dev/loop*;
 				)?;
 
 				// format EFI partition
