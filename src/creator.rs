@@ -1,16 +1,25 @@
 use color_eyre::{eyre::eyre, Help, Result};
-use std::{io::Write, path::Path};
+use std::{
+	fs,
+	io::Write,
+	path::{Path, PathBuf},
+};
 use tracing::{debug, error, info, instrument, trace, warn};
 
-use crate::{cfg::Config, run};
+use crate::{
+	cfg::{Config, OutputFormat},
+	run,
+	util::Arch,
+};
 
 const DEFAULT_DNF: &str = "dnf5";
 const DEFAULT_BOOTLOADER: &str = "limine";
+const UBOOT_DATA: &str = "/usr/share/uboot";
 
-pub trait LiveImageCreator {
+pub trait ImageCreator {
 	/// src, dest, required
 	const EFI_FILES: &'static [(&'static str, &'static str, bool)];
-	const ARCH: crate::util::Arch;
+	// const ARCH: crate::util::Arch;
 
 	fn get_cfg(&self) -> &Config;
 
@@ -58,13 +67,40 @@ pub trait LiveImageCreator {
 		Ok(())
 	}
 
+	fn copy_uboot_files(&self, bootpath: &Path) -> Result<()> {
+		info!("Copying U-Boot files");
+		// copy u-boot files to bootpath
+
+		// dictionary of files to copy and destination
+
+		let files = vec![
+			("rpi_4/u-boot.bin", "rpi4-u-boot.bin"),
+			("rpi_3/u-boot.bin", "rpi3-u-boot.bin"),
+			("rpi_arm64/u-boot.bin", "rpi-u-boot.bin"),
+		];
+
+		// fs::copy(UBOOT_DATA, bootpath)?;
+
+		Ok(())
+	}
+
+	fn get_arch(&self) -> Result<Arch> {
+		let cfg = self.get_cfg();
+		Ok(match cfg.arch.as_ref().is_some() {
+			true => Arch::from(cfg.arch.as_ref().unwrap().as_str()),
+			false => Arch::get()?,
+		})
+	}
+
 	fn copy_efi_files(&self, instroot: &Path) -> Result<bool> {
 		info!("Copying EFI files");
+		// get config arch
+		let arch_str: &str = self.get_arch()?.into();
 		let mut fail = false;
 		std::fs::create_dir_all(Path::new(instroot).join("EFI/BOOT/fonts"))?;
 		for (srcs, dest, req) in Self::EFI_FILES {
-			let srcs = srcs.replace("%arch%", Self::ARCH.into());
-			let dest = dest.replace("%arch%", Self::ARCH.into());
+			let srcs = srcs.replace("%arch%", arch_str);
+			let dest = dest.replace("%arch%", arch_str);
 			let root =
 				&self.get_cfg().instroot.canonicalize().expect("Cannot canonicalize instroot.");
 			let root = root.to_str().unwrap();
@@ -99,7 +135,18 @@ pub trait LiveImageCreator {
 		Ok(fail)
 	}
 
+	/// Redirects to output-specific functions
 	fn exec(&self) -> Result<()> {
+		let cfg = self.get_cfg();
+		let out_fmt = &cfg.format;
+
+		match out_fmt {
+			OutputFormat::Iso => self.exec_iso(),
+			OutputFormat::Disk => self.exec_disk(),
+		}
+	}
+
+	fn exec_iso(&self) -> Result<()> {
 		self.mkmountpt()?;
 		self.init_script()?;
 		self.instpkgs()?;
@@ -115,8 +162,32 @@ pub trait LiveImageCreator {
 		Ok(())
 	}
 
+	fn exec_disk(&self) -> Result<()> {
+		self.mkmountpt()?;
+		self.init_script()?;
+		self.instpkgs()?;
+		// self.dracut()?;
+		// self.rootpw()?;
+		// self.postinst_script()?;
+
+		// self.squashfs()?;
+		// self.liveos()?;
+		// self.xorriso()?;
+		// self.bootloader()?;
+		let cfg = self.get_cfg();
+		info!("Done: {}.raw", cfg.out);
+		Ok(())
+	}
+
 	fn bootloader(&self) -> Result<()> {
-		match self.get_cfg().sys.bootloader.as_ref().map(|x| x.as_str()).unwrap_or(DEFAULT_BOOTLOADER) {
+		match self
+			.get_cfg()
+			.sys
+			.bootloader
+			.as_ref()
+			.map(|x| x.as_str())
+			.unwrap_or(DEFAULT_BOOTLOADER)
+		{
 			"limine" => self.limine(),
 			"grub" => self.grub(),
 			x => Err(eyre!("Unknown bootloader: {x}")),
@@ -169,7 +240,9 @@ pub trait LiveImageCreator {
 		f.write_fmt(format_args!("TIMEOUT=5\n\n:{distro}\n\tPROTOCOL=linux\n\t"))?;
 		f.write_fmt(format_args!("KERNEL_PATH=boot:///boot/vmlinuz-{kver}\n\t"))?;
 		f.write_fmt(format_args!("MODULE_PATH=boot:///boot/initramfs-{kver}.img\n\t"))?;
-		f.write_fmt(format_args!("CMDLINE=root=live:LABEL={volid} rd.live.image selinux=0 {cmdline}"))?; // maybe enforcing=0
+		f.write_fmt(format_args!(
+			"CMDLINE=root=live:LABEL={volid} rd.live.image selinux=0 {cmdline}"
+		))?; // maybe enforcing=0
 		Ok(())
 	}
 
@@ -303,6 +376,137 @@ pub trait LiveImageCreator {
 		self.get_cfg().sys.releasever.to_string()
 	}
 
+	fn prep_disk(&self) -> Result<()> {
+		let cfg = self.get_cfg();
+
+		if let Some(layout) = &cfg.disk {
+			// Now let's create a disk file called {out}.raw
+			let out_file = format!("{}.raw", cfg.out);
+
+			// Create the disk file
+
+			let disk_size = &layout.disk_size;
+			info!(out_file, "Creating disk file");
+
+			cmd_lib::run_cmd!(
+				fallocate -l $disk_size $out_file;
+			)?;
+
+			// Mount disk image to loop device, and return the loop device name
+
+			info!("Mounting disk image to loop device");
+
+			let loop_dev = cmd_lib::run_fun!(losetup -f)?;
+
+			debug!("Found loop device: {loop_dev:?}");
+
+			cmd_lib::run_cmd!(
+				losetup $loop_dev $out_file -v;
+			)?;
+
+			// Partition disk
+
+			info!("Partitioning disk");
+
+			// Create partition table, GPT
+
+			cmd_lib::run_cmd!(
+				parted -s $loop_dev mklabel gpt;
+			)?;
+
+			// number to track partition number
+
+			let mut part_num = 1;
+			let mut efi_num: Option<i32> = None;
+			let boot_num: i32;
+			let root_num: i32;
+
+			if layout.bootloader {
+				// create EFI partition with ESP flag for the first 250MiB
+				// label it as EFI
+
+				cmd_lib::run_cmd!(
+					parted -s $loop_dev mkpart primary fat32 1MiB 250MiB;
+					parted -s $loop_dev set $part_num esp on;
+					parted -s $loop_dev name $part_num EFI;
+				)?;
+
+				// format EFI partition
+
+				cmd_lib::run_cmd!(
+					mkfs.fat -F32 ${loop_dev}p$part_num -n EFI;
+				)?;
+				efi_num = Some(part_num);
+
+				// increment partition number
+				part_num += 1;
+			}
+
+			// create boot partition for installing kernels with the next 1GiB
+			// label as BOOT
+			// ext4
+			cmd_lib::run_cmd!(
+				parted -s $loop_dev mkpart primary ext4 250MiB 1.25GiB;
+				parted -s $loop_dev name $part_num BOOT;
+			)?;
+
+			cmd_lib::run_cmd!(
+				mkfs.ext4 -F ${loop_dev}p$part_num -L BOOT;
+			)?;
+
+			boot_num = part_num;
+
+			part_num += 1;
+
+			// Create blank partition with the rest of the free space
+
+			let volid = &cfg.volid;
+			cmd_lib::run_cmd!(
+				parted -s $loop_dev mkpart primary ext4 1.25GiB 100%;
+				parted -s $loop_dev name $part_num $volid;
+			)?;
+
+			root_num = part_num;
+
+			// now format the partition
+
+			let root_format = &layout.root_format;
+
+			cmd_lib::run_cmd!(
+				mkfs.${root_format} ${loop_dev}p$part_num -L $volid;
+			)?;
+
+			// Now, mount them all
+
+			info!("Mounting partitions");
+
+			let instroot = &cfg
+				.instroot
+				.to_str()
+				.unwrap_or_default();
+
+			cmd_lib::run_cmd!(
+				mkdir -p $instroot;
+				mount ${loop_dev}p$root_num $instroot;
+				mkdir -p $instroot/boot;
+				mount ${loop_dev}p$boot_num $instroot/boot;
+			)?;
+
+			if layout.bootloader {
+				let efi_num = efi_num.unwrap();
+				cmd_lib::run_cmd!(
+					mkdir -p $instroot/boot/efi;
+					mount ${loop_dev}p$efi_num $instroot/boot/efi;
+				)?;
+			}
+
+			Ok(())
+		} else {
+			// error out
+			return Err(eyre!("No disk layout specified"));
+		}
+	}
+
 	#[instrument(skip(self))]
 	fn mkmountpt(&self) -> Result<()> {
 		debug!("Checking for mount point");
@@ -320,8 +524,17 @@ pub trait LiveImageCreator {
 			}
 			std::fs::create_dir(instroot)?;
 		}
-		trace!("Checking for ISO directory");
-		std::fs::create_dir_all(format!("./{}/LiveOS", cfg.distro))?;
+		match cfg.format {
+			OutputFormat::Iso => {
+				trace!("Checking for ISO directory");
+				std::fs::create_dir_all(format!("./{}/LiveOS", cfg.distro))?;
+			},
+			OutputFormat::Disk => {
+				std::fs::create_dir_all(format!("{}/boot/efi", instroot.display()))?;
+				self.prep_disk()?;
+			},
+		}
+
 		Ok(())
 	}
 
@@ -337,17 +550,95 @@ pub trait LiveImageCreator {
 		// if dnf == "dnf5" {
 		// 	pkgs.push("--use-host-config");
 		// }
+
+		let mut extra_args = vec![];
+		if cfg.arch.is_some() {
+			extra_args.push("--forcearch");
+			extra_args.push(cfg.arch.as_ref().unwrap());
+		}
 		cmd_lib::run_cmd!(
-			$dnf in -y --releasever=$rel --installroot $root $[pkgs];
+			$dnf in -y --releasever=$rel $[extra_args] --installroot $root $[pkgs];
 			$dnf clean all;
 		)?;
 		Ok(())
 	}
 }
 
-pub struct LiveImageCreatorX86 {
+pub struct KatsuCreator {
 	cfg: Config,
 }
+impl From<Config> for KatsuCreator {
+	fn from(cfg: Config) -> Self {
+		Self { cfg }
+	}
+}
+impl ImageCreator for KatsuCreator {
+	// const ARCH: crate::util::Arch = crate::util::Arch::X86;
+	const EFI_FILES: &'static [(&'static str, &'static str, bool)] = &[
+		("/boot/efi/EFI/*/shim%arch%.efi", "/EFI/BOOT/BOOT%arch%.EFI", true),
+		("/boot/efi/EFI/*/gcd%arch%.efi", "/EFI/BOOT/grub%arch%.efi", true),
+		("/boot/efi/EFI/*/shimia32.efi", "/EFI/BOOT/BOOTIA32.EFI", false),
+		("/boot/efi/EFI/*/gcdia32.efi", "/EFI/BOOT/grubia32.efi", false),
+		("/usr/share/grub/unicode.pf2", "/EFI/BOOT/fonts/", true),
+	];
+
+	#[inline]
+	fn get_cfg(&self) -> &Config {
+		&self.cfg
+	}
+}
+
+// @madonuko: why? Why did you hardcode everything per architecture? I... My sanity hurts. -@korewaChino
+// pub struct LiveImageCreatorX86 {
+// 	cfg: Config,
+// }
+
+// impl From<Config> for LiveImageCreatorX86 {
+// 	fn from(cfg: Config) -> Self {
+// 		Self { cfg }
+// 	}
+// }
+
+// impl ImageCreator for LiveImageCreatorX86 {
+// 	// const ARCH: crate::util::Arch = crate::util::Arch::X86;
+// 	const EFI_FILES: &'static [(&'static str, &'static str, bool)] = &[
+// 		("/boot/efi/EFI/*/shim%arch%.efi", "/EFI/BOOT/BOOT%arch%.EFI", true),
+// 		("/boot/efi/EFI/*/gcd%arch%.efi", "/EFI/BOOT/grub%arch%.efi", true),
+// 		("/boot/efi/EFI/*/shimia32.efi", "/EFI/BOOT/BOOTIA32.EFI", false),
+// 		("/boot/efi/EFI/*/gcdia32.efi", "/EFI/BOOT/grubia32.efi", false),
+// 		("/usr/share/grub/unicode.pf2", "/EFI/BOOT/fonts/", true),
+// 	];
+
+// 	#[inline]
+// 	fn get_cfg(&self) -> &Config {
+// 		&self.cfg
+// 	}
+// }
+// pub struct LiveImageCreatorX86_64 {
+// 	cfg: Config,
+// }
+
+// impl From<Config> for LiveImageCreatorX86_64 {
+// 	fn from(cfg: Config) -> Self {
+// 		Self { cfg }
+// 	}
+// }
+
+// impl ImageCreator for LiveImageCreatorX86_64 {
+// 	// const ARCH: crate::util::Arch = crate::util::Arch::X86_64;
+// 	const EFI_FILES: &'static [(&'static str, &'static str, bool)] = &[
+// 		("/boot/efi/EFI/*/shim%arch%.efi", "/EFI/BOOT/BOOT%arch%.EFI", true),
+// 		("/boot/efi/EFI/*/gcd%arch%.efi", "/EFI/BOOT/grub%arch%.efi", true),
+// 		("/boot/efi/EFI/*/shimia32.efi", "/EFI/BOOT/BOOTIA32.EFI", false),
+// 		("/boot/efi/EFI/*/gcdia32.efi", "/EFI/BOOT/grubia32.efi", false),
+// 		("/usr/share/grub/unicode.pf2", "/EFI/BOOT/fonts/", true),
+// 	];
+
+// 	fn get_cfg(&self) -> &Config {
+// 		&self.cfg
+// 	}
+// }
+
 /// Prepare chroot by mounting /dev, /proc, /sys
 fn prepare_chroot(root: &str) -> Result<()> {
 	cmd_lib::run_cmd! (
@@ -375,50 +666,4 @@ fn unmount_chroot(root: &str) -> Result<()> {
 		sh -c "mv $root/etc/resolv.conf.bak $root/etc/resolv.conf || true";
 	)?;
 	Ok(())
-}
-
-impl From<Config> for LiveImageCreatorX86 {
-	fn from(cfg: Config) -> Self {
-		Self { cfg }
-	}
-}
-
-impl LiveImageCreator for LiveImageCreatorX86 {
-	const ARCH: crate::util::Arch = crate::util::Arch::X86;
-	const EFI_FILES: &'static [(&'static str, &'static str, bool)] = &[
-		("/boot/efi/EFI/*/shim%arch%.efi", "/EFI/BOOT/BOOT%arch%.EFI", true),
-		("/boot/efi/EFI/*/gcd%arch%.efi", "/EFI/BOOT/grub%arch%.efi", true),
-		("/boot/efi/EFI/*/shimia32.efi", "/EFI/BOOT/BOOTIA32.EFI", false),
-		("/boot/efi/EFI/*/gcdia32.efi", "/EFI/BOOT/grubia32.efi", false),
-		("/usr/share/grub/unicode.pf2", "/EFI/BOOT/fonts/", true),
-	];
-
-	#[inline]
-	fn get_cfg(&self) -> &Config {
-		&self.cfg
-	}
-}
-pub struct LiveImageCreatorX86_64 {
-	cfg: Config,
-}
-
-impl From<Config> for LiveImageCreatorX86_64 {
-	fn from(cfg: Config) -> Self {
-		Self { cfg }
-	}
-}
-
-impl LiveImageCreator for LiveImageCreatorX86_64 {
-	const ARCH: crate::util::Arch = crate::util::Arch::X86_64;
-	const EFI_FILES: &'static [(&'static str, &'static str, bool)] = &[
-		("/boot/efi/EFI/*/shim%arch%.efi", "/EFI/BOOT/BOOT%arch%.EFI", true),
-		("/boot/efi/EFI/*/gcd%arch%.efi", "/EFI/BOOT/grub%arch%.efi", true),
-		("/boot/efi/EFI/*/shimia32.efi", "/EFI/BOOT/BOOTIA32.EFI", false),
-		("/boot/efi/EFI/*/gcdia32.efi", "/EFI/BOOT/grubia32.efi", false),
-		("/usr/share/grub/unicode.pf2", "/EFI/BOOT/fonts/", true),
-	];
-
-	fn get_cfg(&self) -> &Config {
-		&self.cfg
-	}
 }

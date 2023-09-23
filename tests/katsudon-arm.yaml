@@ -1,0 +1,45 @@
+dnf: dnf
+distro: Ultramarine-ARM
+instroot: instroot-arm/
+# this is the name of the iso
+out: out
+volid: ULTRAMARINE
+arch: aarch64
+format: disk
+
+packages:
+  # dracut stuff below
+  - filesystem
+  - setup
+  - lvm2
+  - btrfs-progs
+  - dmraid
+  - nvme-cli
+  - dbus-daemon
+  # necessary stuff
+  - "@core"
+  - fedora-repos
+  - kernel
+  - glibc
+  - glibc-common
+  - "@standard"
+  - ultramarine-release
+  - dnf
+  - terra-release
+  - dracut
+  - NetworkManager
+  - mkpasswd
+  - polkit
+
+disk:
+  bootloader: true
+  root_format: btrfs
+  disk_size: 8G
+
+sys:
+  releasever: 38
+  rootpw: ultramarine
+
+script:
+  init: init.sh
+  postinst: postinst.sh

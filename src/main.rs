@@ -2,12 +2,11 @@ mod cfg;
 mod creator;
 mod util;
 
-use crate::creator::{LiveImageCreator, LiveImageCreatorX86, LiveImageCreatorX86_64};
+use crate::creator::{ImageCreator, KatsuCreator};
 use cfg::Config;
 use color_eyre::Result;
 use tracing::trace;
 use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, Layer};
-use util::Arch;
 
 fn main() -> Result<()> {
 	dotenv::dotenv()?;
@@ -25,11 +24,27 @@ fn main() -> Result<()> {
 		trace!(cfg_file, "Reading/Parsing config");
 		let config: Config = serde_yaml::from_str(&std::fs::read_to_string(cfg_file)?)?;
 		trace!("Config read done: {config:#?}");
-		match Arch::get()? {
-			Arch::X86 => LiveImageCreatorX86::from(config).exec()?,
-			Arch::X86_64 => LiveImageCreatorX86_64::from(config).exec()?,
-			_ => panic!("Unknown architecture"),
-		}
+		// let arch = {
+		// 	let cfg_arch = config.clone().arch;
+
+		// 	if cfg_arch.is_none() {
+		// 		Arch::get()?
+		// 	} else {
+		// 		Arch::from(cfg_arch.as_ref().unwrap().as_str())
+		// 	}
+		// };
+		// match arch {
+		// 	Arch::X86 => LiveImageCreatorX86::from(config).exec_iso()?,
+
+		// 	Arch::X86_64 => LiveImageCreatorX86_64::from(config).exec_iso()?,
+
+		// 	// todo: please clean this up
+		
+		// 	Arch::AArch64 => todo!(),
+
+		// 	_ => panic!("Unknown architecture"),
+		// }
+		KatsuCreator::from(config).exec()?;
 	}
 	Ok(())
 }

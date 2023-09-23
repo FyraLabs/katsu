@@ -1,0 +1,45 @@
+name: ARM cross-build test
+
+on:
+  push:
+
+jobs:
+  unit-test:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/terrapkg/builder:f38
+      # priv
+      options: --cap-add=SYS_ADMIN --privileged
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          dnf install -y \
+          xorriso \
+          rpm \
+          limine \
+          systemd \
+          btrfs-progs \
+          e2fsprogs \
+          xfsprogs \
+          dosfstools \
+          grub2 \
+          grub2-efi \
+          uboot-images-armv8 \
+          uboot-tools \
+          rustc \
+          cargo
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build and install katsu
+        run: |
+          cargo install --path .
+      - name: Run test
+        run: |
+          pushd tests
+          katsu katsudon-arm.yaml
+          popd
+

@@ -3,7 +3,33 @@ use std::path::PathBuf;
 use serde_derive::Deserialize;
 use smartstring::alias::String as SStr;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Default, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum OutputFormat {
+	/// The ISO file will be created.
+	/// This is the default.
+	#[default]
+	Iso,
+	/// Generates a disk image
+	/// This is not implemented yet.
+	Disk,
+}
+
+// from string to enum
+impl From<&str> for OutputFormat {
+	fn from(value: &str) -> Self {
+		match value.to_lowercase().as_str() {
+			"iso" => Self::Iso,
+			"disk" => Self::Disk,
+			_ => {
+				tracing::warn!("Unknown format: {}, setting ISO mode", value);
+				Self::Iso
+			}
+		}
+	}
+}
+
+#[derive(Deserialize, Debug, Clone)]
 pub struct Config {
 	/// The name of the distro / edition.
 	/// This is used to name the directory with the ISO content.
@@ -26,9 +52,27 @@ pub struct Config {
 	pub dnf: Option<String>,
 	/// The volume id of the ISO file.
 	pub volid: String,
+	/// The system architecture.
+	/// - `x86` (default)
+	pub arch: Option<String>,
+	/// Output format.
+	pub format: OutputFormat,
+
+	/// The disk layout of the new system.
+	pub disk: Option<DiskLayout>,
+}
+#[derive(Deserialize, Debug, Clone)]
+pub struct DiskLayout {
+	/// Create bootloader partition?
+	pub bootloader: bool,
+	/// Filesystem of the bootloader partition.
+	pub root_format: String,
+	/// Total size of the disk image.
+	pub disk_size: String,
 }
 
-#[derive(Deserialize, Debug)]
+
+#[derive(Deserialize, Debug, Clone)]
 pub struct System {
 	/// The release version of the new system.
 	pub releasever: u8,
@@ -46,7 +90,7 @@ pub struct System {
 	pub kernel_params: Option<String>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct Script {
 	/// The path to the init script.
 	/// The init script is run after the mountpoint is created but before the packages are installed.
