@@ -174,7 +174,7 @@ pub trait ImageCreator {
 		self.init_script()?;
 		self.instpkgs()?;
 		// self.dracut()?;
-		// self.rootpw()?;
+		self.rootpw()?;
 		self.postinst_script()?;
 
 		// self.squashfs()?;
@@ -570,10 +570,22 @@ pub trait ImageCreator {
 			extra_args.push("--forcearch");
 			extra_args.push(cfg.arch.as_ref().unwrap());
 		}
+		prepare_chroot(root).unwrap_or_else(|e| {
+			error!(?e, "Failed to prepare chroot");
+			std::process::exit(1);
+		});
 		cmd_lib::run_cmd!(
 			$dnf in -y --releasever=$rel $[extra_args] --installroot $root $[pkgs];
 			$dnf clean all;
-		)?;
+		).unwrap_or_else(|e| {
+			error!(?e, "Failed to install packages");
+			unmount_chroot(root).unwrap_or_else(|e| {
+				error!(?e, "Failed to unmount chroot");
+				std::process::exit(1);
+			});
+			std::process::exit(1);
+		});
+		unmount_chroot(root)?;
 		Ok(())
 	}
 }

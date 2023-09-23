@@ -15,7 +15,6 @@ packages:
   - btrfs-progs
   - dmraid
   - nvme-cli
-  - dbus-daemon
   # necessary stuff
   - "@core"
   - fedora-repos
@@ -35,11 +34,22 @@ packages:
   - chrony
   - dracut-config-generic
   - "@arm-tools"
+  # - "-dracut-config-rescue"
+  - chrony
+  - "@hardware-support"
+  # - "-iwl*"
+  # - "-ipw*"
+  # - "-usb_modeswitch"
+  - grub2-efi-aa64
+  - grub2-efi-aa64-modules
+  - grub2-efi-aa64-cdboot
+  - grub2-tools
+
 
 disk:
   bootloader: true
-  root_format: btrfs
-  disk_size: 8G
+  root_format: xfs
+  disk_size: 6G
 
 sys:
   releasever: 38
