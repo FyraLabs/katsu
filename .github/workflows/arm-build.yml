@@ -49,6 +49,12 @@ jobs:
       - name: Build and install katsu
         run: |
           cargo install --path .
+      - name: Prepare loop devices
+        run: |
+            for i in $(seq 0 23);
+            do
+                sudo mknod -m 0660 /dev/loop$i b 7 0  2> /dev/null || true
+            done
       - name: Run test
         run: |
           export PATH=$HOME/.cargo/bin:$PATH
