@@ -410,7 +410,7 @@ pub trait ImageCreator {
 			debug!("Found loop device: {loop_dev:?}");
 
 			cmd_lib::run_cmd!(
-				losetup $loop_dev $out_file -v;
+				losetup $loop_dev $out_file --show;
 			)?;
 
 			// Partition disk
@@ -445,6 +445,7 @@ pub trait ImageCreator {
 				cmd_lib::run_cmd!(
 					lsblk;
 					ls -l /dev;
+					ls -l /dev/disk/by-partlabel;
 				)?;
 
 				// format EFI partition
