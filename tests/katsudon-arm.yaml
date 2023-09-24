@@ -2,7 +2,7 @@ dnf: dnf
 distro: Ultramarine-ARM
 instroot: instroot-arm/
 # this is the name of the iso
-out: out
+out: out2
 volid: ULTRAMARINE
 arch: aarch64
 format: disk
@@ -50,8 +50,8 @@ packages:
 
 disk:
   bootloader: true
-  root_format: xfs
-  disk_size: 6G
+  root_format: btrfs
+  disk_size: 8G
 
 sys:
   releasever: 38

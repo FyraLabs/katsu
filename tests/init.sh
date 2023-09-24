@@ -1,5 +1,8 @@
 #!/bin/bash -x
 set -x
+
+sudo semanage permissive -a setfiles_mac_t || true
+
 echo "Initializing chroot and repos"
 
 mkdir -p ./etc/yum.repos.d ./etc/dnf

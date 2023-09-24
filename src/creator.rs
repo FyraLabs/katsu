@@ -1,4 +1,5 @@
 use color_eyre::{eyre::eyre, Help, Result};
+use tracing_subscriber::field::debug;
 use std::{
 	fs,
 	io::Write,
@@ -14,7 +15,7 @@ use crate::{
 
 const DEFAULT_DNF: &str = "dnf5";
 const DEFAULT_BOOTLOADER: &str = "limine";
-const UBOOT_DATA: &str = "/usr/share/uboot";
+// const UBOOT_DATA: &str = "/usr/share/uboot";
 
 #[derive(Debug, Clone)]
 pub struct ImageLayout {
@@ -39,6 +40,42 @@ pub trait ImageCreator {
 		let root = cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
 		let mut f = std::fs::File::create(format!("{}/etc/fstab", root.display()))?;
 		f.write(b"/squashfs.img\t/\tsquashfs\tdefaults\t0\t0")?;
+		Ok(())
+	}
+
+	fn genfstab(&self) -> Result<()> {
+		let cfg = self.get_cfg();
+		let root = cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
+		let root = root.to_str().unwrap();
+		let out = format!("{}/etc/fstab", root);
+		// list mounts in $root
+		let mounts = cmd_lib::run_fun!(findmnt -n -o UUID,TARGET,FSTYPE,OPTIONS --real --raw --noheadings --notruncate --output-all --target $root)?;
+
+		// convert to fstab format
+		let mut mounts = mounts
+			.lines()
+			.map(|x| {
+				let mut x = x.split_whitespace();
+				let uuid = x.next().unwrap();
+				let target = x.next().unwrap();
+				let fstype = x.next().unwrap();
+				let options = x.next().unwrap();
+				format!(
+					"UUID={uuid}\t{target}\t{fstype}\t{options}\t0\t0",
+					uuid = uuid,
+					target = target,
+					fstype = fstype,
+					options = options
+				)
+			})
+			.collect::<Vec<String>>()
+			.join("\n");
+		mounts.push('\n');
+
+		
+		debug!(?mounts, "Mounts");
+		let mut f = std::fs::File::create(out)?;
+		f.write_all(mounts.as_bytes())?;
 		Ok(())
 	}
 
@@ -176,6 +213,7 @@ pub trait ImageCreator {
 		// self.dracut()?;
 		self.rootpw()?;
 		self.postinst_script()?;
+		self.genfstab()?;
 
 		// self.squashfs()?;
 		// self.liveos()?;
@@ -322,15 +360,17 @@ pub trait ImageCreator {
 		debug!(?script, ?dest, "Copying postinst script");
 		std::fs::copy(script, &dest)?;
 		// debug!("Mounting /dev, /proc, /sys");
-		// prepare_chroot(rootname)?;
+		prepare_chroot(rootname)?;
 		info!(?script, "Running postinst script");
 		// TODO: use unshare
-		run!(~"unshare","-R", &rootname, &*format!("/{name}"))
-			.map_err(|e| e.wrap_err("postinst script failed"))?;
+		run!(~"unshare","-R", &rootname, &*format!("/{name}")).map_err(|e| {
+			unmount_chroot(rootname).unwrap();
+			e.wrap_err("postinst script failed")
+		})?;
 		debug!(?dest, "Removing postinst script");
 		std::fs::remove_file(dest)?;
 		// debug!("Unmounting /dev, /proc, /sys");
-		// unmount_chroot(rootname)?;
+		unmount_chroot(rootname)?;
 		Ok(())
 	}
 
@@ -396,7 +436,7 @@ pub trait ImageCreator {
 			info!(out_file, "Creating disk file");
 
 			cmd_lib::run_cmd!(
-				fallocate -l $disk_size $out_file;
+				truncate -s $disk_size $out_file;
 			)?;
 
 			// Mount disk image to loop device, and return the loop device name
@@ -577,7 +617,8 @@ pub trait ImageCreator {
 		cmd_lib::run_cmd!(
 			$dnf in -y --releasever=$rel $[extra_args] --installroot $root $[pkgs];
 			$dnf clean all;
-		).unwrap_or_else(|e| {
+		)
+		.unwrap_or_else(|e| {
 			error!(?e, "Failed to install packages");
 			unmount_chroot(root).unwrap_or_else(|e| {
 				error!(?e, "Failed to unmount chroot");

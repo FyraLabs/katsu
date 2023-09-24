@@ -32,7 +32,8 @@ rm -f /var/lib/rpm/__db*
 
 echo "Fixing SELinux labels"
 
-# fixfiles -vRa restore
+setfiles -v -F -e /proc -e /sys -e /dev -e /bin /etc/selinux/targeted/contexts/files/file_contexts /
+setfiles -v -F -e /proc -e /sys -e /dev -e /etc/selinux/targeted/contexts/files/file_contexts.bin /bin
 
 # todo: move this out of postinst
 grub2-mkconfig > /boot/grub2/grub.cfg
