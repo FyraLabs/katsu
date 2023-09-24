@@ -3,3 +3,5 @@ instroot-arm/
 Ultramarine-Linux
 out.iso
 *.raw
+*.zip
+*.xz

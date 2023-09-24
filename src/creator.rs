@@ -1,11 +1,11 @@
 use color_eyre::{eyre::eyre, Help, Result};
-use tracing_subscriber::field::debug;
 use std::{
 	fs,
 	io::Write,
 	path::{Path, PathBuf},
 };
 use tracing::{debug, error, info, instrument, trace, warn};
+use tracing_subscriber::field::debug;
 
 use crate::{
 	cfg::{Config, OutputFormat},
@@ -48,6 +48,9 @@ pub trait ImageCreator {
 		let root = cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
 		let root = root.to_str().unwrap();
 		let out = format!("{}/etc/fstab", root);
+		cmd_lib::run_cmd!(
+			mkdir -p $root/etc;
+		)?;
 		// list mounts in $root
 		let mounts = cmd_lib::run_fun!(findmnt -n -o UUID,TARGET,FSTYPE,OPTIONS --real --raw --noheadings --notruncate --output-all --target $root)?;
 
@@ -72,7 +75,6 @@ pub trait ImageCreator {
 			.join("\n");
 		mounts.push('\n');
 
-		
 		debug!(?mounts, "Mounts");
 		let mut f = std::fs::File::create(out)?;
 		f.write_all(mounts.as_bytes())?;
@@ -209,10 +211,10 @@ pub trait ImageCreator {
 	fn exec_disk(&self) -> Result<()> {
 		self.mkmountpt()?;
 		self.init_script()?;
+		self.genfstab()?;
 		self.instpkgs()?;
 		// self.dracut()?;
 		self.rootpw()?;
-		self.genfstab()?;
 		self.postinst_script()?;
 
 		// self.squashfs()?;
@@ -386,13 +388,14 @@ pub trait ImageCreator {
 				// let's truncate the disk image to the actual size
 				info!(?size, "Truncating disk image");
 
+				// cmd_lib::run_cmd!(
+				// 	truncate -s $size $image;
+				// )?;
 				cmd_lib::run_cmd!(
-					truncate -s $size $image;
+					fallocate -d $image;
 				)?;
-
-
-			}
-			_ => {}
+			},
+			_ => {},
 		}
 		Ok(())
 	}

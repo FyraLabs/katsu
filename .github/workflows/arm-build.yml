@@ -67,10 +67,11 @@ jobs:
           pushd tests
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           katsu katsudon-arm.yaml 2>&1
+          xz -z9 out2.raw -c > out2.raw.xz
           popd
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v2
         with:
           name: katsudon-arm
-          path: tests/*.raw
+          path: tests/*.raw.xz
