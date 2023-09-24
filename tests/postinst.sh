@@ -25,6 +25,8 @@ rm -f /var/lib/systemd/random-seed
 rm -f /etc/NetworkManager/system-connections/*.nmconnection
 # dnf -y remove dracut-config-generic
 
+# dracut -vvv --force --regenerate-all -N
+
 rm -f /etc/machine-id
 touch /etc/machine-id
 
