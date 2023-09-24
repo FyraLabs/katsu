@@ -639,7 +639,7 @@ pub trait ImageCreator {
 		});
 		cmd_lib::run_cmd!(
 			$dnf in -y --releasever=$rel $[extra_args] --installroot $root $[pkgs];
-			$dnf clean all;
+			$dnf clean all --installroot $root;
 		)
 		.unwrap_or_else(|e| {
 			error!(?e, "Failed to install packages");
