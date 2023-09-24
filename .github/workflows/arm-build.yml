@@ -49,6 +49,7 @@ jobs:
           qemu-kvm \
           qemu-img \
           cargo \
+          systemd-devel \
           mkpasswd \
           moby-engine
 
