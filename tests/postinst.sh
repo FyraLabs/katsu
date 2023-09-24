@@ -23,7 +23,7 @@ cp -P /usr/share/uboot/rpi_3/u-boot.bin /boot/efi/rpi3-u-boot.bin
 cp -P /usr/share/uboot/rpi_4/u-boot.bin /boot/efi/rpi4-u-boot.bin
 rm -f /var/lib/systemd/random-seed
 rm -f /etc/NetworkManager/system-connections/*.nmconnection
-dnf -y remove dracut-config-generic
+# dnf -y remove dracut-config-generic
 
 rm -f /etc/machine-id
 touch /etc/machine-id
@@ -32,7 +32,27 @@ rm -f /var/lib/rpm/__db*
 
 echo "Fixing SELinux labels"
 
-fixfiles -vRa restore
+# fixfiles -vRa restore
+
+# todo: move this out of postinst
+grub2-mkconfig > /boot/grub2/grub.cfg
+
+# get /dev/ of /boot
+bootdev=$(findmnt -n -o SOURCE /boot)
+
+# get blkid of /boot
+bootid=$(blkid -s UUID -o value $bootdev)
+
+# heredoc for /dev/disk
+
+cat << EOF > /boot/efi/EFI/fedora/grub.cfg
+search --no-floppy --fs-uuid --set=dev $bootid
+set prefix=(\$dev)/grub2
+
+export \$prefix
+configfile \$prefix/grub.cfg
+EOF
+
 
 
 # dnf up -y # for downloading keys

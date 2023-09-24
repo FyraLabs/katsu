@@ -44,6 +44,8 @@ packages:
   - grub2-efi-aa64-modules
   - grub2-efi-aa64-cdboot
   - grub2-tools
+  - shim-aa64
+  - shim-unsigned-aarch64
 
 
 disk:
