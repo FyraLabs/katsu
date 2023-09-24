@@ -67,3 +67,9 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           katsu katsudon-arm.yaml 2>&1
           popd
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: katsudon-arm
+          path: tests/*.raw
