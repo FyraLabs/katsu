@@ -50,7 +50,7 @@ packages:
 
 disk:
   bootloader: true
-  root_format: btrfs
+  root_format: ext4
   disk_size: 8G
 
 sys:

@@ -36,4 +36,4 @@ sys:
 
 script:
   init: init.sh
-  postinst: postinst.sh
+  postinst: postinst-live.sh

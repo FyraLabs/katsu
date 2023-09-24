@@ -212,8 +212,8 @@ pub trait ImageCreator {
 		self.instpkgs()?;
 		// self.dracut()?;
 		self.rootpw()?;
-		self.postinst_script()?;
 		self.genfstab()?;
+		self.postinst_script()?;
 
 		// self.squashfs()?;
 		// self.liveos()?;
@@ -371,6 +371,29 @@ pub trait ImageCreator {
 		std::fs::remove_file(dest)?;
 		// debug!("Unmounting /dev, /proc, /sys");
 		unmount_chroot(rootname)?;
+
+		match cfg.format {
+			OutputFormat::Disk => {
+				// Post-process disk image
+
+				let image = format!("{}.raw", cfg.out);
+
+				// get actual file size by bytes using -du
+
+				let size = cmd_lib::run_fun!(du --block-size=1 $image | cut -f1)?;
+				let size = size.parse::<i64>()? + 1;
+
+				// let's truncate the disk image to the actual size
+				info!(?size, "Truncating disk image");
+
+				cmd_lib::run_cmd!(
+					truncate -s $size $image;
+				)?;
+
+
+			}
+			_ => {}
+		}
 		Ok(())
 	}
 
