@@ -1,0 +1,9 @@
+# Example manifest for a Katsu build
+scripts:
+  pre:
+    - inline: |
+        echo "Hello from pre.sh"
+
+  post:
+    - inline: |
+        echo "Hello from post.sh"

@@ -1,0 +1,12 @@
+import:
+  - recurse2.yaml
+
+
+dnf:
+  packages:
+    - baz
+
+scripts:
+  pre:
+    - inline: |
+        echo "Hello from recurse1.yaml"

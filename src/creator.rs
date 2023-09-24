@@ -17,12 +17,6 @@ const DEFAULT_DNF: &str = "dnf5";
 const DEFAULT_BOOTLOADER: &str = "limine";
 // const UBOOT_DATA: &str = "/usr/share/uboot";
 
-#[derive(Debug, Clone)]
-pub struct ImageLayout {
-	pub efi_dev: Option<String>,
-	pub root_dev: String,
-	pub boot_dev: String,
-}
 
 pub trait ImageCreator {
 	/// src, dest, required

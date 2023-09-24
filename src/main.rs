@@ -1,6 +1,9 @@
 mod cfg;
+mod config;
 mod creator;
 mod util;
+mod builder;
+mod boot;
 
 use crate::creator::{ImageCreator, KatsuCreator};
 use cfg::Config;

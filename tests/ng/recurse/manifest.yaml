@@ -1,0 +1,9 @@
+import:
+  - recurse1.yaml
+
+distro: RecursiveOS
+releasever: 1
+
+dnf:
+  packages:
+    - foo
