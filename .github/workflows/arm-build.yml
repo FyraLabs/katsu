@@ -2,6 +2,7 @@ name: ARM cross-build test
 
 on:
   push:
+    branches: [ main ]
 
 jobs:
   unit-test:

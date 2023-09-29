@@ -93,7 +93,7 @@ impl Into<&str> for Arch {
 
 
 /// Prepare chroot by mounting /dev, /proc, /sys
-pub fn prepare_chroot(root: &str) -> Result<()> {
+pub fn prepare_chroot(root: PathBuf) -> Result<()> {
 	debug!("Preparing chroot");
 
 	// cmd_lib::run_cmd! (
@@ -110,34 +110,33 @@ pub fn prepare_chroot(root: &str) -> Result<()> {
 	// )?;
 	// rewrite the above with 
 
-	let pbuf = PathBuf::from(root);
-	std::fs::create_dir_all(root)?;
+	std::fs::create_dir_all(root.clone())?;
 
-	let proc_pbuf = pbuf.join("proc");
+	let proc_pbuf = root.join("proc");
 
 	std::fs::create_dir_all(&proc_pbuf)?;
 
 	nix::mount::mount(
 		Some("/proc"),
-		&PathBuf::from(root).join("proc"),
+		&root.join("proc"),
 		Some("proc"),
 		nix::mount::MsFlags::empty(),
 		None::<&str>,
 	)?;
 
-	let sys_pbuf = pbuf.join("sys");
+	let sys_pbuf = root.join("sys");
 
 	std::fs::create_dir_all(&sys_pbuf)?;
 
 	nix::mount::mount(
 		Some("/sys"),
-		&PathBuf::from(root).join("sys"),
+		&root.join("sys"),
 		Some("sysfs"),
 		nix::mount::MsFlags::empty(),
 		None::<&str>,
 	)?;
 
-	let dev_pbuf = pbuf.join("dev");
+	let dev_pbuf = root.join("dev");
 
 	std::fs::create_dir_all(&dev_pbuf.join("pts"))?;
 
@@ -145,7 +144,7 @@ pub fn prepare_chroot(root: &str) -> Result<()> {
 
 	nix::mount::mount(
 		Some("/dev"),
-		&PathBuf::from(root).join("dev"),
+		&root.join("dev"),
 		None::<&str>,
 		nix::mount::MsFlags::MS_BIND,
 		None::<&str>,
@@ -153,7 +152,7 @@ pub fn prepare_chroot(root: &str) -> Result<()> {
 
 	nix::mount::mount(
 		Some("/dev/pts"),
-		&PathBuf::from(root).join("dev/pts"),
+		&root.join("dev/pts"),
 		None::<&str>,
 		nix::mount::MsFlags::MS_BIND,
 		None::<&str>,
@@ -163,13 +162,13 @@ pub fn prepare_chroot(root: &str) -> Result<()> {
 
 	let resolv_conf = std::fs::read_to_string("/etc/resolv.conf")?;
 
-	std::fs::write(pbuf.join("etc/resolv.conf"), resolv_conf)?;
+	std::fs::write(root.join("etc/resolv.conf"), resolv_conf)?;
 
 	Ok(())
 }
 
 /// Unmount /dev, /proc, /sys
-pub fn unmount_chroot(root: &str) -> Result<()> {
+pub fn unmount_chroot(root: PathBuf) -> Result<()> {
 	debug!("Unmounting chroot");
 	// cmd_lib::run_cmd! (
 	// 	umount $root/dev/pts;
@@ -178,19 +177,19 @@ pub fn unmount_chroot(root: &str) -> Result<()> {
 	// 	umount $root/proc;
 	// 	sh -c "mv $root/etc/resolv.conf.bak $root/etc/resolv.conf || true";
 	// )?;
-
-	let pbuf = PathBuf::from(root);
-
-	nix::mount::umount(&pbuf.join("dev/pts"))?;
-	nix::mount::umount(&pbuf.join("dev"))?;
-	nix::mount::umount(&pbuf.join("sys"))?;
-	nix::mount::umount(&pbuf.join("proc"))?;
+	nix::mount::umount(&root.join("dev/pts"))?;
+	nix::mount::umount(&root.join("dev"))?;
+	nix::mount::umount(&root.join("sys"))?;
+	nix::mount::umount(&root.join("proc"))?;
 	Ok(())
 }
 /// Mount chroot devices, then run function
-pub fn run_with_chroot<T>(root: &str, f: impl FnOnce() -> T) -> Result<T> {
-	prepare_chroot(root)?;
+pub fn run_with_chroot<T>(root: &PathBuf, f: impl FnOnce() -> T) -> Result<T> {
+	prepare_chroot(root.to_path_buf())?;
 	let res = f();
-	unmount_chroot(root)?;
+	unmount_chroot(root.to_path_buf())?;
 	Ok(res)
 }
+
+
+

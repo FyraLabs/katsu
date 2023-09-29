@@ -55,7 +55,7 @@ impl RootBuilder for DnfRootBuilder {
 		}
 
 		// todo: maybe not unwrap?
-		util::run_with_chroot(chroot.to_str().unwrap(), || -> color_eyre::Result<()> {
+		util::run_with_chroot(&chroot, || -> color_eyre::Result<()> {
 			cmd_lib::run_cmd!(
 				dnf install -y --releasever=${releasever} --installroot=${chroot} $[packages] $[options];
 				dnf clean all --installroot=${chroot};
