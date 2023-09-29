@@ -22,22 +22,33 @@ macro_rules! run {
 // todo: write macro that wraps around cmd_lib::run_cmd!, but runs it in a chroot
 
 /// Macro that wraps around cmd_lib::run_cmd!, but runs it in a chroot
+///
+/// First argument is the chroot path, the following arguments are the command and arguments
+///
+/// Example:
+/// ```rs
+/// chroot_run!(PathBuf::from("/path/to/chroot"), "dnf", "install", "-y", "vim");
+/// ```
+/// 
+/// Uses run! but `unshare -R` prepended with first argument
 #[macro_export]
-macro_rules! run_chroot {
-	($root:expr, $n:expr $(, $arr:expr)* $(,)?) => {{
-		run_chroot!($root, $n; [$($arr,)*])
+macro_rules! chroot_run {
+	($chroot:expr, $n:expr $(, $arr:expr)* $(,)?) => {{
+		chroot_run!($chroot, $n; [$($arr,)*])
 	}};
-	($root:expr, $n:expr; $arr:expr) => {{
-		crate::util::run_with_chroot(&$root, || {
-			crate::util::exec($n, &$arr.to_vec(), true)
+	($chroot:expr, $n:expr; $arr:expr) => {{
+		crate::util::run_with_chroot(&PathBuf::from($chroot), || {
+			crate::run!($n; $arr)?;
+			Ok(())
 		})
 	}};
-	(~$root:expr, $n:expr $(, $arr:expr)* $(,)?) => {{
-		run_chroot!(~$root, $n; [$($arr,)*])
+	(~$chroot:expr, $n:expr $(, $arr:expr)* $(,)?) => {{
+		chroot_run!(~$chroot, $n; [$($arr,)*])
 	}};
-	(~$root:expr, $n:expr; $arr:expr) => {{
-		crate::util::run_with_chroot(&$root, || {
-			crate::util::exec($n, &$arr.to_vec(), false)
+	(~$chroot:expr, $n:expr; $arr:expr) => {{
+		crate::util::run_with_chroot(&PathBuf::from($chroot), || {
+			crate::run!(~$n; $arr)?;
+			Ok(())
 		})
 	}};
 }

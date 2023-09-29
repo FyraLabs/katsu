@@ -10,7 +10,7 @@ use tracing_subscriber::field::debug;
 use crate::{
 	cfg::{Config, OutputFormat},
 	run,
-	util::Arch,
+	util::Arch, chroot_run,
 };
 
 const DEFAULT_DNF: &str = "dnf5";
@@ -359,7 +359,7 @@ pub trait ImageCreator {
 		prepare_chroot(rootname)?;
 		info!(?script, "Running postinst script");
 		// TODO: use unshare
-		run!(~"unshare","-R", &rootname, &*format!("/{name}")).map_err(|e| {
+		chroot_run!(~&rootname, &*format!("/{name}")).map_err(|e| {
 			unmount_chroot(rootname).unwrap();
 			e.wrap_err("postinst script failed")
 		})?;
