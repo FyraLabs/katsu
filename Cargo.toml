@@ -37,3 +37,4 @@ block-utils = "0.11.1"
 tera = "1"
 merge-struct = "0.1.0"
 clap = { version = "4.4.6", features = ["derive", "env"] }
+nix = { version = "0.27.1", features = ["mount", "hostname", "dir"] }

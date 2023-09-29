@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use color_eyre::Result;
 use tracing::debug;
 
@@ -93,32 +95,96 @@ impl Into<&str> for Arch {
 /// Prepare chroot by mounting /dev, /proc, /sys
 pub fn prepare_chroot(root: &str) -> Result<()> {
 	debug!("Preparing chroot");
-	
-	cmd_lib::run_cmd! (
-		mkdir -p $root/proc;
-		mount -t proc proc $root/proc;
-		mkdir -p $root/sys;
-		mount -t sysfs sys $root/sys;
-		mkdir -p $root/dev;
-		mount -o bind /dev $root/dev;
-		mkdir -p $root/dev/pts;
-		mount -o bind /dev $root/dev/pts;
-		sh -c "mv $root/etc/resolv.conf $root/etc/resolv.conf.bak || true";
-		cp /etc/resolv.conf $root/etc/resolv.conf;
+
+	// cmd_lib::run_cmd! (
+	// 	mkdir -p $root/proc;
+	// 	mount -t proc proc $root/proc;
+	// 	mkdir -p $root/sys;
+	// 	mount -t sysfs sys $root/sys;
+	// 	mkdir -p $root/dev;
+	// 	mount -o bind /dev $root/dev;
+	// 	mkdir -p $root/dev/pts;
+	// 	mount -o bind /dev $root/dev/pts;
+	// 	sh -c "mv $root/etc/resolv.conf $root/etc/resolv.conf.bak || true";
+	// 	cp /etc/resolv.conf $root/etc/resolv.conf;
+	// )?;
+	// rewrite the above with 
+
+	let pbuf = PathBuf::from(root);
+	std::fs::create_dir_all(root)?;
+
+	let proc_pbuf = pbuf.join("proc");
+
+	std::fs::create_dir_all(&proc_pbuf)?;
+
+	nix::mount::mount(
+		Some("/proc"),
+		&PathBuf::from(root).join("proc"),
+		Some("proc"),
+		nix::mount::MsFlags::empty(),
+		None::<&str>,
 	)?;
+
+	let sys_pbuf = pbuf.join("sys");
+
+	std::fs::create_dir_all(&sys_pbuf)?;
+
+	nix::mount::mount(
+		Some("/sys"),
+		&PathBuf::from(root).join("sys"),
+		Some("sysfs"),
+		nix::mount::MsFlags::empty(),
+		None::<&str>,
+	)?;
+
+	let dev_pbuf = pbuf.join("dev");
+
+	std::fs::create_dir_all(&dev_pbuf.join("pts"))?;
+
+	// bind mount this one instead
+
+	nix::mount::mount(
+		Some("/dev"),
+		&PathBuf::from(root).join("dev"),
+		None::<&str>,
+		nix::mount::MsFlags::MS_BIND,
+		None::<&str>,
+	)?;
+
+	nix::mount::mount(
+		Some("/dev/pts"),
+		&PathBuf::from(root).join("dev/pts"),
+		None::<&str>,
+		nix::mount::MsFlags::MS_BIND,
+		None::<&str>,
+	)?;
+
+	// copy resolv.conf
+
+	let resolv_conf = std::fs::read_to_string("/etc/resolv.conf")?;
+
+	std::fs::write(pbuf.join("etc/resolv.conf"), resolv_conf)?;
+
 	Ok(())
 }
 
 /// Unmount /dev, /proc, /sys
 pub fn unmount_chroot(root: &str) -> Result<()> {
 	debug!("Unmounting chroot");
-	cmd_lib::run_cmd! (
-		umount $root/dev/pts;
-		umount $root/dev;
-		umount $root/sys;
-		umount $root/proc;
-		sh -c "mv $root/etc/resolv.conf.bak $root/etc/resolv.conf || true";
-	)?;
+	// cmd_lib::run_cmd! (
+	// 	umount $root/dev/pts;
+	// 	umount $root/dev;
+	// 	umount $root/sys;
+	// 	umount $root/proc;
+	// 	sh -c "mv $root/etc/resolv.conf.bak $root/etc/resolv.conf || true";
+	// )?;
+
+	let pbuf = PathBuf::from(root);
+
+	nix::mount::umount(&pbuf.join("dev/pts"))?;
+	nix::mount::umount(&pbuf.join("dev"))?;
+	nix::mount::umount(&pbuf.join("sys"))?;
+	nix::mount::umount(&pbuf.join("proc"))?;
 	Ok(())
 }
 /// Mount chroot devices, then run function
