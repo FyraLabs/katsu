@@ -6,6 +6,7 @@ use tracing::debug;
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct Manifest {
+	pub builder: String,
 	#[serde(default)]
 	pub import: Vec<PathBuf>,
 	/// The distro name for the build result

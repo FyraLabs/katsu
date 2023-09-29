@@ -1,4 +1,7 @@
 # Example manifest for a Katsu build
+builder: dnf
+distro: Katsu Ultramarine
+
 scripts:
   pre:
     - inline: |
@@ -7,3 +10,46 @@ scripts:
   post:
     - inline: |
         echo "Hello from post.sh"
+
+dnf:
+  releasever: 38
+  packages:
+    - filesystem
+    - setup
+    - lvm2
+    - btrfs-progs
+    - dmraid
+    - nvme-cli
+    - kernel
+    - fedora-repos
+    - glibc
+    - glibc-common
+    - dnf
+    - dracut
+    - mkpasswd # maybe not needed soon
+    - "@core"
+    - "@standard"
+    - grub2-tools
+    - "@hardware-support"
+    - NetworkManager
+    - rpm
+    - libgomp
+
+  arch_packages:
+    aarch64:
+      - grub2-efi-aa64
+      - grub2-efi-aa64-modules
+      - grub2-efi-aa64-cdboot
+      - shim-aa64
+      - shim-unsigned-aarch64
+      - bcm283x-firmware
+      - bcm283x-overlays
+      - "@arm-tools"
+    x86_64:
+      - grub2-efi-x64
+      - grub2-efi-x64-modules
+      - grub2-efi-x64-cdboot
+      - grub2-pc
+      - grub2-pc-modules
+      - shim-x64
+      - shim-unsigned-x64

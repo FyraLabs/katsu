@@ -1,3 +1,6 @@
+use color_eyre::Result;
+use tracing::debug;
+
 #[macro_export]
 macro_rules! run {
 	($n:expr $(, $arr:expr)* $(,)?) => {{
@@ -84,4 +87,44 @@ impl Into<&str> for Arch {
 			_ => panic!("Unknown architecture"),
 		}
 	}
+}
+
+
+/// Prepare chroot by mounting /dev, /proc, /sys
+pub fn prepare_chroot(root: &str) -> Result<()> {
+	debug!("Preparing chroot");
+	
+	cmd_lib::run_cmd! (
+		mkdir -p $root/proc;
+		mount -t proc proc $root/proc;
+		mkdir -p $root/sys;
+		mount -t sysfs sys $root/sys;
+		mkdir -p $root/dev;
+		mount -o bind /dev $root/dev;
+		mkdir -p $root/dev/pts;
+		mount -o bind /dev $root/dev/pts;
+		sh -c "mv $root/etc/resolv.conf $root/etc/resolv.conf.bak || true";
+		cp /etc/resolv.conf $root/etc/resolv.conf;
+	)?;
+	Ok(())
+}
+
+/// Unmount /dev, /proc, /sys
+pub fn unmount_chroot(root: &str) -> Result<()> {
+	debug!("Unmounting chroot");
+	cmd_lib::run_cmd! (
+		umount $root/dev/pts;
+		umount $root/dev;
+		umount $root/sys;
+		umount $root/proc;
+		sh -c "mv $root/etc/resolv.conf.bak $root/etc/resolv.conf || true";
+	)?;
+	Ok(())
+}
+/// Mount chroot devices, then run function
+pub fn run_with_chroot<T>(root: &str, f: impl FnOnce() -> T) -> Result<T> {
+	prepare_chroot(root)?;
+	let res = f();
+	unmount_chroot(root)?;
+	Ok(res)
 }
