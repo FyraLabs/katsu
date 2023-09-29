@@ -29,7 +29,7 @@ macro_rules! run {
 /// ```rs
 /// chroot_run!(PathBuf::from("/path/to/chroot"), "dnf", "install", "-y", "vim");
 /// ```
-/// 
+///
 /// Uses run! but `unshare -R` prepended with first argument
 #[macro_export]
 macro_rules! chroot_run {
@@ -52,6 +52,38 @@ macro_rules! chroot_run {
 		})
 	}};
 }
+
+/// Wraps around cmd_lib::run_cmd!, but mounts the chroot
+/// Example:
+///
+/// ```rs
+/// chroot_run!(PathBuf::from("/path/to/chroot"), chroot /path/to/chroot echo "hello world" > /hello.txt);
+/// ```
+#[macro_export]
+macro_rules! chroot_run_cmd {
+	($chroot:expr, $($cmd:tt)*) => {{
+		crate::util::run_with_chroot(&PathBuf::from($chroot.clone()), || {
+
+			cmd_lib::run_cmd!($($cmd)*)?;
+			Ok(())
+		})
+	}};
+}
+
+/// Runs in chroot, returns stdout
+#[macro_export]
+macro_rules! chroot_run_fun {
+	($chroot:expr, $($cmd:tt)*) => {{
+		crate::util::run_with_chroot(&PathBuf::from($chroot.clone()), || {
+
+			cmd_lib::run_fun!($($cmd)*)?;
+			Ok(())
+		})
+	}};
+}
+
+
+
 
 #[tracing::instrument]
 pub fn exec(cmd: &str, args: &[&str], pipe: bool) -> color_eyre::Result<Vec<u8>> {
@@ -89,7 +121,7 @@ pub fn exec(cmd: &str, args: &[&str], pipe: bool) -> color_eyre::Result<Vec<u8>>
 pub enum Arch {
 	X86,
 	X86_64,
-	ArmV7l, // armv7l
+	ArmV7l,  // armv7l
 	AArch64, // aarch64
 	#[default]
 	Nyani, // にゃんに？？ｗ
@@ -97,7 +129,7 @@ pub enum Arch {
 
 impl Arch {
 	pub fn get() -> color_eyre::Result<Self> {
-		Ok(Self::from(&*cmd_lib::run_fun!(uname -m)?))
+		Ok(Self::from(&*cmd_lib::run_fun!(uname - m)?))
 	}
 }
 
@@ -125,7 +157,6 @@ impl Into<&str> for Arch {
 	}
 }
 
-
 /// Prepare chroot by mounting /dev, /proc, /sys
 pub fn prepare_chroot(root: PathBuf) -> Result<()> {
 	debug!("Preparing chroot");
@@ -142,7 +173,7 @@ pub fn prepare_chroot(root: PathBuf) -> Result<()> {
 	// 	sh -c "mv $root/etc/resolv.conf $root/etc/resolv.conf.bak || true";
 	// 	cp /etc/resolv.conf $root/etc/resolv.conf;
 	// )?;
-	// rewrite the above with 
+	// rewrite the above with
 
 	std::fs::create_dir_all(root.clone())?;
 
@@ -220,17 +251,11 @@ pub fn unmount_chroot(root: PathBuf) -> Result<()> {
 	Ok(())
 }
 /// Mount chroot devices, then run function
-/// 
+///
 /// NOTE: This function requires that the function inside returns a result, so we can catch errors and unmount early
 pub fn run_with_chroot<T>(root: &PathBuf, f: impl FnOnce() -> Result<T>) -> Result<T> {
 	prepare_chroot(root.clone())?;
 	let res = f();
-
-	if res.is_err() {
-		unmount_chroot(root.clone())?;
-	}
 	unmount_chroot(root.clone())?;
 	res
 }
-
-

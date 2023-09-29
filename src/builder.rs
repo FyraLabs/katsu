@@ -2,7 +2,7 @@ use color_eyre::Result;
 use serde_derive::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, path::PathBuf};
 
-use crate::{cli::OutputFormat, config::Manifest, util};
+use crate::{chroot_run_cmd, cli::OutputFormat, config::Manifest, util};
 const WORKDIR: &str = "katsu-work";
 
 pub enum Bootloader {
@@ -162,8 +162,9 @@ impl KatsuBuilder {
 		let image = workdir.join("image");
 		fs::create_dir_all(image.clone())?;
 
-		self.image_builder.build(chroot.canonicalize()?, image)?;
+		// self.image_builder.build(chroot.canonicalize()?, image)?;
 
+		chroot_run_cmd!(chroot, unshare -R ${chroot} bash -c "echo woo")?;
 		Ok(())
 	}
 }
