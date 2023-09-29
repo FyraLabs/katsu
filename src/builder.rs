@@ -61,7 +61,7 @@ impl RootBuilder for DnfRootBuilder {
 				dnf clean all --installroot=${chroot};
 			)?;
 			Ok(())
-		})??;
+		})?;
 
 		Ok(())
 	}

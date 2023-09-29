@@ -19,6 +19,29 @@ macro_rules! run {
 	}};
 }
 
+// todo: write macro that wraps around cmd_lib::run_cmd!, but runs it in a chroot
+
+/// Macro that wraps around cmd_lib::run_cmd!, but runs it in a chroot
+#[macro_export]
+macro_rules! run_chroot {
+	($root:expr, $n:expr $(, $arr:expr)* $(,)?) => {{
+		run_chroot!($root, $n; [$($arr,)*])
+	}};
+	($root:expr, $n:expr; $arr:expr) => {{
+		crate::util::run_with_chroot(&$root, || {
+			crate::util::exec($n, &$arr.to_vec(), true)
+		})
+	}};
+	(~$root:expr, $n:expr $(, $arr:expr)* $(,)?) => {{
+		run_chroot!(~$root, $n; [$($arr,)*])
+	}};
+	(~$root:expr, $n:expr; $arr:expr) => {{
+		crate::util::run_with_chroot(&$root, || {
+			crate::util::exec($n, &$arr.to_vec(), false)
+		})
+	}};
+}
+
 #[tracing::instrument]
 pub fn exec(cmd: &str, args: &[&str], pipe: bool) -> color_eyre::Result<Vec<u8>> {
 	tracing::debug!("Executing command");
@@ -162,6 +185,8 @@ pub fn prepare_chroot(root: PathBuf) -> Result<()> {
 
 	let resolv_conf = std::fs::read_to_string("/etc/resolv.conf")?;
 
+	std::fs::create_dir_all(&root.join("etc"))?;
+
 	std::fs::write(root.join("etc/resolv.conf"), resolv_conf)?;
 
 	Ok(())
@@ -177,19 +202,24 @@ pub fn unmount_chroot(root: PathBuf) -> Result<()> {
 	// 	umount $root/proc;
 	// 	sh -c "mv $root/etc/resolv.conf.bak $root/etc/resolv.conf || true";
 	// )?;
-	nix::mount::umount(&root.join("dev/pts"))?;
+	nix::mount::umount(&root.join("dev").join("pts"))?;
 	nix::mount::umount(&root.join("dev"))?;
 	nix::mount::umount(&root.join("sys"))?;
 	nix::mount::umount(&root.join("proc"))?;
 	Ok(())
 }
 /// Mount chroot devices, then run function
-pub fn run_with_chroot<T>(root: &PathBuf, f: impl FnOnce() -> T) -> Result<T> {
-	prepare_chroot(root.to_path_buf())?;
+/// 
+/// NOTE: This function requires that the function inside returns a result, so we can catch errors and unmount early
+pub fn run_with_chroot<T>(root: &PathBuf, f: impl FnOnce() -> Result<T>) -> Result<T> {
+	prepare_chroot(root.clone())?;
 	let res = f();
-	unmount_chroot(root.to_path_buf())?;
-	Ok(res)
-}
 
+	if res.is_err() {
+		unmount_chroot(root.clone())?;
+	}
+	unmount_chroot(root.clone())?;
+	res
+}
 
 
