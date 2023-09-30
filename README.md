@@ -24,3 +24,4 @@ Katsu uses YAML configuration files to describe the image, with modular manifest
 - `limine` or `grub2`
 - `rpm`
 - `dnf` or `dnf5`
+- `systemd-devel`
