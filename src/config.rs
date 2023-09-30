@@ -2,7 +2,6 @@ use color_eyre::Result;
 use merge_struct::merge;
 use serde_derive::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tracing::debug;
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct Manifest {

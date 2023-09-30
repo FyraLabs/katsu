@@ -6,8 +6,6 @@ mod builder;
 mod boot;
 mod cli;
 
-use crate::creator::{ImageCreator, KatsuCreator};
-use cfg::Config;
 use clap::Parser;
 use color_eyre::Result;
 use tracing::trace;

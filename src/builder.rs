@@ -6,9 +6,30 @@ use crate::{chroot_run_cmd, cli::OutputFormat, config::Manifest, util};
 const WORKDIR: &str = "katsu-work";
 
 pub enum Bootloader {
-	Limine,
 	Grub,
+	Limine,
 	SystemdBoot,
+}
+
+impl Default for Bootloader {
+	fn default() -> Self {
+		Self::Grub
+	}
+}
+
+impl From<&str> for Bootloader {
+	fn from(value: &str) -> Self {
+		match value.to_lowercase().as_str() {
+			"limine" => Self::Limine,
+			"grub" => Self::Grub,
+			"grub2" => Self::Grub,
+			"systemd-boot" => Self::SystemdBoot,
+			_ => {
+				tracing::warn!("Unknown bootloader: {}, setting GRUB mode", value);
+				Self::Grub
+			},
+		}
+	}
 }
 
 pub trait RootBuilder {
