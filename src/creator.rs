@@ -5,7 +5,6 @@ use std::{
 	path::{Path, PathBuf},
 };
 use tracing::{debug, error, info, instrument, trace, warn};
-use tracing_subscriber::field::debug;
 
 use crate::{
 	cfg::{Config, OutputFormat},
@@ -16,7 +15,6 @@ use crate::{
 const DEFAULT_DNF: &str = "dnf5";
 const DEFAULT_BOOTLOADER: &str = "limine";
 // const UBOOT_DATA: &str = "/usr/share/uboot";
-
 
 pub trait ImageCreator {
 	/// src, dest, required
@@ -41,10 +39,8 @@ pub trait ImageCreator {
 		let cfg = self.get_cfg();
 		let root = cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
 		let root = root.to_str().unwrap();
-		let out = format!("{}/etc/fstab", root);
-		cmd_lib::run_cmd!(
-			mkdir -p $root/etc;
-		)?;
+		let out = format!("{root}/etc/fstab");
+		cmd_lib::run_cmd!(mkdir -p $root/etc)?;
 		// list mounts in $root
 		let mounts = cmd_lib::run_fun!(findmnt -n -o UUID,TARGET,FSTYPE,OPTIONS --real --raw --noheadings --notruncate --output-all --target $root)?;
 
@@ -52,18 +48,8 @@ pub trait ImageCreator {
 		let mut mounts = mounts
 			.lines()
 			.map(|x| {
-				let mut x = x.split_whitespace();
-				let uuid = x.next().unwrap();
-				let target = x.next().unwrap();
-				let fstype = x.next().unwrap();
-				let options = x.next().unwrap();
-				format!(
-					"UUID={uuid}\t{target}\t{fstype}\t{options}\t0\t0",
-					uuid = uuid,
-					target = target,
-					fstype = fstype,
-					options = options
-				)
+				let [uuid, target, fstype, options] = x.split_whitespace().collect::<Vec<_>>()[..] else { panic!("Bad output from findmnt: {x}"); };
+				format!("UUID={uuid}\t{target}\t{fstype}\t{options}\t0\t0")
 			})
 			.collect::<Vec<String>>()
 			.join("\n");
@@ -274,16 +260,14 @@ pub trait ImageCreator {
 		let kver = &Self::get_krnl_ver(root.to_str().unwrap())?;
 		let kver = kver.trim_start_matches("kernel-");
 		let volid = &cfg.volid;
-		let cmdline = cfg.sys.kernel_params.as_ref().map(String::as_str).unwrap_or_default();
+		let cmd = cfg.sys.kernel_params.as_ref().map(String::as_str).unwrap_or_default();
 		let mut f = std::fs::File::create(path)
 			.map_err(|e| eyre!(e).wrap_err("Cannot create limine.cfg"))?;
 
 		f.write_fmt(format_args!("TIMEOUT=5\n\n:{distro}\n\tPROTOCOL=linux\n\t"))?;
 		f.write_fmt(format_args!("KERNEL_PATH=boot:///boot/vmlinuz-{kver}\n\t"))?;
 		f.write_fmt(format_args!("MODULE_PATH=boot:///boot/initramfs-{kver}.img\n\t"))?;
-		f.write_fmt(format_args!(
-			"CMDLINE=root=live:LABEL={volid} rd.live.image selinux=0 {cmdline}"
-		))?; // maybe enforcing=0
+		f.write_fmt(format_args!("CMDLINE=root=live:LABEL={volid} rd.live.image selinux=0 {cmd}"))?;
 		Ok(())
 	}
 
@@ -660,7 +644,6 @@ impl From<Config> for KatsuCreator {
 	}
 }
 impl ImageCreator for KatsuCreator {
-	// const ARCH: crate::util::Arch = crate::util::Arch::X86;
 	const EFI_FILES: &'static [(&'static str, &'static str, bool)] = &[
 		("/boot/efi/EFI/*/shim%arch%.efi", "/EFI/BOOT/BOOT%arch%.EFI", true),
 		("/boot/efi/EFI/*/gcd%arch%.efi", "/EFI/BOOT/grub%arch%.efi", true),
@@ -674,57 +657,6 @@ impl ImageCreator for KatsuCreator {
 		&self.cfg
 	}
 }
-
-// @madonuko: why? Why did you hardcode everything per architecture? I... My sanity hurts. -@korewaChino
-// pub struct LiveImageCreatorX86 {
-// 	cfg: Config,
-// }
-
-// impl From<Config> for LiveImageCreatorX86 {
-// 	fn from(cfg: Config) -> Self {
-// 		Self { cfg }
-// 	}
-// }
-
-// impl ImageCreator for LiveImageCreatorX86 {
-// 	// const ARCH: crate::util::Arch = crate::util::Arch::X86;
-// 	const EFI_FILES: &'static [(&'static str, &'static str, bool)] = &[
-// 		("/boot/efi/EFI/*/shim%arch%.efi", "/EFI/BOOT/BOOT%arch%.EFI", true),
-// 		("/boot/efi/EFI/*/gcd%arch%.efi", "/EFI/BOOT/grub%arch%.efi", true),
-// 		("/boot/efi/EFI/*/shimia32.efi", "/EFI/BOOT/BOOTIA32.EFI", false),
-// 		("/boot/efi/EFI/*/gcdia32.efi", "/EFI/BOOT/grubia32.efi", false),
-// 		("/usr/share/grub/unicode.pf2", "/EFI/BOOT/fonts/", true),
-// 	];
-
-// 	#[inline]
-// 	fn get_cfg(&self) -> &Config {
-// 		&self.cfg
-// 	}
-// }
-// pub struct LiveImageCreatorX86_64 {
-// 	cfg: Config,
-// }
-
-// impl From<Config> for LiveImageCreatorX86_64 {
-// 	fn from(cfg: Config) -> Self {
-// 		Self { cfg }
-// 	}
-// }
-
-// impl ImageCreator for LiveImageCreatorX86_64 {
-// 	// const ARCH: crate::util::Arch = crate::util::Arch::X86_64;
-// 	const EFI_FILES: &'static [(&'static str, &'static str, bool)] = &[
-// 		("/boot/efi/EFI/*/shim%arch%.efi", "/EFI/BOOT/BOOT%arch%.EFI", true),
-// 		("/boot/efi/EFI/*/gcd%arch%.efi", "/EFI/BOOT/grub%arch%.efi", true),
-// 		("/boot/efi/EFI/*/shimia32.efi", "/EFI/BOOT/BOOTIA32.EFI", false),
-// 		("/boot/efi/EFI/*/gcdia32.efi", "/EFI/BOOT/grubia32.efi", false),
-// 		("/usr/share/grub/unicode.pf2", "/EFI/BOOT/fonts/", true),
-// 	];
-
-// 	fn get_cfg(&self) -> &Config {
-// 		&self.cfg
-// 	}
-// }
 
 /// Prepare chroot by mounting /dev, /proc, /sys
 fn prepare_chroot(root: &str) -> Result<()> {

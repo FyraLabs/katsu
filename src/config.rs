@@ -36,34 +36,26 @@ impl Manifest {
 		let mut path_can = path;
 		path_can.pop();
 
-		for import in manifest.import.clone() {
-			println!("Import: {:#?}", import);
-			// swap the import with the canonicalized path
-			let import_ord = manifest.import.iter().position(|x| *x == import).unwrap();
-			// replace
-			let cn = path_can.join(import).canonicalize()?;
-			println!("Canonicalized import: {:#?}", cn);
-			manifest.import[import_ord] = cn.clone();
+		for import in &mut manifest.import {
+			debug!("Import: {import:#?}");
+			// swap canonicalized path
+			let cn = path_can.join(&import).canonicalize()?;
+			debug!("Canonicalized import: {cn:#?}");
+			*import = cn;
 		}
 
 		// canonicalize all file paths in scripts, then modify their paths put in the manifest
 
-		for mut script in manifest.scripts.pre.clone() {
-			if script.file.is_some() {
-				script.file = Some(script.file.as_ref().unwrap().canonicalize()?);
+		for script in &mut manifest.scripts.pre {
+			if let Some(f) = script.file.as_mut() {
+				*f = f.canonicalize()?;
 			}
-			// replace old path
-			let script_ord = manifest.scripts.pre.iter().position(|x| *x == script).unwrap();
-            manifest.scripts.pre[script_ord] = script.clone();
 		}
 
-		for mut script in manifest.scripts.post.clone() {
-			if script.file.is_some() {
-				script.file = Some(script.file.as_ref().unwrap().canonicalize()?);
+		for script in &mut manifest.scripts.post {
+			if let Some(f) = script.file.as_mut() {
+				*f = f.canonicalize()?;
 			}
-			// replace old path
-            let script_ord = manifest.scripts.post.iter().position(|x| *x == script).unwrap();
-            manifest.scripts.post[script_ord] = script.clone();
 		}
 
 		Ok(manifest)
@@ -97,8 +89,6 @@ impl Manifest {
 	}
 }
 
-
-
 #[derive(Deserialize, Debug, Clone, Serialize, Default)]
 pub struct ScriptsManifest {
 	#[serde(default)]
@@ -117,14 +107,13 @@ pub struct Script {
 impl Script {
 	pub fn load(&self) -> Option<String> {
 		if self.inline.is_some() {
-			return self.inline.clone();
-		} else if self.file.is_some() {
-			return std::fs::read_to_string(
-				self.file.as_ref().unwrap().canonicalize().unwrap_or_default(),
-			)
-			.ok();
+			self.inline.clone()
+		} else if let Some(f) = &self.file {
+			std::fs::read_to_string(f.canonicalize().unwrap_or_default()).ok()
 		} else {
-			return None;
+			self.file
+				.as_ref()
+				.and_then(|f| std::fs::read_to_string(f.canonicalize().unwrap_or_default()).ok())
 		}
 	}
 }
