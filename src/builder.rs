@@ -112,7 +112,8 @@ pub fn run_scripts(scripts: Vec<Script>, chroot: &PathBuf, in_chroot: bool) -> R
 
 			info!("Running script: {script}", script = script.name.as_ref().unwrap_or(&"<Untitled>".to_string()));
 			info!("Script ID: {id}", id = script.id.as_ref().unwrap_or(&"<NULL>".to_string()));
-
+			
+			let script_name = format!("script-{}", script.id.as_ref().unwrap_or(&"untitled".to_string()));
 			// check if data has shebang
 			if !data.starts_with("#!") {
 				// if not, add one
@@ -121,22 +122,23 @@ pub fn run_scripts(scripts: Vec<Script>, chroot: &PathBuf, in_chroot: bool) -> R
 			}
 			// write data to chroot
 			let fpath = if in_chroot {
-				chroot.join("tmp/script")
+				chroot.join("tmp").join(&script_name)
 			} else {
-				PathBuf::from("katsu-work/tmp-script")
+				PathBuf::from(format!("katsu-work/{}", &script_name))
 			};
 			let mut file = fs::File::create(fpath)?;
 			file.write_all(data.as_bytes())?;
 			file.flush()?;
 			drop(file);
 
+
 			// now add execute bit
 			if in_chroot {
 				util::run_with_chroot(&chroot, || -> color_eyre::Result<()> {
 					cmd_lib::run_cmd!(
-						chmod +x ${chroot}/tmp/script;
-						chroot ${chroot} /tmp/script;
-						rm -f ${chroot}/tmp/script;
+						chmod +x ${chroot}/tmp/${script_name};
+						chroot ${chroot} /tmp/${script_name};
+						rm -f ${chroot}/tmp/${script_name};
 					)?;
 					Ok(())
 				})?;
@@ -144,8 +146,9 @@ pub fn run_scripts(scripts: Vec<Script>, chroot: &PathBuf, in_chroot: bool) -> R
 				// export envar
 				std::env::set_var("CHROOT", chroot);
 				cmd_lib::run_cmd!(
-					chmod +x katsu-work/tmp-script;
-					/usr/bin/env CHROOT=${chroot} katsu-work/tmp-script;
+					chmod +x katsu-work/${script_name};
+					/usr/bin/env CHROOT=${chroot} katsu-work/${script_name};
+					rm -f katsu-work/${script_name};
 				)?;
 			}
 
