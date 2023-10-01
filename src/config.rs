@@ -1,6 +1,7 @@
 use color_eyre::Result;
 use merge_struct::merge;
 use serde_derive::{Deserialize, Serialize};
+use tracing::debug;
 use std::path::PathBuf;
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
@@ -100,6 +101,8 @@ pub struct ScriptsManifest {
 #[derive(Deserialize, Debug, Clone, Serialize, PartialEq, Eq)]
 // load script from file, or inline if there's one specified
 pub struct Script {
+	pub id: Option<String>,
+	pub name: Option<String>,
 	pub file: Option<PathBuf>,
 	pub inline: Option<String>,
 }
