@@ -3,8 +3,8 @@ on:
   push:
 
 jobs:
-  unit-test:
-    runs-on: ARM64
+  unit-test-arm:
+    runs-on: ubuntu-latest
     container:
       image: ghcr.io/terrapkg/builder:f38
       # Pass /dev from host to container
@@ -19,9 +19,9 @@ jobs:
         uses: actions/cache@v2
         with:
           path: /var/cache/dnf
-          key: dnf-${{ runner.os }}
+          key: dnf-${{ runner.os }}-arm
           restore-keys: |
-            dnf-${{ runner.os }}-
+            dnf-${{ runner.os }}-arm
             dnf-
 
       - name: Install dependencies
@@ -68,7 +68,7 @@ jobs:
           pushd tests/ng
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
-          katsu -o disk-image katsu.yaml 2>&1
+          katsu -o disk-image katsu-arm.yaml 2>&1
           xz -z9 katsu-work/image/katsu.img -c > katsu-work/image/katsu.raw.xz
           popd
 
