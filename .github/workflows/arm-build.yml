@@ -77,29 +77,3 @@ jobs:
         with:
           name: katsudon-arm
           path: tests/ng/katsu-work/image/*.raw.xz
-
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Build and install katsu
-        run: |
-          cargo install --path . --debug
-
-      - name: Run test
-        run: |
-          export PATH=$HOME/.cargo/bin:$PATH
-          pushd tests/ng
-          echo "COLORBT_SHOW_HIDDEN=1" >> .env
-          echo "KATSU_LOG=trace" >> .env
-          katsu -o disk-image katsu-arm.yaml 2>&1
-          xz -z9 katsu-work/image/katsu.img -c > katsu-work/image/katsu.raw.xz
-          popd
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v2
-        with:
-          name: katsudon-arm
-          path: tests/ng/katsu-work/image/*.raw.xz
