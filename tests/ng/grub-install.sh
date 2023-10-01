@@ -15,3 +15,7 @@ set prefix=(\$dev)/grub2
 export \$prefix
 configfile \$prefix/grub.cfg
 EOF
+
+
+# GRUB entries: set ro to rw in /boot/loader/entries/*.conf
+sed -i 's/ ro/ rw/g' /boot/loader/entries/*.conf
