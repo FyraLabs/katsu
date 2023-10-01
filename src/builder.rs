@@ -100,7 +100,7 @@ impl RootBuilder for DnfRootBuilder {
 
 		info!("Running post-install scripts");
 
-		run_scripts(manifest.scripts.pre.clone(), &chroot, true)?;
+		run_scripts(manifest.scripts.post.clone(), &chroot, true)?;
 
 		Ok(())
 	}
@@ -141,9 +141,11 @@ pub fn run_scripts(scripts: Vec<Script>, chroot: &PathBuf, in_chroot: bool) -> R
 					Ok(())
 				})?;
 			} else {
+				// export envar
+				std::env::set_var("CHROOT", chroot);
 				cmd_lib::run_cmd!(
 					chmod +x katsu-work/tmp-script;
-					katsu-work/tmp-script;
+					/usr/bin/env CHROOT=${chroot} katsu-work/tmp-script;
 				)?;
 			}
 

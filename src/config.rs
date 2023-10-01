@@ -1,7 +1,7 @@
 use color_eyre::Result;
 use merge_struct::merge;
 use serde_derive::{Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, trace};
 use std::path::PathBuf;
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
@@ -32,10 +32,12 @@ impl Manifest {
 	pub fn load(path: PathBuf) -> Result<Self> {
 		let mut manifest: Self = serde_yaml::from_str(&std::fs::read_to_string(path.clone())?)?;
 
-		// get dir of path
+		// get dir of path relative to cwd
 
-		let mut path_can = path;
+		let mut path_can = path.canonicalize()?;
+
 		path_can.pop();
+		trace!(path = ?path_can, "Canonicalizing path");
 
 		for import in &mut manifest.import {
 			debug!("Import: {import:#?}");
@@ -49,13 +51,18 @@ impl Manifest {
 
 		for script in &mut manifest.scripts.pre {
 			if let Some(f) = script.file.as_mut() {
-				*f = f.canonicalize()?;
+				let cn = path_can.join(&f);
+				trace!(f = ?cn, "Canonicalizing script path");
+				*f = path_can.join(&f);
 			}
 		}
 
 		for script in &mut manifest.scripts.post {
 			if let Some(f) = script.file.as_mut() {
-				*f = f.canonicalize()?;
+
+				let cn = path_can.join(&f);
+				trace!(f = ?cn, "Canonicalizing script path");
+				*f = path_can.join(&f);
 			}
 		}
 

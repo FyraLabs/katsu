@@ -4,12 +4,31 @@ distro: Katsu Ultramarine
 
 scripts:
   pre:
-    - inline: |
+    - id: pre-test
+      name: Preinstall test
+      inline: |
         echo "Hello from pre.sh"
+    - id: pre-test2
+      name: Preinstall test 2
+      file: pre-test2.sh
 
   post:
-    - inline: |
+    - id: post-test
+      name: Postinstall test
+      inline: |
         echo "Hello from post.sh"
+
+    - id: image-cleanup
+      name: Clean up root filesystem
+      file: image-cleanup.sh
+
+    - id: grub-install
+      name: Install GRUB
+      file: grub-install.sh
+
+    - id: selinux-label
+      name: Relabel SELinux for new filesystem
+      file: selinux-label.sh
 
 dnf:
   releasever: 38
