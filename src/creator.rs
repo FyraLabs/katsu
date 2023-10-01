@@ -1,9 +1,5 @@
 use color_eyre::{eyre::eyre, Help, Result};
-use std::{
-	fs,
-	io::Write,
-	path::{Path, PathBuf},
-};
+use std::{io::Write, path::Path};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
@@ -430,139 +426,120 @@ pub trait ImageCreator {
 	fn prep_disk(&self) -> Result<()> {
 		let cfg = self.get_cfg();
 
-		if let Some(layout) = &cfg.disk {
-			// Now let's create a disk file called {out}.raw
-			let out_file = format!("{}.raw", cfg.out);
+		let layout = cfg.disk.as_ref().ok_or_else(|| eyre!("No disk layout specified"))?;
+		// Now let's create a disk file called {out}.raw
+		let out_file = format!("{}.raw", cfg.out);
 
-			// Create the disk file
+		// Create the disk file
 
-			let disk_size = &layout.disk_size;
-			info!(out_file, "Creating disk file");
+		let disk_size = &layout.disk_size;
+		info!(out_file, "Creating disk file");
 
-			cmd_lib::run_cmd!(
-				truncate -s $disk_size $out_file;
-			)?;
+		cmd_lib::run_cmd!(
+			truncate -s $disk_size $out_file;
+		)?;
 
-			// Mount disk image to loop device, and return the loop device name
+		// Mount disk image to loop device, and return the loop device name
 
-			info!("Mounting disk image to loop device");
+		info!("Mounting disk image to loop device");
+		let loop_dev = cmd_lib::run_fun!(losetup -f;)?;
+		debug!("Found loop device: {loop_dev:?}");
 
-			// The reason we run this command instead of just losetup -f is
-			// because rustfmt messes up the formatting of the command
-			let loop_dev = cmd_lib::run_fun!(bash -c "losetup -f")?;
+		cmd_lib::run_cmd!(losetup $loop_dev $out_file --show;)?;
 
-			debug!("Found loop device: {loop_dev:?}");
+		info!("Partitioning disk");
+		// Create partition table, GPT
+		cmd_lib::run_cmd!(parted -s $loop_dev mklabel gpt;)?;
 
-			cmd_lib::run_cmd!(
-				losetup $loop_dev $out_file --show;
-			)?;
+		// number to track partition number
+		let mut part_num = 1;
+		let mut efi_num: Option<i32> = None;
+		let boot_num: i32;
+		let root_num: i32;
 
-			// Partition disk
-
-			info!("Partitioning disk");
-
-			// Create partition table, GPT
-
-			cmd_lib::run_cmd!(
-				parted -s $loop_dev mklabel gpt;
-			)?;
-
-			// number to track partition number
-
-			let mut part_num = 1;
-			let mut efi_num: Option<i32> = None;
-			let boot_num: i32;
-			let root_num: i32;
-
-			if layout.bootloader {
-				// create EFI partition with ESP flag for the first 250MiB
-				// label it as EFI
-
-				cmd_lib::run_cmd!(
-					parted -s $loop_dev mkpart primary fat32 1MiB 250MiB;
-					parted -s $loop_dev set $part_num esp on;
-					parted -s $loop_dev name $part_num EFI;
-				)?;
-
-				// debug lsblk
-
-				cmd_lib::run_cmd!(
-					lsblk;
-					partprobe $loop_dev;
-					ls -l /dev;
-				)?;
-
-				// format EFI partition
-
-				cmd_lib::run_cmd!(
-					mkfs.fat -F32 ${loop_dev}p$part_num -n EFI 2>&1;
-				)?;
-				efi_num = Some(part_num);
-
-				// increment partition number
-				part_num += 1;
-			}
-
-			// create boot partition for installing kernels with the next 1GiB
-			// label as BOOT
-			// ext4
-			cmd_lib::run_cmd!(
-				parted -s $loop_dev mkpart primary ext4 250MiB 1.25GiB;
-				parted -s $loop_dev name $part_num BOOT;
-			)?;
+		if layout.bootloader {
+			// create EFI partition with ESP flag for the first 250MiB
+			// label it as EFI
 
 			cmd_lib::run_cmd!(
-				mkfs.ext4 -F ${loop_dev}p$part_num -L BOOT;
+				parted -s $loop_dev mkpart primary fat32 1MiB 250MiB;
+				parted -s $loop_dev set $part_num esp on;
+				parted -s $loop_dev name $part_num EFI;
 			)?;
 
-			boot_num = part_num;
+			// debug lsblk
 
+			cmd_lib::run_cmd!(
+				lsblk;
+				partprobe $loop_dev;
+				ls -l /dev;
+			)?;
+
+			// format EFI partition
+
+			cmd_lib::run_cmd!(mkfs.fat -F32 ${loop_dev}p$part_num -n EFI;)?;
+			efi_num = Some(part_num);
+
+			// increment partition number
 			part_num += 1;
-
-			// Create blank partition with the rest of the free space
-
-			let volid = &cfg.volid;
-			cmd_lib::run_cmd!(
-				parted -s $loop_dev mkpart primary ext4 1.25GiB 100%;
-				parted -s $loop_dev name $part_num $volid;
-			)?;
-
-			root_num = part_num;
-
-			// now format the partition
-
-			let root_format = &layout.root_format;
-
-			cmd_lib::run_cmd!(
-				mkfs.${root_format} ${loop_dev}p$part_num -L $volid;
-			)?;
-
-			// Now, mount them all
-
-			info!("Mounting partitions");
-
-			let instroot = &cfg.instroot.to_str().unwrap_or_default();
-
-			cmd_lib::run_cmd!(
-				mkdir -p $instroot;
-				mount ${loop_dev}p$root_num $instroot;
-				mkdir -p $instroot/boot;
-				mount ${loop_dev}p$boot_num $instroot/boot;
-			)?;
-
-			if layout.bootloader {
-				let efi_num = efi_num.unwrap();
-				cmd_lib::run_cmd!(
-					mkdir -p $instroot/boot/efi;
-					mount ${loop_dev}p$efi_num $instroot/boot/efi;
-				)?;
-			}
-
-			Ok(())
-		} else {
-			// error out
-			return Err(eyre!("No disk layout specified"));
 		}
+
+		// create boot partition for installing kernels with the next 1GiB
+		// label as BOOT
+		// ext4
+		cmd_lib::run_cmd!(
+			parted -s $loop_dev mkpart primary ext4 250MiB 1.25GiB;
+			parted -s $loop_dev name $part_num BOOT;
+		)?;
+
+		cmd_lib::run_cmd!(
+			mkfs.ext4 -F ${loop_dev}p$part_num -L BOOT;
+		)?;
+
+		boot_num = part_num;
+
+		part_num += 1;
+
+		// Create blank partition with the rest of the free space
+
+		let volid = &cfg.volid;
+		cmd_lib::run_cmd!(
+			parted -s $loop_dev mkpart primary ext4 1.25GiB 100%;
+			parted -s $loop_dev name $part_num $volid;
+		)?;
+
+		root_num = part_num;
+
+		// now format the partition
+
+		let root_format = &layout.root_format;
+
+		cmd_lib::run_cmd!(
+			mkfs.${root_format} ${loop_dev}p$part_num -L $volid;
+		)?;
+
+		// Now, mount them all
+
+		info!("Mounting partitions");
+
+		let instroot = &cfg.instroot.to_str().unwrap_or_default();
+
+		cmd_lib::run_cmd!(
+			mkdir -p $instroot;
+			mount ${loop_dev}p$root_num $instroot;
+			mkdir -p $instroot/boot;
+			mount ${loop_dev}p$boot_num $instroot/boot;
+		)?;
+
+		if layout.bootloader {
+			let efi_num = efi_num.unwrap();
+			cmd_lib::run_cmd!(
+				mkdir -p $instroot/boot/efi;
+				mount ${loop_dev}p$efi_num $instroot/boot/efi;
+			)?;
+		}
+
+		Ok(())
 	}
 
 	#[instrument(skip(self))]
@@ -610,9 +587,9 @@ pub trait ImageCreator {
 		// }
 
 		let mut extra_args = vec![];
-		if cfg.arch.is_some() {
+		if let Some(arch) = &cfg.arch {
 			extra_args.push("--forcearch");
-			extra_args.push(cfg.arch.as_ref().unwrap());
+			extra_args.push(arch);
 		}
 		prepare_chroot(root).unwrap_or_else(|e| {
 			error!(?e, "Failed to prepare chroot");
@@ -624,10 +601,7 @@ pub trait ImageCreator {
 		)
 		.unwrap_or_else(|e| {
 			error!(?e, "Failed to install packages");
-			unmount_chroot(root).unwrap_or_else(|e| {
-				error!(?e, "Failed to unmount chroot");
-				std::process::exit(1);
-			});
+			unmount_chroot(root).unwrap_or_else(|e| error!(?e, "Failed to unmount chroot"));
 			std::process::exit(1);
 		});
 		unmount_chroot(root)?;

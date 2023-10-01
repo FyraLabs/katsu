@@ -58,8 +58,8 @@ impl RootBuilder for DnfRootBuilder {
 		let exclude = self.exclude.clone();
 		let releasever = &self.releasever;
 
-		if self.arch.is_some() {
-			options.push(format!("--forcearch={}", self.arch.as_ref().unwrap()));
+		if let Some(a) = &self.arch {
+			options.push(format!("--forcearch={a}"));
 		}
 
 		// Get host architecture using uname
@@ -67,13 +67,10 @@ impl RootBuilder for DnfRootBuilder {
 
 		let arch_string = self.arch.as_ref().unwrap_or(&host_arch);
 
-		if self.arch_packages.contains_key(arch_string) {
-			packages.append(&mut self.arch_packages.get(arch_string).unwrap().clone());
+		if let Some(pkg) = self.arch_packages.get(arch_string) {
+			packages.append(&mut pkg.clone());
 		}
-
-		for package in exclude {
-			options.push(format!("--exclude={}", package));
-		}
+		options.append(&mut exclude.iter().map(|p| format!("--exclude={p}")).collect());
 
 		// todo: maybe not unwrap?
 		util::run_with_chroot(&chroot, || -> color_eyre::Result<()> {

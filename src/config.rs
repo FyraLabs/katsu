@@ -124,7 +124,7 @@ fn test_recurse() {
 
 	let manifest = Manifest::load_all(PathBuf::from("tests/ng/recurse/manifest.yaml")).unwrap();
 
-	println!("{:#?}", manifest);
+	println!("{manifest:#?}");
 
 	// let ass: Manifest = Manifest { import: vec!["recurse1.yaml", "recurse2.yaml"], distro: Some("RecursiveOS"), out_file: None, dnf: (), scripts: () }
 }
