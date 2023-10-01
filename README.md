@@ -20,6 +20,7 @@ Katsu uses YAML configuration files to describe the image, with modular manifest
 ## Dependencies
 
 - `xorriso`
+- `clang-devel`
 - `dracut`
 - `limine` or `grub2`
 - `rpm`

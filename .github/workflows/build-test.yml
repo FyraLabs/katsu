@@ -2,7 +2,6 @@ name: Build test
 
 on:
   push:
-    branches: [ refactor ]
 
 jobs:
   unit-test:
