@@ -28,7 +28,7 @@ scripts:
 
     - id: selinux-label
       name: Relabel SELinux for new filesystem
-      file: selinux-label.sh
+      file: selinux.sh
 
 dnf:
   releasever: 38

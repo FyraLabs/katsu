@@ -51,18 +51,17 @@ impl Manifest {
 
 		for script in &mut manifest.scripts.pre {
 			if let Some(f) = script.file.as_mut() {
-				let cn = path_can.join(&f);
-				trace!(f = ?cn, "Canonicalizing script path");
-				*f = path_can.join(&f);
+				trace!(f = ?f, "Loading Script file");
+				let cn = path_can.join(&f).canonicalize()?;
+				*f = cn;
 			}
 		}
 
 		for script in &mut manifest.scripts.post {
 			if let Some(f) = script.file.as_mut() {
-
-				let cn = path_can.join(&f);
-				trace!(f = ?cn, "Canonicalizing script path");
-				*f = path_can.join(&f);
+				trace!(f = ?f, "Loading script file");
+				let cn = path_can.join(&f).canonicalize()?;
+				*f = cn;
 			}
 		}
 
