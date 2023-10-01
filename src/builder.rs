@@ -74,6 +74,7 @@ impl RootBuilder for DnfRootBuilder {
 		let releasever = &self.releasever;
 
 		if let Some(a) = &self.arch {
+			debug!(arch = ?a, "Setting arch");
 			options.push(format!("--forcearch={a}"));
 		}
 
