@@ -54,6 +54,8 @@ users:
 dnf:
   releasever: 39
   repodir: repodir/
+  options:
+    - --setopt=cachedir=/tmp/dnf-cache
   exclude:
     - fedora-release-matecompiz
     - default-fonts-cjk-sans
