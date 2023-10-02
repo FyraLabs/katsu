@@ -6,7 +6,7 @@ use std::{
 	io::{Seek, Write},
 	path::PathBuf,
 };
-use tracing::{debug, info, warn, trace};
+use tracing::{debug, info, trace, warn};
 
 use crate::{
 	cli::OutputFormat,
@@ -59,6 +59,8 @@ pub struct DnfRootBuilder {
 	pub arch: Option<String>,
 	#[serde(default)]
 	pub arch_packages: BTreeMap<String, Vec<String>>,
+	#[serde(default)]
+	pub repodir: Option<PathBuf>,
 }
 
 impl RootBuilder for DnfRootBuilder {
@@ -89,6 +91,12 @@ impl RootBuilder for DnfRootBuilder {
 			options.push(format!("--forcearch={a}"));
 		}
 
+		if let Some(reposdir) = &self.repodir {
+			let reposdir = reposdir.canonicalize()?.display().to_string();
+			debug!(reposdir = ?reposdir, "Setting reposdir");
+			options.push(format!("--setopt=reposdir={reposdir}"));
+		}
+
 		// Get host architecture using uname
 		let host_arch = cmd_lib::run_fun!(uname -m;)?;
 
@@ -102,11 +110,23 @@ impl RootBuilder for DnfRootBuilder {
 		// todo: maybe not unwrap?
 		util::run_with_chroot(&chroot, || -> color_eyre::Result<()> {
 			cmd_lib::run_cmd!(
-				dnf install -y --releasever=${releasever} --installroot=${chroot} $[packages] $[options];
+				dnf install -y --releasever=${releasever} --installroot=${chroot} $[packages] $[options] 2>&1;
 				dnf clean all --installroot=${chroot};
 			)?;
 			Ok(())
 		})?;
+
+		info!("Setting up users");
+
+		let mut users = manifest.clone().users;
+
+		if users.is_empty() {
+			warn!("No users specified, no users will be created!");
+		} else {
+			for user in users.iter_mut() {
+				user.add_to_chroot(&chroot)?;
+			}
+		}
 
 		// now, let's run some funny post-install scripts
 

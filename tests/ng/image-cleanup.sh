@@ -21,7 +21,12 @@ systemd-sysusers
 
 # set password for root to "ultramarine"
 
-echo "root:ultramarine" | chpasswd
+# echo "root:ultramarine" | chpasswd
+
+# Set graphical target to default
+systemctl set-default graphical.target
+
+
 
 
 # if aarch64

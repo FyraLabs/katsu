@@ -2,8 +2,8 @@ use bytesize::ByteSize;
 use color_eyre::Result;
 use merge_struct::merge;
 use serde_derive::{Deserialize, Serialize};
-use std::{path::PathBuf, str::FromStr, fs};
-use tracing::{debug, trace, info};
+use std::{fs, path::PathBuf, str::FromStr, io::Write};
+use tracing::{debug, info, trace};
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct Manifest {
@@ -27,8 +27,13 @@ pub struct Manifest {
 	// todo: dynamically load this?
 	pub dnf: crate::builder::DnfRootBuilder,
 
+	/// Scripts to run before and after the build
 	#[serde(default)]
 	pub scripts: ScriptsManifest,
+
+	/// Users to add to the image
+	#[serde(default)]
+	pub users: Vec<Auth>,
 }
 
 impl Manifest {
@@ -277,7 +282,6 @@ impl PartitionLayout {
 		let mut fstab = String::new();
 
 		for part in &ordered.partitions {
-
 			// get devname by finding from mount, instead of index because we won't be using it as much
 			let mountpoint = PathBuf::from(&part.mountpoint);
 			let mountpoint_chroot = part.mountpoint.trim_start_matches('/');
@@ -287,7 +291,6 @@ impl PartitionLayout {
 			debug!(mountpoint_chroot = ?mountpoint_chroot, "Mountpoint of partition in chroot");
 
 			let devname = cmd_lib::run_fun!(findmnt -n -o SOURCE ${mountpoint_chroot})?;
-
 
 			debug!(devname = ?devname, "Device name of partition");
 
@@ -390,7 +393,6 @@ impl PartitionLayout {
 
 				cmd_lib::run_cmd!(parted -s ${disk} set ${index} esp on 2>&1)?;
 			}
-			
 
 			if let Some(label) = &part.label {
 				trace!(
@@ -415,18 +417,11 @@ impl PartitionLayout {
 
 			// Some stupid hackery checks for the args of mkfs.fat
 			if part.filesystem == "efi" {
-				trace!(
-					"mkfs.fat -F32 {devname}",
-					devname = devname
-				);
+				trace!("mkfs.fat -F32 {devname}", devname = devname);
 
 				cmd_lib::run_cmd!(mkfs.fat -F32 ${devname} 2>&1)?;
 			} else {
-				trace!(
-					"mkfs.{fs} {devname}",
-					fs = fsname,
-					devname = devname
-				);
+				trace!("mkfs.{fs} {devname}", fs = fsname, devname = devname);
 
 				cmd_lib::run_cmd!(mkfs.${fsname} ${devname} 2>&1)?;
 			}
@@ -504,6 +499,114 @@ fn test_bytesize() {
 	let size = ByteSize::from_str("100M").unwrap();
 	println!("{:#?}", size.as_u64())
 }
+
+fn _default_true() -> bool {
+	true
+}
+
+/// Image default users configuration
+#[derive(Deserialize, Debug, Clone, Serialize)]
+pub struct Auth {
+	/// Username for the user
+	pub username: String,
+	/// Passwords are optional, but heavily recommended
+	/// Passwords must be hashed with crypt(3) or mkpasswd(1)
+	pub password: Option<String>,
+	/// Groups to add the user to
+	#[serde(default)]
+	pub groups: Vec<String>,
+	/// Whether to create a home directory for the user
+	/// Defaults to true
+	#[serde(default = "_default_true")]
+	pub create_home: bool,
+	/// Shell for the user
+	#[serde(default)]
+	pub shell: Option<String>,
+	/// UID for the user
+	#[serde(default)]
+	pub uid: Option<u32>,
+	/// GID for the user
+	#[serde(default)]
+	pub gid: Option<u32>,
+
+	/// SSH keys for the user
+	/// This will be written to ~/.ssh/authorized_keys
+	#[serde(default)]
+	pub ssh_keys: Vec<String>,
+}
+
+impl Auth {
+	pub fn add_to_chroot(&self, chroot: &PathBuf) -> Result<()> {
+		// add user to chroot
+
+		let binding = chroot.to_string_lossy();
+		let mut args = vec!["-R".to_string(), binding.as_ref().to_string()];
+
+		if let Some(uid) = self.uid {
+			args.push("-u".to_string());
+			let binding = uid.to_string();
+			args.push(binding.to_string());
+		}
+		if let Some(gid) = self.gid {
+			args.push("-g".to_string());
+			args.push(gid.to_string());
+		}
+
+		if let Some(shell) = &self.shell {
+			args.push("-s".to_string());
+			args.push(shell.to_string());
+		}
+
+		if let Some(password) = &self.password {
+			args.push("-p".to_string());
+			args.push(password.to_string());
+		}
+
+		if self.create_home {
+			args.push("-m".to_string());
+		} else {
+			args.push("-M".to_string());
+		}
+
+		// add groups
+		for group in &self.groups {
+			args.push("-G".to_string());
+			args.push(group.to_string());
+		}
+
+		args.push(self.username.to_owned());
+
+		trace!(args = ?args, "useradd args");
+
+		cmd_lib::run_cmd!(useradd $[args] 2>&1)?;
+
+		// add ssh keys
+		if !self.ssh_keys.is_empty() {
+			let mut ssh_dir = chroot.clone();
+			ssh_dir.push("home");
+			ssh_dir.push(&self.username);
+			ssh_dir.push(".ssh");
+
+			fs::create_dir_all(&ssh_dir)?;
+
+			let mut auth_keys = ssh_dir.clone();
+			auth_keys.push("authorized_keys");
+
+			let mut auth_keys_file = fs::File::create(auth_keys)?;
+
+			for key in &self.ssh_keys {
+				auth_keys_file.write_all(key.as_bytes())?;
+				auth_keys_file.write_all(b"\n")?;
+			}
+
+			auth_keys_file.flush()?;
+			drop(auth_keys_file);
+		}
+
+		Ok(())
+	}
+}
+
 // #[test]
 // fn test_recurse() {
 // 	// cd tests/ng/recurse

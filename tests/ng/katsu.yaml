@@ -42,9 +42,22 @@ disk:
       filesystem: ext4
       mountpoint: /
 
+users:
+  - username: ultramarine
+    password: "$y$j9T$6/DebcxXazPrtBYnNXtEM.$yaUJHww5Mo1L8xNJ9IDJ.bvKOrIJxAG9PGQKWioBMx3"
+    groups:
+      - wheel
+
+  
+
 
 dnf:
-  releasever: 38
+  releasever: 39
+  repodir: repodir/
+  exclude:
+    - fedora-release-matecompiz
+    - default-fonts-cjk-sans
+    - google-noto-sans-cjk-vf-fonts
   packages:
     - filesystem
     - setup
@@ -53,14 +66,13 @@ dnf:
     - dmraid
     - nvme-cli
     - kernel
-    - fedora-repos
     - glibc
     - glibc-common
     - dracut-config-generic
     - dracut-tools
     - dnf
     - dracut
-    - mkpasswd # maybe not needed soon
+    # - mkpasswd # maybe not needed soon
     - "@core"
     - "@standard"
     - grub2-tools
@@ -68,6 +80,14 @@ dnf:
     - NetworkManager
     - rpm
     - libgomp
+    - ultramarine-release
+    - ultramarine-release-common
+    - ultramarine-repos
+    - ultramarine-repos-common
+    - fedora-repos
+    - "@mate-desktop-environment"
+
+
 
   arch_packages:
     aarch64:
