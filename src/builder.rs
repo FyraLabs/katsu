@@ -12,7 +12,12 @@ use std::{
 };
 use tracing::{debug, info, warn};
 
-use crate::{chroot_run_cmd, cli::OutputFormat, config::{Manifest, Script}, util};
+use crate::{
+	chroot_run_cmd,
+	cli::OutputFormat,
+	config::{Manifest, Script},
+	util,
+};
 const WORKDIR: &str = "katsu-work";
 
 pub enum Bootloader {
@@ -63,7 +68,6 @@ pub struct DnfRootBuilder {
 
 impl RootBuilder for DnfRootBuilder {
 	fn build(&self, chroot: PathBuf, manifest: &Manifest) -> Result<()> {
-
 		info!("Running Pre-install scripts");
 
 		run_scripts(manifest.scripts.pre.clone(), &chroot, false)?;
@@ -110,11 +114,14 @@ impl RootBuilder for DnfRootBuilder {
 pub fn run_scripts(scripts: Vec<Script>, chroot: &PathBuf, in_chroot: bool) -> Result<()> {
 	for script in scripts {
 		if let Some(mut data) = script.load() {
-
-			info!("Running script: {script}", script = script.name.as_ref().unwrap_or(&"<Untitled>".to_string()));
+			info!(
+				"Running script: {script}",
+				script = script.name.as_ref().unwrap_or(&"<Untitled>".to_string())
+			);
 			info!("Script ID: {id}", id = script.id.as_ref().unwrap_or(&"<NULL>".to_string()));
-			
-			let script_name = format!("script-{}", script.id.as_ref().unwrap_or(&"untitled".to_string()));
+
+			let script_name =
+				format!("script-{}", script.id.as_ref().unwrap_or(&"untitled".to_string()));
 			// check if data has shebang
 			if !data.starts_with("#!") {
 				// if not, add one
@@ -132,13 +139,12 @@ pub fn run_scripts(scripts: Vec<Script>, chroot: &PathBuf, in_chroot: bool) -> R
 			file.flush()?;
 			drop(file);
 
-
 			// now add execute bit
 			if in_chroot {
 				util::run_with_chroot(&chroot, || -> color_eyre::Result<()> {
 					cmd_lib::run_cmd!(
 						chmod +x ${chroot}/tmp/${script_name};
-						chroot ${chroot} /tmp/${script_name} 2>&1;
+						unshare -R ${chroot} /tmp/${script_name} 2>&1;
 						rm -f ${chroot}/tmp/${script_name};
 					)?;
 					Ok(())
@@ -153,7 +159,10 @@ pub fn run_scripts(scripts: Vec<Script>, chroot: &PathBuf, in_chroot: bool) -> R
 				)?;
 			}
 
-			info!("===== Script {script} finished =====", script = script.name.as_ref().unwrap_or(&"<Untitled>".to_string()));
+			info!(
+				"===== Script {script} finished =====",
+				script = script.name.as_ref().unwrap_or(&"<Untitled>".to_string())
+			);
 		}
 	}
 	Ok(())
@@ -344,10 +353,7 @@ impl ImageBuilder for DiskImageBuilder {
 		*/
 		self.root_builder.build(chroot.clone(), manifest)?;
 
-
 		// Now, after we finally have a rootfs, we can now run some post-install scripts
-
-		
 
 		// reverse mount table, unmount
 

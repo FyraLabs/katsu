@@ -1,6 +1,14 @@
 #!/bin/bash
 set -x
+# Disable os-prober for now
+
+echo "Disabling os-prober..."
+
+echo "GRUB_DISABLE_OS_PROBER=true" > /etc/default/grub
 grub2-mkconfig > /boot/grub2/grub.cfg
+rm /etc/default/grub
+
+
 
 # get /dev/ of /boot
 bootdev=$(findmnt -n -o SOURCE /boot)
