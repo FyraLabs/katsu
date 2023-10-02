@@ -31,7 +31,7 @@ scripts:
       file: selinux.sh
 
 disk:
-  size: 8GiB
+  size: 12GiB
   partitions:
     - label: EFI
       size: 512MiB
@@ -55,7 +55,11 @@ dnf:
   releasever: 39
   repodir: repodir/
   options:
-    - --setopt=cachedir=/tmp/dnf-cache
+    - --setopt=cachedir=/var/cache/dnf
+  # exclude:
+  #   - flatpak
+  #   - pkgconf
+  #   - 
   packages:
     - filesystem
     - setup
@@ -78,11 +82,9 @@ dnf:
     - NetworkManager
     - rpm
     - libgomp
-    - ultramarine-release
-    - ultramarine-release-common
-    - ultramarine-repos
-    - ultramarine-repos-common
+    - ultramarine-release-basic
     - fedora-repos
+
 
 
 
