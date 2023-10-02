@@ -41,4 +41,4 @@ UUID=$bootid /boot ext4 defaults 0 2
 UUID=$rootid / ext4 defaults 0 0
 EOF
 
-dracut -vvv --force -N --add-drivers -a "qemu qemu-net btrfs drm convertfs"
+dracut -vfN --add-drivers "virtio virtio_blk virtio_scsi usb xchi_pci mmc"
