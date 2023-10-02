@@ -43,6 +43,8 @@ dnf:
     - fedora-repos
     - glibc
     - glibc-common
+    - dracut-config-generic
+    - dracut-tools
     - dnf
     - dracut
     - mkpasswd # maybe not needed soon

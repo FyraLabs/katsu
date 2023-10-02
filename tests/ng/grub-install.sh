@@ -1,4 +1,6 @@
-#!/bin/bash -x
+#!/bin/bash
+set -x
+grub2-mkconfig > /boot/grub2/grub.cfg
 
 # get /dev/ of /boot
 bootdev=$(findmnt -n -o SOURCE /boot)
@@ -28,7 +30,7 @@ rootid=$(blkid -s UUID -o value "$(findmnt -n -o SOURCE /)")
 cat << EOF > /etc/fstab
 UUID=$efiid /boot/efi vfat umask=0077,shortname=winnt 0 2
 UUID=$bootid /boot ext4 defaults 0 2
-UUID=$rootid / btrfs defaults 0 0
+UUID=$rootid / ext4 defaults 0 0
 EOF
 
-dracut -vvv --force -N
+dracut -vvv --force --regenerate-all -N --rebuild

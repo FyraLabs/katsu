@@ -138,7 +138,7 @@ pub fn run_scripts(scripts: Vec<Script>, chroot: &PathBuf, in_chroot: bool) -> R
 				util::run_with_chroot(&chroot, || -> color_eyre::Result<()> {
 					cmd_lib::run_cmd!(
 						chmod +x ${chroot}/tmp/${script_name};
-						chroot ${chroot} /tmp/${script_name};
+						chroot ${chroot} /tmp/${script_name} 2>&1;
 						rm -f ${chroot}/tmp/${script_name};
 					)?;
 					Ok(())
@@ -148,7 +148,7 @@ pub fn run_scripts(scripts: Vec<Script>, chroot: &PathBuf, in_chroot: bool) -> R
 				std::env::set_var("CHROOT", chroot);
 				cmd_lib::run_cmd!(
 					chmod +x katsu-work/${script_name};
-					/usr/bin/env CHROOT=${chroot} katsu-work/${script_name};
+					/usr/bin/env CHROOT=${chroot} katsu-work/${script_name} 2>&1;
 					rm -f katsu-work/${script_name};
 				)?;
 			}
@@ -273,7 +273,7 @@ impl ImageBuilder for DiskImageBuilder {
 		cmd_lib::run_cmd!(
 			mkfs.vfat -F 32 ${loopdev_path}p1;
 			mkfs.ext4 ${loopdev_path}p2;
-			mkfs.btrfs ${loopdev_path}p3;
+			mkfs.ext4 ${loopdev_path}p3;
 		)?;
 
 		// mount partitions using nix mount
@@ -291,8 +291,8 @@ impl ImageBuilder for DiskImageBuilder {
 			chroot = ?chroot,
 		);
 
-		let mount_table = [
-			(&root_loopdev, &chroot, "btrfs"),
+		let mount_table: [(&PathBuf, &PathBuf, &str); 3] = [
+			(&root_loopdev, &chroot, "ext4"),
 			(&boot_loopdev, &chroot.join("boot"), "ext4"),
 			(&efi_loopdev, &chroot.join("boot/efi"), "vfat"),
 		];
