@@ -1,19 +1,14 @@
 use color_eyre::Result;
-use gpt::{
-	disk::{self, DEFAULT_SECTOR_SIZE},
-	partition_types::{Type, EFI, LINUX_FS},
-};
 use serde_derive::{Deserialize, Serialize};
 use std::{
 	collections::BTreeMap,
 	fs,
 	io::{Seek, Write},
-	path::{Path, PathBuf},
+	path::PathBuf,
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, info, warn, trace};
 
 use crate::{
-	chroot_run_cmd,
 	cli::OutputFormat,
 	config::{Manifest, Script},
 	util,
@@ -71,6 +66,18 @@ impl RootBuilder for DnfRootBuilder {
 		info!("Running Pre-install scripts");
 
 		run_scripts(manifest.scripts.pre.clone(), &chroot, false)?;
+
+		if let Some(disk) = manifest.clone().disk {
+			let f = disk.fstab(&chroot)?;
+			trace!(fstab = ?f, "fstab");
+			// write fstab to chroot
+			std::fs::create_dir_all(chroot.join("etc"))?;
+			let fstab_path = chroot.join("etc/fstab");
+			let mut fstab_file = fs::File::create(fstab_path)?;
+			fstab_file.write_all(f.as_bytes())?;
+			fstab_file.flush()?;
+			drop(fstab_file);
+		}
 
 		let mut packages = self.packages.clone();
 		let mut options = self.options.clone();
@@ -183,185 +190,53 @@ impl ImageBuilder for DiskImageBuilder {
 		// create sparse file on disk
 		let sparse_path = &image.canonicalize()?.join("katsu.img");
 		debug!(image = ?sparse_path, "Creating sparse file");
+
+		// Error checking
+
+		if manifest.clone().disk.is_none() {
+			// error out
+			return Err(color_eyre::eyre::eyre!("Disk layout not specified"));
+		} else {
+			info!("Disk layout specified");
+			if manifest.clone().disk.unwrap().size.is_none() {
+				return Err(color_eyre::eyre::eyre!("Disk size not specified"));
+			}
+		}
+
 		let mut sparse_file = fs::File::create(sparse_path)?;
 
-		// allocate 8GB (hardcoded for now)
-		// todo: unhardcode
-		// sparse_file.set_len(8 * 1024 * 1024 * 1024)?;
-		sparse_file.seek(std::io::SeekFrom::Start(8 * 1024 * 1024 * 1024))?;
+		let disk_size = manifest.clone().disk.unwrap().size.unwrap();
+
+		sparse_file.seek(std::io::SeekFrom::Start(disk_size.as_u64()))?;
 		sparse_file.write_all(&[0])?;
 
-		// sparse_file.flush()?;
-		// drop(sparse_file);
-		/*
-		// use gpt crate to create gpt table
-		let mbr = gpt::mbr::ProtectiveMBR::with_lb_size(
-			u32::try_from((2 * 1024 * 1024) / 512).unwrap_or(0xFF_FF_FF_FF),
-		);
-		mbr.overwrite_lba0(&mut sparse_file)?;
-		let header =
-			gpt::header::read_header_from_arbitrary_device(&mut sparse_file, DEFAULT_SECTOR_SIZE)?;
-
-		let h = header.write_primary(&mut sparse_file, DEFAULT_SECTOR_SIZE)?;
-
-		let mut disk = gpt::GptConfig::new()
-			.writable(true)
-			.initialized(false)
-			.logical_block_size(disk::LogicalBlockSize::Lb512)
-			.create_from_device(Box::new(sparse_file), None)?;
-
-		// Create partition table
-		// let disk = gpt_cfg.open_from_device(Box::new(sparse_file))?;
-		// let mut disk = gpt_cfg.create_from_device(Box::new(sparse_file), None)?;
-
-		debug!(disk = ?disk, "Disk");
-
-		disk.write_inplace()?;
-
-		// create EFI partition (250mb)
-		let mut efi_partition = disk.add_partition(
-			"EFI",
-			250 * 1024 * 1024,
-			EFI,
-			gpt::partition::PartitionAttributes::all().bits(),
-			None,
-		)?;
-
-		disk.write_inplace()?;
-		// create root partition (rest of disk)
-
-		// get the remaining size of the disk
-		let free_sectors = disk.find_free_sectors();
-		debug!(free_sectors = ?free_sectors, "Free sectors");
-
-		let mut root_partition = disk.add_partition(
-			"ROOT",
-			4 * 1024 * 1024 * 1024,
-			LINUX_FS,
-			gpt::partition::PartitionAttributes::empty().bits(),
-			None,
-		)?;
-
-		disk.write_inplace()?;
-
-		// disk. */
-
-		// todo: make the above code work
-		// for now, we'll just use fdisk and a shell script
-		// let sparse_path_str = sparse_path.to_str().unwrap();
-
-		// parted with heredoc
-
-		cmd_lib::run_cmd!(
-			parted -s ${sparse_path} mklabel gpt;
-			parted -s ${sparse_path} mkpart primary fat32 1MiB 250MiB;
-			parted -s ${sparse_path} set 1 esp on;
-			parted -s ${sparse_path} name 1 EFI;
-			parted -s ${sparse_path} mkpart primary ext4 250MiB 1.25GiB;
-			parted -s ${sparse_path} name 2 BOOT;
-			parted -s ${sparse_path} mkpart primary ext4 1.25GiB 100%;
-			parted -s ${sparse_path} name 3 ROOT;
-			parted -s ${sparse_path} print;
-		)?;
-
-		// now mount them as loop devices
-
+		// let's mount the disk as a loop device
 		let lc = loopdev::LoopControl::open()?;
 		let loopdev = lc.next_free()?;
 
-		loopdev.attach_file(&sparse_path)?;
+		loopdev.attach_file(sparse_path)?;
 
-		// scan partitions
-		let loopdev_path = loopdev.path().unwrap();
-		cmd_lib::run_cmd!(
-			partprobe ${loopdev_path};
-		)?;
+		// if let Some(disk) = manifest.disk.as_ref() {
+		// 	disk.apply(&loopdev.path().unwrap())?;
+		// 	disk.mount_to_chroot(&loopdev.path().unwrap(), &chroot)?;
+		// 	disk.unmount_from_chroot(&loopdev.path().unwrap(), &chroot)?;
+		// }
 
-		// Format partitions
-		// todo: unhardcode
-		cmd_lib::run_cmd!(
-			mkfs.vfat -F 32 ${loopdev_path}p1;
-			mkfs.ext4 ${loopdev_path}p2;
-			mkfs.ext4 ${loopdev_path}p3;
-		)?;
+		let disk = manifest.clone().disk.unwrap();
 
-		// mount partitions using nix mount
+		let ldp = loopdev.path().unwrap();
 
-		let efi_loopdev = PathBuf::from(format!("{}p1", loopdev_path.display()));
-		let boot_loopdev = PathBuf::from(format!("{}p2", loopdev_path.display()));
-		let root_loopdev = PathBuf::from(format!("{}p3", loopdev_path.display()));
+		// Partition disk
 
-		let chroot = chroot.canonicalize()?;
+		disk.apply(&ldp)?;
 
-		debug!(
-			efi_loopdev = ?efi_loopdev,
-			boot_loopdev = ?boot_loopdev,
-			root_loopdev = ?root_loopdev,
-			chroot = ?chroot,
-		);
+		// Mount partitions to chroot
 
-		let mount_table: [(&PathBuf, &PathBuf, &str); 3] = [
-			(&root_loopdev, &chroot, "ext4"),
-			(&boot_loopdev, &chroot.join("boot"), "ext4"),
-			(&efi_loopdev, &chroot.join("boot/efi"), "vfat"),
-		];
+		disk.mount_to_chroot(&ldp, &chroot)?;
 
-		// mkdir
-		fs::create_dir_all(&chroot)?;
+		self.root_builder.build(chroot.clone().canonicalize()?, manifest)?;
 
-		for (ld, path, fs) in &mount_table {
-			debug!(ld = ?ld, path = ?path, fs = ?fs, "Mounting Device");
-			fs::create_dir_all(*path)?;
-			nix::mount::mount(
-				Some(*ld),
-				*path,
-				Some(*fs),
-				nix::mount::MsFlags::empty(),
-				None::<&str>,
-			)?;
-		}
-
-		/* 		nix::mount::mount(
-				   Some(&root_loopdev),
-				   &chroot,
-				   Some("btrfs"),
-				   nix::mount::MsFlags::empty(),
-				   None::<&str>,
-			   )?;
-
-			   fs::create_dir_all(&chroot.join("boot"))?;
-
-			   nix::mount::mount(
-				   Some(&boot_loopdev),
-				   &chroot.join("boot"),
-				   Some("ext4"),
-				   nix::mount::MsFlags::empty(),
-				   None::<&str>,
-			   )?;
-
-			   fs::create_dir_all(&chroot.join("boot/efi"))?;
-
-
-			   nix::mount::mount(
-				   Some(&efi_loopdev),
-				   &chroot.join("boot/efi"),
-				   Some("vfat"),
-				   nix::mount::MsFlags::empty(),
-				   None::<&str>,
-			   )?;
-
-		*/
-		self.root_builder.build(chroot.clone(), manifest)?;
-
-		// Now, after we finally have a rootfs, we can now run some post-install scripts
-
-		// reverse mount table, unmount
-
-		for (_, path, _) in mount_table.iter().rev() {
-			nix::mount::umount(*path)?;
-			// nix::mount::umount(*ld)?;
-		}
-
+		disk.unmount_from_chroot(&ldp, &chroot)?;
 		loopdev.detach()?;
 
 		Ok(())

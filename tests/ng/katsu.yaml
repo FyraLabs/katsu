@@ -30,6 +30,19 @@ scripts:
       name: Relabel SELinux for new filesystem
       file: selinux.sh
 
+disk:
+  size: 4G
+  partitions:
+    - label: EFI
+      size: 512MiB
+      filesystem: efi
+      mountpoint: /boot/efi
+    - label: root
+      # size: 2.5MiB
+      filesystem: ext4
+      mountpoint: /
+
+
 dnf:
   releasever: 38
   packages:
