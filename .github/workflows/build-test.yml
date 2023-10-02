@@ -76,5 +76,5 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v2
         with:
-          name: katsudon-arm
+          name: katsudon
           path: tests/ng/katsu-work/image/*.raw.xz
