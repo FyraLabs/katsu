@@ -18,7 +18,7 @@ EOF
 
 
 # GRUB entries: set ro to rw in /boot/loader/entries/*.conf
-sed -i 's/ ro/ rw/g' /boot/loader/entries/*.conf
+sed -i 's/ ro\n/ rw\n/g' /boot/loader/entries/*.conf
 
 
 # generate fstab
