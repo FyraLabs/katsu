@@ -19,3 +19,14 @@ EOF
 
 # GRUB entries: set ro to rw in /boot/loader/entries/*.conf
 sed -i 's/ ro/ rw/g' /boot/loader/entries/*.conf
+
+
+# generate fstab
+efiid=$(blkid -s UUID -o value "$(findmnt -n -o SOURCE /boot/efi)")
+rootid=$(blkid -s UUID -o value "$(findmnt -n -o SOURCE /)")
+
+cat << EOF > /etc/fstab
+UUID=$efiid /boot/efi vfat umask=0077,shortname=winnt 0 2
+UUID=$bootid /boot ext4 defaults 0 2
+UUID=$rootid / btrfs defaults 0 0
+EOF
