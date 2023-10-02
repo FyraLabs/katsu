@@ -31,7 +31,7 @@ scripts:
       file: selinux.sh
 
 disk:
-  size: 4G
+  size: 8GiB
   partitions:
     - label: EFI
       size: 512MiB
