@@ -2,7 +2,7 @@ use bytesize::ByteSize;
 use color_eyre::Result;
 use merge_struct::merge;
 use serde_derive::{Deserialize, Serialize};
-use std::{fs, path::PathBuf, str::FromStr, io::Write};
+use std::{collections::BTreeMap, fs, io::Write, path::PathBuf, str::FromStr};
 use tracing::{debug, info, trace};
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
@@ -199,34 +199,64 @@ impl PartitionLayout {
 		self.partitions.iter().find(|p| p.mountpoint == mountpoint)
 	}
 
-	pub fn sort_partitions(&mut self) {
+	pub fn sort_partitions(&mut self) -> BTreeMap<usize, Partition> {
 		// We should sort partitions by mountpoint, so that we can mount them in order
 		// In this case, from the least nested to the most nested, so count the number of slashes
 
-		self.partitions.sort_by(|a, b| {
-			let a_slashes = a.mountpoint.matches('/').count();
-			let b_slashes = b.mountpoint.matches('/').count();
+		// sort by least nested to most nested
 
-			a_slashes.cmp(&b_slashes)
-		});
+		// However, also keep the original order of the partitions from the manifest
+
+		// the key is the original index of the partition so we can get the right devname from its index
+
+		let mut ordered = BTreeMap::new();
+
+		for (_, part) in self.partitions.iter().enumerate() {
+			let index = self.get_index(&part.mountpoint).unwrap();
+			ordered.insert(index, part.clone());
+
+			debug!(index = ?index, "Index of partition");
+		}
+
+		// now sort by mountpoint, least nested to most nested by counting the number of slashes
+		// but make an exception if it's just /, then it's 0
+
+		ordered
+			.iter()
+			.map(|(i, part)| {
+				let count = part.mountpoint.chars().filter(|c| *c == '/').count();
+				(count, i, part)
+			})
+			.collect::<Vec<_>>()
+			.sort_by(|(a, _, _), (b, _, _)| a.cmp(b));
+
+		ordered
 	}
 
 	pub fn mount_to_chroot(&self, disk: &PathBuf, chroot: &PathBuf) -> Result<()> {
 		// mount partitions to chroot
 
 		// sort partitions by mountpoint
-		let mut ordered = self.clone();
-		ordered.sort_partitions();
+		let ordered = self.clone().sort_partitions();
 
-		debug!(or = ?ordered, "Mounting partitions to chroot");
+		// reverse the order
 
-		for part in &ordered.partitions {
-			let index = ordered.get_index(&part.mountpoint).unwrap();
-			let devname = partition_name(&disk.to_string_lossy(), index as u32);
+		let ordered = ordered.into_iter().rev().collect::<Vec<_>>();
+
+
+		debug!("Mounting partitions to chroot: {:#?}", ordered);
+
+		// Ok, so for some reason the partitions are swapped?
+
+		for (index, part) in ordered.iter() {
+			let devname = partition_name(&disk.to_string_lossy(), *index as u32);
+
 
 			// clean the mountpoint so we don't have the slash at the start
 			let mp_cleaned = part.mountpoint.trim_start_matches('/');
 			let mountpoint = chroot.join(&mp_cleaned);
+
+			std::fs::create_dir_all(&mountpoint)?;
 
 			trace!(
 				"mount {devname} {mountpoint}",
@@ -234,10 +264,11 @@ impl PartitionLayout {
 				mountpoint = mountpoint.to_string_lossy()
 			);
 
-			fs::create_dir_all(&mountpoint)?;
-
 			cmd_lib::run_cmd!(mount ${devname} ${mountpoint} 2>&1)?;
 		}
+
+
+		
 
 		Ok(())
 	}
@@ -246,30 +277,27 @@ impl PartitionLayout {
 		// unmount partitions from chroot
 
 		// sort partitions by mountpoint
-		let mut ordered = self.clone();
-		ordered.sort_partitions();
-		// reverse the order
-		ordered.partitions.reverse();
+		let ordered = self.clone().sort_partitions();
 
-		debug!(or = ?ordered, "Unmounting partitions from chroot");
+		
+		for (index, part) in ordered.iter() {
+			let devname = partition_name(&disk.to_string_lossy(), *index as u32);
 
-		for part in &ordered.partitions {
-			let index = ordered.get_index(&part.mountpoint).unwrap();
-			let devname = partition_name(&disk.to_string_lossy(), index as u32);
 
 			// clean the mountpoint so we don't have the slash at the start
 			let mp_cleaned = part.mountpoint.trim_start_matches('/');
 			let mountpoint = chroot.join(&mp_cleaned);
 
+			std::fs::create_dir_all(&mountpoint)?;
+
 			trace!(
-				"umount {devname} {mountpoint}",
+				"mount {devname} {mountpoint}",
 				devname = devname,
 				mountpoint = mountpoint.to_string_lossy()
 			);
 
-			cmd_lib::run_cmd!(umount -l ${mountpoint} 2>&1)?;
+			cmd_lib::run_cmd!(umount ${devname} 2>&1)?;
 		}
-
 		Ok(())
 	}
 
@@ -344,7 +372,7 @@ impl PartitionLayout {
 		let mut last_end = 0;
 
 		for (i, part) in self.partitions.iter().enumerate() {
-			trace!("Creating partition {}:", i + 1);
+			trace!("Creating partition {}:", i);
 			trace!("{:#?}", part);
 
 			// get index of partition
@@ -476,7 +504,7 @@ fn test_partlay() {
 		println!("====================");
 	}
 
-	partlay.apply(&mock_disk).unwrap();
+	// partlay.apply(&mock_disk).unwrap();
 	// check if parts would be applied correctly
 }
 

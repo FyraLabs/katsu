@@ -31,12 +31,13 @@ scripts:
       file: selinux.sh
 
 disk:
-  size: 12GiB
+  size: 8GiB
   partitions:
     - label: EFI
       size: 512MiB
       filesystem: efi
       mountpoint: /boot/efi
+
     - label: root
       # size: 2.5MiB
       filesystem: ext4
@@ -54,8 +55,8 @@ users:
 dnf:
   releasever: 39
   repodir: repodir/
-  options:
-    - --setopt=cachedir=/var/cache/dnf
+  # options:
+  #   - --setopt=cachedir=/var/cache/dnf
   # exclude:
   #   - flatpak
   #   - pkgconf
