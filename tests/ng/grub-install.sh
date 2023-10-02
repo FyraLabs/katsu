@@ -41,4 +41,4 @@ UUID=$bootid /boot ext4 defaults 0 2
 UUID=$rootid / ext4 defaults 0 0
 EOF
 
-dracut -vvv --force --regenerate-all -N --rebuild
+dracut -vvv --force --regenerate-all -N -p --add-drivers -a "qemu qemu-net btrfs drm convertfs"
