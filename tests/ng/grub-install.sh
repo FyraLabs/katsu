@@ -30,3 +30,5 @@ UUID=$efiid /boot/efi vfat umask=0077,shortname=winnt 0 2
 UUID=$bootid /boot ext4 defaults 0 2
 UUID=$rootid / btrfs defaults 0 0
 EOF
+
+dracut -vvv --force -N
