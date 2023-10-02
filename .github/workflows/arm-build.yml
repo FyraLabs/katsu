@@ -19,9 +19,9 @@ jobs:
         uses: actions/cache@v2
         with:
           path: /var/cache/dnf
-          key: dnf-${{ runner.os }}-arm
+          key: dnf-${{ runner.os }}
           restore-keys: |
-            dnf-${{ runner.os }}-arm
+            dnf-${{ runner.os }}
             dnf-
 
       - name: Install dependencies
