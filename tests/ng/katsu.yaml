@@ -56,10 +56,6 @@ dnf:
   repodir: repodir/
   options:
     - --setopt=cachedir=/tmp/dnf-cache
-  exclude:
-    - fedora-release-matecompiz
-    - default-fonts-cjk-sans
-    - google-noto-sans-cjk-vf-fonts
   packages:
     - filesystem
     - setup
@@ -87,7 +83,6 @@ dnf:
     - ultramarine-repos
     - ultramarine-repos-common
     - fedora-repos
-    - "@mate-desktop-environment"
 
 
 
