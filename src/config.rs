@@ -5,6 +5,8 @@ use serde_derive::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, io::Write, path::PathBuf, str::FromStr};
 use tracing::{debug, info, trace};
 
+use crate::{util::run_with_chroot, chroot_run_cmd};
+
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct Manifest {
 	pub builder: String,
@@ -567,8 +569,7 @@ impl Auth {
 	pub fn add_to_chroot(&self, chroot: &PathBuf) -> Result<()> {
 		// add user to chroot
 
-		let binding = chroot.to_string_lossy();
-		let mut args = vec!["-R".to_string(), binding.as_ref().to_string()];
+		let mut args = vec![];
 
 		if let Some(uid) = self.uid {
 			args.push("-u".to_string());
@@ -606,7 +607,9 @@ impl Auth {
 
 		trace!(args = ?args, "useradd args");
 
-		cmd_lib::run_cmd!(useradd $[args] 2>&1)?;
+
+		chroot_run_cmd!(chroot, unshare -R ${chroot} useradd $[args] 2>&1)?;
+		// cmd_lib::run_cmd!(useradd $[args] 2>&1)?;
 
 		// add ssh keys
 		if !self.ssh_keys.is_empty() {

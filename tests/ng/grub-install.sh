@@ -9,10 +9,18 @@ grub2-mkconfig > /boot/grub2/grub.cfg
 rm /etc/default/grub
 
 
+# get /dev/ of /boot, or / if /boot is not a separate partition
+function find_bootdev {
+    # try findmnt /boot
+    if findmnt -n -o SOURCE /boot; then
+        bootdev=$(findmnt -n -o SOURCE /boot)
+    else
+        bootdev=$(findmnt -n -o SOURCE /)
+    fi
+}
 
-# get /dev/ of /boot
-bootdev=$(findmnt -n -o SOURCE /boot)
 
+find_bootdev
 # get blkid of /boot
 bootid=$(blkid -s UUID -o value $bootdev)
 

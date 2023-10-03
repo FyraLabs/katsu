@@ -38,6 +38,11 @@ disk:
       filesystem: efi
       mountpoint: /boot/efi
 
+    - label: boot
+      size: 1GiB
+      filesystem: ext4
+      mountpoint: /boot
+
     - label: root
       # size: 2.5MiB
       filesystem: ext4
@@ -55,8 +60,8 @@ users:
 dnf:
   releasever: 39
   repodir: repodir/
-  # options:
-  #   - --setopt=cachedir=/var/cache/dnf
+  options:
+    - --setopt=cachedir=/var/cache/dnf
   # exclude:
   #   - flatpak
   #   - pkgconf
