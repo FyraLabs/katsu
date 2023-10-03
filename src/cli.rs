@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
-use clap::{value_parser, Args, Parser, Subcommand};
+use clap::{value_parser, Parser};
 use color_eyre::Result;
 use serde_derive::{Deserialize, Serialize};
-use tracing::{debug, trace};
+use tracing::trace;
 
-use crate::{config::Manifest, builder::KatsuBuilder};
+use crate::{builder::KatsuBuilder, config::Manifest};
 
 // The structure should be like RPM-OSTree's Compose
 // CLI
@@ -44,19 +44,19 @@ impl std::str::FromStr for OutputFormat {
 }
 
 pub fn parse(cli: KatsuCli) -> Result<()> {
-	println!("{:?}", cli);
+	println!("{cli:?}");
 
 	// load manifest from config file
 
-    sudo::escalate_if_needed().unwrap();
+	sudo::escalate_if_needed().unwrap();
 
 	let manifest = Manifest::load_all(cli.config.unwrap())?;
 
-    trace!(man = ?manifest, "Loaded manifest");
+	trace!(man = ?manifest, "Loaded manifest");
 
-    let builder = KatsuBuilder::new(manifest, cli.output)?;
+	let builder = KatsuBuilder::new(manifest, cli.output)?;
 
-    builder.build()?;
+	builder.build()?;
 
 	Ok(())
 }

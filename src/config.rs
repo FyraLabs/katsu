@@ -1,11 +1,15 @@
+use crate::chroot_run_cmd;
 use bytesize::ByteSize;
 use color_eyre::Result;
 use merge_struct::merge;
 use serde_derive::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fs, io::Write, path::PathBuf, str::FromStr};
+use std::{
+	collections::BTreeMap,
+	fs,
+	io::Write,
+	path::{Path, PathBuf},
+};
 use tracing::{debug, info, trace};
-
-use crate::{chroot_run_cmd, util::run_with_chroot};
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct Manifest {
@@ -299,7 +303,7 @@ impl PartitionLayout {
 	}
 
 	/// Generate fstab entries for the partitions
-	pub fn fstab(&self, chroot: &PathBuf) -> Result<String> {
+	pub fn fstab(&self, chroot: &Path) -> Result<String> {
 		// sort partitions by mountpoint
 		let mut ordered = self.clone();
 		ordered.sort_partitions();
@@ -354,10 +358,7 @@ impl PartitionLayout {
 
 			let entry = format!(
 				"UUID={uuid}\t{mountpoint}\t{fsname}\tdefaults\t0\t{fsck}",
-				uuid = uuid,
 				mountpoint = mountpoint.to_string_lossy(),
-				fsname = fsname,
-				fsck = fsck
 			);
 
 			fstab.push_str(&entry);
@@ -370,7 +371,7 @@ impl PartitionLayout {
 	pub fn apply(&self, disk: &PathBuf) -> Result<()> {
 		// This is a destructive operation, so we need to make sure we don't accidentally wipe the wrong disk
 
-		info!("Applying partition layout to disk: {:#?}", disk);
+		info!("Applying partition layout to disk: {disk:#?}");
 
 		// format disk with GPT
 
@@ -503,12 +504,12 @@ fn test_partlay() {
 	});
 
 	for (i, part) in partlay.partitions.iter().enumerate() {
-		println!("Partition {}:", i);
-		println!("{:#?}", part);
+		println!("Partition {i}:");
+		println!("{part:#?}");
 
 		// get index of partition
 		let index = partlay.get_index(&part.mountpoint).unwrap();
-		println!("Index: {}", index);
+		println!("Index: {index}");
 
 		println!("Partition name: {}", partition_name(&mock_disk.to_string_lossy(), index as u32));
 
@@ -532,8 +533,10 @@ pub struct Partition {
 
 #[test]
 fn test_bytesize() {
+	use std::str::FromStr;
+
 	let size = ByteSize::mib(100);
-	println!("{:#?}", size);
+	println!("{size:#?}");
 
 	let size = ByteSize::from_str("100M").unwrap();
 	println!("{:#?}", size.as_u64())
@@ -575,7 +578,7 @@ pub struct Auth {
 }
 
 impl Auth {
-	pub fn add_to_chroot(&self, chroot: &PathBuf) -> Result<()> {
+	pub fn add_to_chroot(&self, chroot: &Path) -> Result<()> {
 		// add user to chroot
 
 		let mut args = vec![];
@@ -621,7 +624,7 @@ impl Auth {
 
 		// add ssh keys
 		if !self.ssh_keys.is_empty() {
-			let mut ssh_dir = chroot.clone();
+			let mut ssh_dir = PathBuf::from(chroot);
 			ssh_dir.push("home");
 			ssh_dir.push(&self.username);
 			ssh_dir.push(".ssh");

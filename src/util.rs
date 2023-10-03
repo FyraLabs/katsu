@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::Path;
 
 use color_eyre::Result;
 use tracing::debug;
@@ -82,9 +82,6 @@ macro_rules! chroot_run_fun {
 	}};
 }
 
-
-
-
 #[tracing::instrument]
 pub fn exec(cmd: &str, args: &[&str], pipe: bool) -> color_eyre::Result<Vec<u8>> {
 	tracing::debug!("Executing command");
@@ -129,7 +126,7 @@ pub enum Arch {
 
 impl Arch {
 	pub fn get() -> color_eyre::Result<Self> {
-		Ok(Self::from(&*cmd_lib::run_fun!(uname - m)?))
+		Ok(Self::from(&*cmd_lib::run_fun!(uname -m;)?))
 	}
 }
 
@@ -158,7 +155,7 @@ impl Into<&str> for Arch {
 }
 
 /// Prepare chroot by mounting /dev, /proc, /sys
-pub fn prepare_chroot(root: PathBuf) -> Result<()> {
+pub fn prepare_chroot(root: &Path) -> Result<()> {
 	debug!("Preparing chroot");
 
 	// cmd_lib::run_cmd! (
@@ -235,7 +232,7 @@ pub fn prepare_chroot(root: PathBuf) -> Result<()> {
 }
 
 /// Unmount /dev, /proc, /sys
-pub fn unmount_chroot(root: PathBuf) -> Result<()> {
+pub fn unmount_chroot(root: &Path) -> Result<()> {
 	debug!("Unmounting chroot");
 	// cmd_lib::run_cmd! (
 	// 	umount $root/dev/pts;
@@ -253,7 +250,7 @@ pub fn unmount_chroot(root: PathBuf) -> Result<()> {
 /// Mount chroot devices, then run function
 ///
 /// NOTE: This function requires that the function inside returns a result, so we can catch errors and unmount early
-pub fn run_with_chroot<T>(root: &PathBuf, f: impl FnOnce() -> Result<T>) -> Result<T> {
+pub fn run_with_chroot<T>(root: &Path, f: impl FnOnce() -> Result<T>) -> Result<T> {
 	prepare_chroot(root.clone())?;
 	let res = f();
 	unmount_chroot(root.clone())?;

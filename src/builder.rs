@@ -4,7 +4,7 @@ use std::{
 	collections::{BTreeMap, HashMap},
 	fs,
 	io::{Seek, Write},
-	path::PathBuf,
+	path::{PathBuf, Path},
 };
 use tracing::{debug, info, trace, warn};
 
@@ -15,27 +15,22 @@ use crate::{
 };
 const WORKDIR: &str = "katsu-work";
 
+#[derive(Default)]
 pub enum Bootloader {
+	#[default]
 	Grub,
 	Limine,
 	SystemdBoot,
-}
-
-impl Default for Bootloader {
-	fn default() -> Self {
-		Self::Grub
-	}
 }
 
 impl From<&str> for Bootloader {
 	fn from(value: &str) -> Self {
 		match value.to_lowercase().as_str() {
 			"limine" => Self::Limine,
-			"grub" => Self::Grub,
-			"grub2" => Self::Grub,
+			"grub" | "grub2" => Self::Grub,
 			"systemd-boot" => Self::SystemdBoot,
 			_ => {
-				tracing::warn!("Unknown bootloader: {}, setting GRUB mode", value);
+				tracing::warn!("Unknown bootloader: {value}, falling back to GRUB");
 				Self::Grub
 			},
 		}
@@ -43,8 +38,9 @@ impl From<&str> for Bootloader {
 }
 
 pub trait RootBuilder {
-	fn build(&self, chroot: PathBuf, manifest: &Manifest) -> Result<()>;
+	fn build(&self, chroot: &Path, manifest: &Manifest) -> Result<()>;
 }
+
 #[derive(Deserialize, Debug, Clone, Serialize, Default)]
 pub struct DnfRootBuilder {
 	#[serde(default)]
@@ -64,26 +60,24 @@ pub struct DnfRootBuilder {
 }
 
 impl RootBuilder for DnfRootBuilder {
-	fn build(&self, chroot: PathBuf, manifest: &Manifest) -> Result<()> {
+	fn build(&self, chroot: &Path, manifest: &Manifest) -> Result<()> {
 		info!("Running Pre-install scripts");
 
-		run_all_scripts(manifest.scripts.pre.clone(), &chroot, false)?;
+		run_all_scripts(manifest.scripts.pre.clone(), chroot, false)?;
 
-		if let Some(disk) = manifest.clone().disk {
-			let f = disk.fstab(&chroot)?;
+		if let Some(disk) = &manifest.disk {
+			let f = disk.fstab(chroot)?;
 			trace!(fstab = ?f, "fstab");
 			// write fstab to chroot
 			std::fs::create_dir_all(chroot.join("etc"))?;
 			let fstab_path = chroot.join("etc/fstab");
 			let mut fstab_file = fs::File::create(fstab_path)?;
 			fstab_file.write_all(f.as_bytes())?;
-			fstab_file.flush()?;
-			drop(fstab_file);
 		}
 
 		let mut packages = self.packages.clone();
 		let mut options = self.options.clone();
-		let exclude = self.exclude.clone();
+		let exclude = &self.exclude;
 		let releasever = &self.releasever;
 
 		if let Some(a) = &self.arch {
@@ -92,8 +86,9 @@ impl RootBuilder for DnfRootBuilder {
 		}
 
 		if let Some(reposdir) = &self.repodir {
-			let reposdir = reposdir.canonicalize()?.display().to_string();
-			debug!(reposdir = ?reposdir, "Setting reposdir");
+			let reposdir = reposdir.canonicalize()?;
+			let reposdir = reposdir.display();
+			debug!(?reposdir, "Setting reposdir");
 			options.push(format!("--setopt=reposdir={reposdir}"));
 		}
 
@@ -108,9 +103,9 @@ impl RootBuilder for DnfRootBuilder {
 		options.append(&mut exclude.iter().map(|p| format!("--exclude={p}")).collect());
 
 		// todo: maybe not unwrap?
-		util::run_with_chroot(&chroot, || -> color_eyre::Result<()> {
+		util::run_with_chroot(chroot, || -> Result<()> {
 			cmd_lib::run_cmd!(
-				dnf install -y --releasever=${releasever} --installroot=${chroot} $[packages] $[options] 2>&1;
+				dnf install -y --releasever=${releasever} --installroot=${chroot} $[packages] $[options];
 				dnf clean all --installroot=${chroot};
 			)?;
 			Ok(())
@@ -118,13 +113,13 @@ impl RootBuilder for DnfRootBuilder {
 
 		info!("Setting up users");
 
-		let mut users = manifest.clone().users;
+		let users = &manifest.users;
 
 		if users.is_empty() {
 			warn!("No users specified, no users will be created!");
 		} else {
-			for user in users.iter_mut() {
-				user.add_to_chroot(&chroot)?;
+			for user in users {
+				user.add_to_chroot(chroot)?;
 			}
 		}
 
@@ -138,9 +133,9 @@ impl RootBuilder for DnfRootBuilder {
 	}
 }
 
-pub fn run_script(script: Script, chroot: &PathBuf, in_chroot: bool) -> Result<()> {
+pub fn run_script(script: Script, chroot: &Path, in_chroot: bool) -> Result<()> {
 	let id = script.id.as_ref().map_or("<NULL>", |s| &**s);
-	let Some(mut data) = script.load() else { return Err(eyre!("Cannot load script `{}`", script.id.as_ref().map_or("<NULL>", |s| &**s))); };
+	let Some(mut data) = script.load() else { return Err(eyre!("Cannot load script `{id}`")); };
 	let name = script.name.as_ref().map_or("<Untitled>", |s| &**s);
 	info!(id, "Running script: {name}");
 
@@ -156,18 +151,15 @@ pub fn run_script(script: Script, chroot: &PathBuf, in_chroot: bool) -> Result<(
 	} else {
 		PathBuf::from(format!("katsu-work/{name}"))
 	};
-	let mut file = fs::File::create(fpath)?;
-	file.write_all(data.as_bytes())?;
-	file.flush()?;
-	drop(file);
+	fs::File::create(fpath)?.write_all(data.as_bytes())?;
 
 	// now add execute bit
 	if in_chroot {
 		util::run_with_chroot(&chroot, || -> Result<()> {
 			cmd_lib::run_cmd!(
-				chmod +x ${chroot}/tmp/${name};
-				unshare -R ${chroot} /tmp/${name} 2>&1;
-				rm -f ${chroot}/tmp/${name};
+				chmod +x $chroot/tmp/$name;
+				unshare -R $chroot /tmp/name 2>&1;
+				rm -f $chroot/tmp/$name;
 			)?;
 			Ok(())
 		})?;
@@ -175,20 +167,20 @@ pub fn run_script(script: Script, chroot: &PathBuf, in_chroot: bool) -> Result<(
 		// export envar
 		std::env::set_var("CHROOT", chroot);
 		cmd_lib::run_cmd!(
-			chmod +x katsu-work/${name};
-			/usr/bin/env CHROOT=${chroot} katsu-work/${name} 2>&1;
-			rm -f katsu-work/${name};
+			chmod +x katsu-work/$name;
+			/usr/bin/env CHROOT=$chroot katsu-work/$name 2>&1;
+			rm -f katsu-work/$name;
 		)?;
 	}
 
 	info!(
 		"===== Script {script} finished =====",
-		script = script.name.as_ref().unwrap_or(&"<Untitled>".to_string())
+		script = script.name.as_ref().map_or("<Untitled>", |s| &**s)
 	);
 	Ok(())
 }
 
-pub fn run_all_scripts(scripts: Vec<Script>, chroot: &PathBuf, in_chroot: bool) -> Result<()> {
+pub fn run_all_scripts(scripts: Vec<Script>, chroot: &Path, in_chroot: bool) -> Result<()> {
 	let mut scrs: HashMap<String, (Script, bool)> = HashMap::new();
 	scripts.into_iter().for_each(|s| {
 		scrs.insert(s.id.clone().unwrap_or("<?>".into()), (s, false));
@@ -197,7 +189,7 @@ pub fn run_all_scripts(scripts: Vec<Script>, chroot: &PathBuf, in_chroot: bool) 
 }
 
 pub fn run_scripts(
-	mut scripts: HashMap<String, (Script, bool)>, chroot: &PathBuf, in_chroot: bool,
+	mut scripts: HashMap<String, (Script, bool)>, chroot: &Path, in_chroot: bool,
 ) -> Result<()> {
 	for idx in scripts.clone().keys() {
 		// FIXME: if someone dares to optimize things with unsafe, go for it
@@ -244,19 +236,15 @@ impl ImageBuilder for DiskImageBuilder {
 
 		// Error checking
 
-		if manifest.clone().disk.is_none() {
-			// error out
-			return Err(eyre!("Disk layout not specified"));
-		} else {
-			info!("Disk layout specified");
-			if manifest.clone().disk.unwrap().size.is_none() {
-				return Err(eyre!("Disk size not specified"));
-			}
-		}
-
 		let mut sparse_file = fs::File::create(sparse_path)?;
 
-		let disk_size = manifest.clone().disk.unwrap().size.unwrap();
+		let Some(disk) = &manifest.disk else { 
+			return Err(eyre!("Disk layout not specified"));
+		};
+
+		let Some(disk_size) = &disk.size else {
+			return Err(eyre!("Disk size not specified"));
+		};
 
 		sparse_file.seek(std::io::SeekFrom::Start(disk_size.as_u64()))?;
 		sparse_file.write_all(&[0])?;
@@ -273,19 +261,15 @@ impl ImageBuilder for DiskImageBuilder {
 		// 	disk.unmount_from_chroot(&loopdev.path().unwrap(), &chroot)?;
 		// }
 
-		let disk = manifest.clone().disk.unwrap();
-
-		let ldp = loopdev.path().unwrap();
+		let ldp = loopdev.path().expect("Failed to unwrap loopdev.path() = None");
 
 		// Partition disk
-
 		disk.apply(&ldp)?;
 
 		// Mount partitions to chroot
-
 		disk.mount_to_chroot(&ldp, &chroot)?;
 
-		self.root_builder.build(chroot.clone().canonicalize()?, manifest)?;
+		self.root_builder.build(&chroot.canonicalize()?, manifest)?;
 
 		disk.unmount_from_chroot(&ldp, &chroot)?;
 		loopdev.detach()?;
@@ -305,7 +289,7 @@ pub struct DeviceInstaller {
 impl ImageBuilder for DeviceInstaller {
 	fn build(&self, chroot: PathBuf, image: PathBuf, manifest: &Manifest) -> Result<()> {
 		todo!();
-		self.root_builder.build(chroot, manifest)?;
+		self.root_builder.build(&chroot, manifest)?;
 		Ok(())
 	}
 }
@@ -337,8 +321,8 @@ impl ImageBuilder for IsoBuilder {
 		// Create workspace directory
 		let workspace = chroot.parent().unwrap().to_path_buf();
 		debug!("Workspace: {workspace:#?}");
-		fs::create_dir_all(workspace.clone())?;
-		self.root_builder.build(chroot.clone(), manifest)?;
+		fs::create_dir_all(&workspace)?;
+		self.root_builder.build(&chroot, manifest)?;
 
 		// Create image directory
 		let image = workspace.join("image");
@@ -383,13 +367,13 @@ impl KatsuBuilder {
 
 	pub fn build(&self) -> Result<()> {
 		let workdir = PathBuf::from(WORKDIR);
-		fs::create_dir_all(workdir.clone())?;
+		fs::create_dir_all(&workdir)?;
 
 		let chroot = workdir.join("chroot");
-		fs::create_dir_all(chroot.clone())?;
+		fs::create_dir_all(&chroot)?;
 
 		let image = workdir.join("image");
-		fs::create_dir_all(image.clone())?;
+		fs::create_dir_all(&image)?;
 
 		self.image_builder.build(chroot, image, &self.manifest)?;
 
