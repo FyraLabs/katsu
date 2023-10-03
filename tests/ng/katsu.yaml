@@ -61,8 +61,8 @@ users:
 dnf:
   releasever: 39
   repodir: repodir/
-  options:
-    - --setopt=cachedir=/var/cache/dnf
+  # options:
+    # - --setopt=cachedir=/var/cache/dnf
   # exclude:
   #   - flatpak
   #   - pkgconf
