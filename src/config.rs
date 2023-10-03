@@ -115,13 +115,15 @@ pub struct ScriptsManifest {
 	pub post: Vec<Script>,
 }
 
-#[derive(Deserialize, Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Deserialize, Debug, Clone, Serialize, PartialEq, Eq, Default)]
 // load script from file, or inline if there's one specified
 pub struct Script {
 	pub id: Option<String>,
 	pub name: Option<String>,
 	pub file: Option<PathBuf>,
 	pub inline: Option<String>,
+	#[serde(default)]
+	pub needs: Vec<String>,
 }
 
 impl Script {

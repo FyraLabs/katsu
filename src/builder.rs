@@ -1,7 +1,7 @@
-use color_eyre::Result;
+use color_eyre::{eyre::eyre, Result};
 use serde_derive::{Deserialize, Serialize};
 use std::{
-	collections::BTreeMap,
+	collections::{BTreeMap, HashMap},
 	fs,
 	io::{Seek, Write},
 	path::PathBuf,
@@ -67,7 +67,7 @@ impl RootBuilder for DnfRootBuilder {
 	fn build(&self, chroot: PathBuf, manifest: &Manifest) -> Result<()> {
 		info!("Running Pre-install scripts");
 
-		run_scripts(manifest.scripts.pre.clone(), &chroot, false)?;
+		run_all_scripts(manifest.scripts.pre.clone(), &chroot, false)?;
 
 		if let Some(disk) = manifest.clone().disk {
 			let f = disk.fstab(&chroot)?;
@@ -132,65 +132,96 @@ impl RootBuilder for DnfRootBuilder {
 
 		info!("Running post-install scripts");
 
-		run_scripts(manifest.scripts.post.clone(), &chroot, true)?;
+		run_all_scripts(manifest.scripts.post.clone(), &chroot, true)?;
 
 		Ok(())
 	}
 }
 
-pub fn run_scripts(scripts: Vec<Script>, chroot: &PathBuf, in_chroot: bool) -> Result<()> {
-	for script in scripts {
-		if let Some(mut data) = script.load() {
-			info!(
-				"Running script: {script}",
-				script = script.name.as_ref().unwrap_or(&"<Untitled>".to_string())
-			);
-			info!("Script ID: {id}", id = script.id.as_ref().unwrap_or(&"<NULL>".to_string()));
+pub fn run_script(script: Script, chroot: &PathBuf, in_chroot: bool) -> Result<()> {
+	let id = script.id.as_ref().map_or("<NULL>", |s| &**s);
+	let Some(mut data) = script.load() else { return Err(eyre!("Cannot load script `{}`", script.id.as_ref().map_or("<NULL>", |s| &**s))); };
+	let name = script.name.as_ref().map_or("<Untitled>", |s| &**s);
+	info!(id, "Running script: {name}");
 
-			let script_name =
-				format!("script-{}", script.id.as_ref().unwrap_or(&"untitled".to_string()));
-			// check if data has shebang
-			if !data.starts_with("#!") {
-				// if not, add one
-				warn!("Script does not have shebang, #!/bin/sh will be added. It is recommended to add a shebang to your script.");
-				data.insert_str(0, "#!/bin/sh\n");
-			}
-			// write data to chroot
-			let fpath = if in_chroot {
-				chroot.join("tmp").join(&script_name)
-			} else {
-				PathBuf::from(format!("katsu-work/{}", &script_name))
-			};
-			let mut file = fs::File::create(fpath)?;
-			file.write_all(data.as_bytes())?;
-			file.flush()?;
-			drop(file);
+	let name = format!("script-{}", script.id.as_ref().map_or("untitled", |s| &**s));
+	// check if data has shebang
+	if !data.starts_with("#!") {
+		warn!("Script does not have shebang, #!/bin/sh will be added. It is recommended to add a shebang to your script.");
+		data.insert_str(0, "#!/bin/sh\n");
+	}
+	// write data to chroot
+	let fpath = if in_chroot {
+		chroot.join("tmp").join(&name)
+	} else {
+		PathBuf::from(format!("katsu-work/{name}"))
+	};
+	let mut file = fs::File::create(fpath)?;
+	file.write_all(data.as_bytes())?;
+	file.flush()?;
+	drop(file);
 
-			// now add execute bit
-			if in_chroot {
-				util::run_with_chroot(&chroot, || -> color_eyre::Result<()> {
-					cmd_lib::run_cmd!(
-						chmod +x ${chroot}/tmp/${script_name};
-						unshare -R ${chroot} /tmp/${script_name} 2>&1;
-						rm -f ${chroot}/tmp/${script_name};
-					)?;
-					Ok(())
-				})?;
-			} else {
-				// export envar
-				std::env::set_var("CHROOT", chroot);
-				cmd_lib::run_cmd!(
-					chmod +x katsu-work/${script_name};
-					/usr/bin/env CHROOT=${chroot} katsu-work/${script_name} 2>&1;
-					rm -f katsu-work/${script_name};
-				)?;
-			}
+	// now add execute bit
+	if in_chroot {
+		util::run_with_chroot(&chroot, || -> Result<()> {
+			cmd_lib::run_cmd!(
+				chmod +x ${chroot}/tmp/${name};
+				unshare -R ${chroot} /tmp/${name} 2>&1;
+				rm -f ${chroot}/tmp/${name};
+			)?;
+			Ok(())
+		})?;
+	} else {
+		// export envar
+		std::env::set_var("CHROOT", chroot);
+		cmd_lib::run_cmd!(
+			chmod +x katsu-work/${name};
+			/usr/bin/env CHROOT=${chroot} katsu-work/${name} 2>&1;
+			rm -f katsu-work/${name};
+		)?;
+	}
 
-			info!(
-				"===== Script {script} finished =====",
-				script = script.name.as_ref().unwrap_or(&"<Untitled>".to_string())
-			);
+	info!(
+		"===== Script {script} finished =====",
+		script = script.name.as_ref().unwrap_or(&"<Untitled>".to_string())
+	);
+	Ok(())
+}
+
+pub fn run_all_scripts(scripts: Vec<Script>, chroot: &PathBuf, in_chroot: bool) -> Result<()> {
+	let mut scrs: HashMap<String, (Script, bool)> = HashMap::new();
+	scripts.into_iter().for_each(|s| {
+		scrs.insert(s.id.clone().unwrap_or("<?>".into()), (s, false));
+	});
+	run_scripts(scrs, chroot, in_chroot)
+}
+
+pub fn run_scripts(
+	mut scripts: HashMap<String, (Script, bool)>, chroot: &PathBuf, in_chroot: bool,
+) -> Result<()> {
+	for idx in scripts.clone().keys() {
+		// FIXME: if someone dares to optimize things with unsafe, go for it
+		// we can't use get_mut here because we need to do scripts.get_mut() later
+		let Some((scr, done)) = scripts.get(idx) else { unreachable!() };
+		if *done {
+			continue;
 		}
+		let id = scr.id.clone().unwrap_or("<NULL>".into());
+		let mut needs = HashMap::new();
+		for need in scr.needs.clone() {
+			let Some((s, done)) = scripts.get_mut(&need) else {
+				return Err(eyre!("Script `{need}` required by `{id}` not found"));
+			};
+			if *done {
+				continue;
+			}
+			needs.insert(need, (std::mem::take(s), false));
+			*done = true;
+		}
+		run_scripts(needs, chroot, in_chroot)?;
+		let Some((scr, done)) = scripts.get_mut(idx) else { unreachable!() };
+		run_script(std::mem::take(scr), chroot, in_chroot)?;
+		*done = true;
 	}
 	Ok(())
 }
@@ -215,11 +246,11 @@ impl ImageBuilder for DiskImageBuilder {
 
 		if manifest.clone().disk.is_none() {
 			// error out
-			return Err(color_eyre::eyre::eyre!("Disk layout not specified"));
+			return Err(eyre!("Disk layout not specified"));
 		} else {
 			info!("Disk layout specified");
 			if manifest.clone().disk.unwrap().size.is_none() {
-				return Err(color_eyre::eyre::eyre!("Disk size not specified"));
+				return Err(eyre!("Disk size not specified"));
 			}
 		}
 
