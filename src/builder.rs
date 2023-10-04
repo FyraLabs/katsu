@@ -158,7 +158,7 @@ pub fn run_script(script: Script, chroot: &Path, in_chroot: bool) -> Result<()> 
 		util::run_with_chroot(&chroot, || -> Result<()> {
 			cmd_lib::run_cmd!(
 				chmod +x $chroot/tmp/$name;
-				unshare -R $chroot /tmp/name 2>&1;
+				unshare -R $chroot /tmp/$name 2>&1;
 				rm -f $chroot/tmp/$name;
 			)?;
 			Ok(())
