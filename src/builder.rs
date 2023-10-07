@@ -104,8 +104,7 @@ impl RootBuilder for DnfRootBuilder {
 
 		util::run_with_chroot(chroot, || -> Result<()> {
 			cmd_lib::run_cmd!(
-				dnf install -y --releasever=$releasever --installroot=$chroot $[packages] $[options];
-				dnf clean all --installroot=$chroot;
+				dnf install -y --releasever=$releasever --installroot=$chroot $[packages] $[options] 2>&1; 				dnf clean all --installroot=$chroot;
 			)?;
 			Ok(())
 		})?;
