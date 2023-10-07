@@ -444,18 +444,20 @@ fn test_partlay() {
 	});
 
 	partlay.add_partition(Partition {
+		label: Some("boot".to_string()),
+		size: Some(ByteSize::gib(100)),
+		filesystem: "ext4".to_string(),
+		mountpoint: "/boot".to_string(),
+	});
+
+	partlay.add_partition(Partition {
 		label: Some("ROOT".to_string()),
 		size: Some(ByteSize::gib(100)),
 		filesystem: "ext4".to_string(),
 		mountpoint: "/".to_string(),
 	});
 
-	partlay.add_partition(Partition {
-		label: Some("HOME".to_string()),
-		size: Some(ByteSize::gib(100)),
-		filesystem: "ext4".to_string(),
-		mountpoint: "/home".to_string(),
-	});
+
 
 	for (i, part) in partlay.partitions.iter().enumerate() {
 		println!("Partition {i}:");
@@ -469,6 +471,52 @@ fn test_partlay() {
 
 		println!("====================");
 	}
+
+
+	let lay = partlay.sort_partitions();
+
+	println!("{:#?}", partlay);
+	println!("sorted: {:#?}", lay);
+
+
+	// Assert that:
+
+	// 1. The partitions are sorted by mountpoint
+	// / will come first
+	// /boot will come second
+	// /boot/efi will come last
+
+	let assertion = vec![
+		(
+			3,
+			Partition {
+				label: Some("ROOT".to_string()),
+				size: Some(ByteSize::gib(100)),
+				filesystem: "ext4".to_string(),
+				mountpoint: "/".to_string(),
+			}
+		),
+		(
+			2,
+			Partition {
+				label: Some("boot".to_string()),
+				size: Some(ByteSize::gib(100)),
+				filesystem: "ext4".to_string(),
+				mountpoint: "/boot".to_string(),
+			}
+		),
+		(
+			1,
+			Partition {
+				label: Some("EFI".to_string()),
+				size: Some(ByteSize::mib(100)),
+				filesystem: "efi".to_string(),
+				mountpoint: "/boot/efi".to_string(),
+			}
+		),
+	];
+
+	assert_eq!(lay, assertion)
 
 	// partlay.apply(&mock_disk).unwrap();
 	// check if parts would be applied correctly
