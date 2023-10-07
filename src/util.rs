@@ -239,10 +239,10 @@ pub fn unmount_chroot(root: &Path) -> Result<()> {
 	// 	umount $root/proc;
 	// 	sh -c "mv $root/etc/resolv.conf.bak $root/etc/resolv.conf || true";
 	// )?;
-	nix::mount::umount(&root.join("dev").join("pts"))?;
-	nix::mount::umount(&root.join("dev"))?;
-	nix::mount::umount(&root.join("sys"))?;
-	nix::mount::umount(&root.join("proc"))?;
+	nix::mount::umount2(&root.join("dev/pts"), nix::mount::MntFlags::MNT_FORCE)?;
+	nix::mount::umount2(&root.join("dev"), nix::mount::MntFlags::MNT_FORCE)?;
+	nix::mount::umount2(&root.join("sys"), nix::mount::MntFlags::MNT_FORCE)?;
+	nix::mount::umount2(&root.join("proc"), nix::mount::MntFlags::MNT_FORCE)?;
 	Ok(())
 }
 /// Mount chroot devices, then run function
