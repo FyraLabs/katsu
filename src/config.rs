@@ -238,7 +238,8 @@ impl PartitionLayout {
 				// / should always come first
 				std::cmp::Ordering::Greater
 			} else if am == bm {
-				a.mountpoint.len().cmp(&b.mountpoint.len())
+				// alphabetical order
+				a.mountpoint.cmp(&b.mountpoint)
 			} else {
 				am.cmp(&bm)
 			}
