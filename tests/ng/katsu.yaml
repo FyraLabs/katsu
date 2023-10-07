@@ -90,7 +90,7 @@ dnf:
     - NetworkManager
     - rpm
     - libgomp
-    - ultramarine-release-basic
+    - ultramarine-release-identity-basic
     - fedora-repos
 
 
