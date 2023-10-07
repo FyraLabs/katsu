@@ -217,20 +217,21 @@ impl PartitionLayout {
 			let index = self.get_index(&part.mountpoint).unwrap();
 			ordered.insert(index, part.clone());
 
-			debug!(?index, "Index of partition");
-			debug!(?part, "Partition");
+			trace!(?index, ?part, "Index and partition");
 		}
 
 		// now sort by mountpoint, least nested to most nested by counting the number of slashes
 		// but make an exception if it's just /, then it's 0
 
-		// if it has the same number of slashes, sort by the character length of the mountpoint
+		// if it has the same number of slashes, sort by alphabetical order
 
 		let mut ordered = ordered.into_iter().collect::<Vec<_>>();
 
-		ordered.sort_by(|(_, a), (_, b)| {
-			let am = a.mountpoint.matches('/').count();
-			let bm = b.mountpoint.matches('/').count();
+		ordered.sort_unstable_by(|(_, a), (_, b)| {
+			// trim trailing slashes
+			
+			let am = a.mountpoint.trim_end_matches('/').matches('/').count();
+			let bm = b.mountpoint.trim_end_matches('/').matches('/').count();
 			if a.mountpoint == "/" {
 				// / should always come first
 				std::cmp::Ordering::Less
