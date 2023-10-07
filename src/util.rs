@@ -62,8 +62,7 @@ macro_rules! chroot_run {
 #[macro_export]
 macro_rules! chroot_run_cmd {
 	($chroot:expr, $($cmd:tt)*) => {{
-		crate::util::run_with_chroot(&PathBuf::from($chroot.clone()), || {
-
+		crate::util::run_with_chroot(&PathBuf::from($chroot), || {
 			cmd_lib::run_cmd!($($cmd)*)?;
 			Ok(())
 		})
@@ -74,8 +73,7 @@ macro_rules! chroot_run_cmd {
 #[macro_export]
 macro_rules! chroot_run_fun {
 	($chroot:expr, $($cmd:tt)*) => {{
-		crate::util::run_with_chroot(&PathBuf::from($chroot.clone()), || {
-
+		crate::util::run_with_chroot(&PathBuf::from($chroot), || {
 			cmd_lib::run_fun!($($cmd)*)?;
 			Ok(())
 		})
@@ -251,8 +249,8 @@ pub fn unmount_chroot(root: &Path) -> Result<()> {
 ///
 /// NOTE: This function requires that the function inside returns a result, so we can catch errors and unmount early
 pub fn run_with_chroot<T>(root: &Path, f: impl FnOnce() -> Result<T>) -> Result<T> {
-	prepare_chroot(root.clone())?;
+	prepare_chroot(root)?;
 	let res = f();
-	unmount_chroot(root.clone())?;
+	unmount_chroot(root)?;
 	res
 }

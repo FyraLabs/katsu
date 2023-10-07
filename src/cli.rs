@@ -38,7 +38,7 @@ impl std::str::FromStr for OutputFormat {
 			"iso" => Ok(OutputFormat::Iso),
 			"disk-image" => Ok(OutputFormat::DiskImage),
 			"device" => Ok(OutputFormat::Device),
-			_ => Err(format!("{} is not a valid output format", s)),
+			_ => Err(format!("{s} is not a valid output format")),
 		}
 	}
 }
@@ -50,9 +50,9 @@ pub fn parse(cli: KatsuCli) -> Result<()> {
 
 	sudo::escalate_if_needed().unwrap();
 
-	let manifest = Manifest::load_all(cli.config.unwrap())?;
+	let manifest = Manifest::load_all(&cli.config.unwrap())?;
 
-	trace!(man = ?manifest, "Loaded manifest");
+	trace!(?manifest, "Loaded manifest");
 
 	let builder = KatsuBuilder::new(manifest, cli.output)?;
 

@@ -63,7 +63,7 @@ impl RootBuilder for DnfRootBuilder {
 	fn build(&self, chroot: &Path, manifest: &Manifest) -> Result<()> {
 		info!("Running Pre-install scripts");
 
-		run_all_scripts(manifest.scripts.pre.clone(), chroot, false)?;
+		run_all_scripts(&manifest.scripts.pre, chroot, false)?;
 
 		if let Some(disk) = &manifest.disk {
 			let f = disk.fstab(chroot)?;
@@ -102,32 +102,27 @@ impl RootBuilder for DnfRootBuilder {
 		}
 		options.append(&mut exclude.iter().map(|p| format!("--exclude={p}")).collect());
 
-		// todo: maybe not unwrap?
 		util::run_with_chroot(chroot, || -> Result<()> {
 			cmd_lib::run_cmd!(
-				dnf install -y --releasever=${releasever} --installroot=${chroot} $[packages] $[options];
-				dnf clean all --installroot=${chroot};
+				dnf install -y --releasever=$releasever --installroot=$chroot $[packages] $[options];
+				dnf clean all --installroot=$chroot;
 			)?;
 			Ok(())
 		})?;
 
 		info!("Setting up users");
 
-		let users = &manifest.users;
-
-		if users.is_empty() {
+		if manifest.users.is_empty() {
 			warn!("No users specified, no users will be created!");
 		} else {
-			for user in users {
-				user.add_to_chroot(chroot)?;
-			}
+			manifest.users.iter().try_for_each(|user| user.add_to_chroot(chroot))?;
 		}
 
 		// now, let's run some funny post-install scripts
 
 		info!("Running post-install scripts");
 
-		run_all_scripts(manifest.scripts.post.clone(), &chroot, true)?;
+		run_all_scripts(&manifest.scripts.post, &chroot, true)?;
 
 		Ok(())
 	}
@@ -180,10 +175,10 @@ pub fn run_script(script: Script, chroot: &Path, in_chroot: bool) -> Result<()> 
 	Ok(())
 }
 
-pub fn run_all_scripts(scripts: Vec<Script>, chroot: &Path, in_chroot: bool) -> Result<()> {
+pub fn run_all_scripts(scripts: &[Script], chroot: &Path, in_chroot: bool) -> Result<()> {
 	let mut scrs: HashMap<String, (Script, bool)> = HashMap::new();
 	scripts.into_iter().for_each(|s| {
-		scrs.insert(s.id.clone().unwrap_or("<?>".into()), (s, false));
+		scrs.insert(s.id.clone().unwrap_or("<?>".into()), (s.clone(), false));
 	});
 	run_scripts(scrs, chroot, in_chroot)
 }
@@ -219,7 +214,7 @@ pub fn run_scripts(
 }
 
 pub trait ImageBuilder {
-	fn build(&self, chroot: PathBuf, image: PathBuf, manifest: &Manifest) -> Result<()>;
+	fn build(&self, chroot: &Path, image: &Path, manifest: &Manifest) -> Result<()>;
 }
 /// Creates a disk image, then installs to it
 pub struct DiskImageBuilder {
@@ -229,7 +224,7 @@ pub struct DiskImageBuilder {
 }
 
 impl ImageBuilder for DiskImageBuilder {
-	fn build(&self, chroot: PathBuf, image: PathBuf, manifest: &Manifest) -> Result<()> {
+	fn build(&self, chroot: &Path, image: &Path, manifest: &Manifest) -> Result<()> {
 		// create sparse file on disk
 		let sparse_path = &image.canonicalize()?.join("katsu.img");
 		debug!(image = ?sparse_path, "Creating sparse file");
@@ -271,7 +266,7 @@ impl ImageBuilder for DiskImageBuilder {
 
 		self.root_builder.build(&chroot.canonicalize()?, manifest)?;
 
-		disk.unmount_from_chroot(&ldp, &chroot)?;
+		disk.unmount_from_chroot(&ldp, chroot)?;
 		loopdev.detach()?;
 
 		Ok(())
@@ -287,7 +282,7 @@ pub struct DeviceInstaller {
 }
 
 impl ImageBuilder for DeviceInstaller {
-	fn build(&self, chroot: PathBuf, image: PathBuf, manifest: &Manifest) -> Result<()> {
+	fn build(&self, chroot: &Path, image: &Path, manifest: &Manifest) -> Result<()> {
 		todo!();
 		self.root_builder.build(&chroot, manifest)?;
 		Ok(())
@@ -300,24 +295,18 @@ pub struct IsoBuilder {
 }
 
 impl IsoBuilder {
-	pub fn squashfs(&self, chroot: PathBuf, image: PathBuf) -> Result<()> {
-		// todo!();
-		cmd_lib::run_cmd!(
-			mksquashfs ${chroot} ${image} -comp xz -Xbcj x86 -b 1048576 -noappend;
-		)?;
+	pub fn squashfs(&self, chroot: &Path, image: &Path) -> Result<()> {
+		cmd_lib::run_cmd!(mksquashfs $chroot $image -comp xz -Xbcj x86 -b 1048576 -noappend)?;
 		Ok(())
 	}
-	pub fn erofs(&self, chroot: PathBuf, image: PathBuf) -> Result<()> {
-		// todo!();
-		cmd_lib::run_cmd!(
-			mkfs.erofs -d ${chroot} -o ${image};
-		)?;
+	pub fn erofs(&self, chroot: &Path, image: &Path) -> Result<()> {
+		cmd_lib::run_cmd!(mkfs.erofs -d $chroot -o $image)?;
 		Ok(())
 	}
 }
 
 impl ImageBuilder for IsoBuilder {
-	fn build(&self, chroot: PathBuf, image: PathBuf, manifest: &Manifest) -> Result<()> {
+	fn build(&self, chroot: &Path, image: &Path, manifest: &Manifest) -> Result<()> {
 		// Create workspace directory
 		let workspace = chroot.parent().unwrap().to_path_buf();
 		debug!("Workspace: {workspace:#?}");
@@ -325,11 +314,11 @@ impl ImageBuilder for IsoBuilder {
 		self.root_builder.build(&chroot, manifest)?;
 
 		// Create image directory
-		let image = workspace.join("image");
-		fs::create_dir_all(image.clone())?;
+		let image_dir = workspace.join("image");
+		fs::create_dir_all(&image_dir)?;
 
 		// generate squashfs
-		self.squashfs(chroot.clone(), image.clone())?;
+		self.squashfs(&chroot, &image)?;
 
 		Ok(())
 	}
@@ -375,7 +364,7 @@ impl KatsuBuilder {
 		let image = workdir.join("image");
 		fs::create_dir_all(&image)?;
 
-		self.image_builder.build(chroot, image, &self.manifest)?;
+		self.image_builder.build(&chroot, &image, &self.manifest)?;
 
 		// chroot_run_cmd!(chroot, unshare -R ${chroot} bash -c "echo woo")?;
 		Ok(())
