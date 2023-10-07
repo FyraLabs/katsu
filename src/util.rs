@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use color_eyre::Result;
-use tracing::debug;
+use tracing::{debug, error};
 
 #[macro_export]
 macro_rules! run {
@@ -170,53 +170,80 @@ pub fn prepare_chroot(root: &Path) -> Result<()> {
 	// )?;
 	// rewrite the above with
 
-	std::fs::create_dir_all(root.clone())?;
 
-	let proc_pbuf = root.join("proc");
+	let mnts = vec![
+		(Some("/proc"), root.join("proc"), Some("proc"), nix::mount::MsFlags::empty(), None::<&str>),
+		(Some("/sys"), root.join("sys"), Some("sysfs"), nix::mount::MsFlags::empty(), None::<&str>),
+		(Some("/dev"), root.join("dev"), None::<&str>, nix::mount::MsFlags::MS_BIND, None::<&str>),
+		(Some("/dev/pts"), root.join("dev/pts"), None::<&str>, nix::mount::MsFlags::MS_BIND, None::<&str>),
+	];
 
-	std::fs::create_dir_all(&proc_pbuf)?;
+	for (src, target, fstype, flags, data) in mnts {
 
-	nix::mount::mount(
-		Some("/proc"),
-		&root.join("proc"),
-		Some("proc"),
-		nix::mount::MsFlags::empty(),
-		None::<&str>,
-	)?;
+		std::fs::create_dir_all(&target)?;
+		let mut i = 0;
+		loop {
+			if nix::mount::mount(src, &target, fstype, flags, data).is_ok() {
+				break;
+			}
+			i += 1;
+			error!("Failed to mount {:?}, {time} tries out of 10", target, time = i);
+			// wait 500ms
+			std::thread::sleep(std::time::Duration::from_millis(500));
+			if i > 10 {
+				break;
+			}
+		}
 
-	let sys_pbuf = root.join("sys");
+	}
 
-	std::fs::create_dir_all(&sys_pbuf)?;
+	// std::fs::create_dir_all(root.clone())?;
 
-	nix::mount::mount(
-		Some("/sys"),
-		&root.join("sys"),
-		Some("sysfs"),
-		nix::mount::MsFlags::empty(),
-		None::<&str>,
-	)?;
+	// let proc_pbuf = root.join("proc");
 
-	let dev_pbuf = root.join("dev");
+	// std::fs::create_dir_all(&proc_pbuf)?;
 
-	std::fs::create_dir_all(&dev_pbuf.join("pts"))?;
+	// nix::mount::mount(
+	// 	Some("/proc"),
+	// 	&root.join("proc"),
+	// 	Some("proc"),
+	// 	nix::mount::MsFlags::empty(),
+	// 	None::<&str>,
+	// )?;
 
-	// bind mount this one instead
+	// let sys_pbuf = root.join("sys");
 
-	nix::mount::mount(
-		Some("/dev"),
-		&root.join("dev"),
-		None::<&str>,
-		nix::mount::MsFlags::MS_BIND,
-		None::<&str>,
-	)?;
+	// std::fs::create_dir_all(&sys_pbuf)?;
 
-	nix::mount::mount(
-		Some("/dev/pts"),
-		&root.join("dev/pts"),
-		None::<&str>,
-		nix::mount::MsFlags::MS_BIND,
-		None::<&str>,
-	)?;
+	// nix::mount::mount(
+	// 	Some("/sys"),
+	// 	&root.join("sys"),
+	// 	Some("sysfs"),
+	// 	nix::mount::MsFlags::empty(),
+	// 	None::<&str>,
+	// )?;
+
+	// let dev_pbuf = root.join("dev");
+
+	// std::fs::create_dir_all(&dev_pbuf.join("pts"))?;
+
+	// // bind mount this one instead
+
+	// nix::mount::mount(
+	// 	Some("/dev"),
+	// 	&root.join("dev"),
+	// 	None::<&str>,
+	// 	nix::mount::MsFlags::MS_BIND,
+	// 	None::<&str>,
+	// )?;
+
+	// nix::mount::mount(
+	// 	Some("/dev/pts"),
+	// 	&root.join("dev/pts"),
+	// 	None::<&str>,
+	// 	nix::mount::MsFlags::MS_BIND,
+	// 	None::<&str>,
+	// )?;
 
 	// copy resolv.conf
 
@@ -225,6 +252,18 @@ pub fn prepare_chroot(root: &Path) -> Result<()> {
 	std::fs::create_dir_all(&root.join("etc"))?;
 
 	std::fs::write(root.join("etc/resolv.conf"), resolv_conf)?;
+
+	// mount resolv.conf
+
+/* 	std::fs::create_dir_all(&root.join("etc"))?;
+
+	nix::mount::mount(
+		Some("/etc/resolv.conf"),
+		&root.join("etc/resolv.conf"),
+		None::<&str>,
+		nix::mount::MsFlags::MS_BIND,
+		None::<&str>,
+	)?; */
 
 	Ok(())
 }
@@ -239,10 +278,33 @@ pub fn unmount_chroot(root: &Path) -> Result<()> {
 	// 	umount $root/proc;
 	// 	sh -c "mv $root/etc/resolv.conf.bak $root/etc/resolv.conf || true";
 	// )?;
-	nix::mount::umount2(&root.join("dev/pts"), nix::mount::MntFlags::MNT_FORCE)?;
-	nix::mount::umount2(&root.join("dev"), nix::mount::MntFlags::MNT_FORCE)?;
-	nix::mount::umount2(&root.join("sys"), nix::mount::MntFlags::MNT_FORCE)?;
-	nix::mount::umount2(&root.join("proc"), nix::mount::MntFlags::MNT_FORCE)?;
+	// loop until all unmounts are successful
+
+	let mounts = vec![root.join("dev/pts"), root.join("dev"), root.join("sys"), root.join("proc")];
+
+	for mount in mounts {
+		let mut i = 0;
+		
+		loop {
+			// combine mntflags: MNT_FORCE | MNT_DETACH
+			if nix::mount::umount2(&mount, nix::mount::MntFlags::MNT_FORCE.union(nix::mount::MntFlags::MNT_DETACH)).is_ok() {
+				break;
+			}
+			i += 1;
+			error!("Failed to unmount {:?}, {time} tries out of 10", mount, time = i);
+			// wait 500ms
+			std::thread::sleep(std::time::Duration::from_millis(500));
+			if i > 10 {
+				break;
+			}
+		}
+	}
+
+	// nix::mount::umount2(&root.join("dev/pts"), nix::mount::MntFlags::MNT_FORCE)?;
+	// let umount = nix::mount::umount2(&root.join("dev"), nix::mount::MntFlags::MNT_FORCE);
+
+	// nix::mount::umount2(&root.join("sys"), nix::mount::MntFlags::MNT_FORCE)?;
+	// nix::mount::umount2(&root.join("proc"), nix::mount::MntFlags::MNT_FORCE)?;
 	Ok(())
 }
 /// Mount chroot devices, then run function
