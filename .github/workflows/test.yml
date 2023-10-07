@@ -60,6 +60,8 @@ jobs:
 
   clippy:
     name: Clippy
+    container:
+      image: ghcr.io/terrapkg/builder:f38
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
