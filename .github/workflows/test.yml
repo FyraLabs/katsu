@@ -4,7 +4,7 @@ on:
   push:
 
 jobs:
-  integration-test:
+  unit-test:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/terrapkg/builder:f38
