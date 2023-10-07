@@ -216,6 +216,7 @@ impl PartitionLayout {
 			ordered.insert(index, part.clone());
 
 			debug!(?index, "Index of partition");
+			debug!(?part, "Partition");
 		}
 
 		// now sort by mountpoint, least nested to most nested by counting the number of slashes
@@ -232,7 +233,7 @@ impl PartitionLayout {
 		// mount partitions to chroot
 
 		// sort partitions by mountpoint
-		let ordered: Vec<_> = self.sort_partitions().into_iter().rev().collect();
+		let ordered: Vec<_> = self.sort_partitions();
 
 		// Ok, so for some reason the partitions are swapped?
 		for (index, part) in &ordered {
@@ -256,7 +257,7 @@ impl PartitionLayout {
 		// unmount partitions from chroot
 
 		// sort partitions by mountpoint
-		let ordered = self.sort_partitions();
+		let ordered = self.sort_partitions().into_iter().rev().collect::<Vec<_>>();
 
 		for (index, part) in &ordered {
 			let devname = partition_name(&disk.to_string_lossy(), *index);
