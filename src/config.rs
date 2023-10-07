@@ -8,8 +8,10 @@ use std::{
 	fs,
 	io::Write,
 	path::{Path, PathBuf},
+	str::FromStr,
 };
 use tracing::{debug, info, trace};
+use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, Layer};
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct Manifest {
@@ -222,9 +224,24 @@ impl PartitionLayout {
 		// now sort by mountpoint, least nested to most nested by counting the number of slashes
 		// but make an exception if it's just /, then it's 0
 
+		// if it has the same number of slashes, sort by the character length of the mountpoint
+
 		let mut ordered = ordered.into_iter().collect::<Vec<_>>();
+
 		ordered.sort_by(|(_, a), (_, b)| {
-			a.mountpoint.matches('/').count().cmp(&b.mountpoint.matches('/').count())
+			let am = a.mountpoint.matches('/').count();
+			let bm = b.mountpoint.matches('/').count();
+			if a.mountpoint == "/" {
+				// / should always come first
+				std::cmp::Ordering::Less
+			} else if b.mountpoint == "/" {
+				// / should always come first
+				std::cmp::Ordering::Greater
+			} else if am == bm {
+				a.mountpoint.len().cmp(&b.mountpoint.len())
+			} else {
+				am.cmp(&bm)
+			}
 		});
 		ordered
 	}
@@ -431,6 +448,13 @@ impl PartitionLayout {
 #[test]
 fn test_partlay() {
 	// Partition layout test
+	let subscriber =
+		tracing_subscriber::Registry::default().with(tracing_error::ErrorLayer::default()).with(
+			tracing_subscriber::fmt::layer()
+				.pretty()
+				.with_filter(tracing_subscriber::EnvFilter::from_str("trace").unwrap()),
+		);
+	tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
 	let mock_disk = PathBuf::from("/dev/sda");
 
@@ -457,8 +481,6 @@ fn test_partlay() {
 		mountpoint: "/".to_string(),
 	});
 
-
-
 	for (i, part) in partlay.partitions.iter().enumerate() {
 		println!("Partition {i}:");
 		println!("{part:#?}");
@@ -472,12 +494,10 @@ fn test_partlay() {
 		println!("====================");
 	}
 
-
 	let lay = partlay.sort_partitions();
 
 	println!("{:#?}", partlay);
 	println!("sorted: {:#?}", lay);
-
 
 	// Assert that:
 
@@ -494,7 +514,7 @@ fn test_partlay() {
 				size: Some(ByteSize::gib(100)),
 				filesystem: "ext4".to_string(),
 				mountpoint: "/".to_string(),
-			}
+			},
 		),
 		(
 			2,
@@ -503,7 +523,7 @@ fn test_partlay() {
 				size: Some(ByteSize::gib(100)),
 				filesystem: "ext4".to_string(),
 				mountpoint: "/boot".to_string(),
-			}
+			},
 		),
 		(
 			1,
@@ -512,7 +532,7 @@ fn test_partlay() {
 				size: Some(ByteSize::mib(100)),
 				filesystem: "efi".to_string(),
 				mountpoint: "/boot/efi".to_string(),
-			}
+			},
 		),
 	];
 
