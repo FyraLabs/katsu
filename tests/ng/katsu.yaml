@@ -64,10 +64,9 @@ dnf:
   options:
     - --setopt=cachedir=/var/cache/dnf
     - --nogpgcheck
-  # exclude:
-  #   - flatpak
-  #   - pkgconf
-  #   - 
+  exclude:
+    - fedora-release*
+    - generic-release*
   packages:
     - filesystem
     - setup
