@@ -24,8 +24,6 @@ find_bootdev
 # get blkid of /boot
 bootid=$(blkid -s UUID -o value $bootdev)
 
-# heredoc for /dev/disk
-
 cat << EOF > /boot/efi/EFI/fedora/grub.cfg
 search --no-floppy --fs-uuid --set=dev $bootid
 set prefix=(\$dev)/grub2
@@ -33,6 +31,10 @@ set prefix=(\$dev)/grub2
 export \$prefix
 configfile \$prefix/grub.cfg
 EOF
+
+# edit ro to rw in all entries
+
+sed -i 's/ ro  / rw  /g' /boot/loader/entries/*.conf
 
 
 dracut -vfN --add-drivers "virtio virtio_blk virtio_scsi xchi_pci mmc" --regenerate-all
