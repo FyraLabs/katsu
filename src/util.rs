@@ -170,16 +170,26 @@ pub fn prepare_chroot(root: &Path) -> Result<()> {
 	// )?;
 	// rewrite the above with
 
-
 	let mnts = vec![
-		(Some("/proc"), root.join("proc"), Some("proc"), nix::mount::MsFlags::empty(), None::<&str>),
+		(
+			Some("/proc"),
+			root.join("proc"),
+			Some("proc"),
+			nix::mount::MsFlags::empty(),
+			None::<&str>,
+		),
 		(Some("/sys"), root.join("sys"), Some("sysfs"), nix::mount::MsFlags::empty(), None::<&str>),
 		(Some("/dev"), root.join("dev"), None::<&str>, nix::mount::MsFlags::MS_BIND, None::<&str>),
-		(Some("/dev/pts"), root.join("dev/pts"), None::<&str>, nix::mount::MsFlags::MS_BIND, None::<&str>),
+		(
+			Some("/dev/pts"),
+			root.join("dev/pts"),
+			None::<&str>,
+			nix::mount::MsFlags::MS_BIND,
+			None::<&str>,
+		),
 	];
 
 	for (src, target, fstype, flags, data) in mnts {
-
 		std::fs::create_dir_all(&target)?;
 		let mut i = 0;
 		loop {
@@ -194,7 +204,6 @@ pub fn prepare_chroot(root: &Path) -> Result<()> {
 				break;
 			}
 		}
-
 	}
 
 	// std::fs::create_dir_all(root.clone())?;
@@ -255,7 +264,7 @@ pub fn prepare_chroot(root: &Path) -> Result<()> {
 
 	// mount resolv.conf
 
-/* 	std::fs::create_dir_all(&root.join("etc"))?;
+	/* 	std::fs::create_dir_all(&root.join("etc"))?;
 
 	nix::mount::mount(
 		Some("/etc/resolv.conf"),
@@ -284,10 +293,15 @@ pub fn unmount_chroot(root: &Path) -> Result<()> {
 
 	for mount in mounts {
 		let mut i = 0;
-		
+
 		loop {
 			// combine mntflags: MNT_FORCE | MNT_DETACH
-			if nix::mount::umount2(&mount, nix::mount::MntFlags::MNT_FORCE.union(nix::mount::MntFlags::MNT_DETACH)).is_ok() {
+			if nix::mount::umount2(
+				&mount,
+				nix::mount::MntFlags::MNT_FORCE.union(nix::mount::MntFlags::MNT_DETACH),
+			)
+			.is_ok()
+			{
 				break;
 			}
 			i += 1;

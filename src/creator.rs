@@ -4,8 +4,8 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
 	cfg::{Config, OutputFormat},
-	run,
-	util::Arch, chroot_run,
+	chroot_run, run,
+	util::Arch,
 };
 
 const DEFAULT_DNF: &str = "dnf5";
@@ -44,7 +44,10 @@ pub trait ImageCreator {
 		let mut mounts = mounts
 			.lines()
 			.map(|x| {
-				let [uuid, target, fstype, options] = x.split_whitespace().collect::<Vec<_>>()[..] else { panic!("Bad output from findmnt: {x}"); };
+				let [uuid, target, fstype, options] = x.split_whitespace().collect::<Vec<_>>()[..]
+				else {
+					panic!("Bad output from findmnt: {x}");
+				};
 				format!("UUID={uuid}\t{target}\t{fstype}\t{options}\t0\t0")
 			})
 			.collect::<Vec<String>>()

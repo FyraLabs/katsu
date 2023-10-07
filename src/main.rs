@@ -1,10 +1,10 @@
+mod boot;
+mod builder;
 mod cfg;
+mod cli;
 mod config;
 mod creator;
 mod util;
-mod builder;
-mod boot;
-mod cli;
 
 use clap::Parser;
 use color_eyre::Result;
@@ -28,7 +28,7 @@ fn main() -> Result<()> {
 
 	cli::parse(cli)
 
-/* 	for cfg_file in std::env::args().skip(1) {
+	/* 	for cfg_file in std::env::args().skip(1) {
 		trace!(cfg_file, "Reading/Parsing config");
 		let config: Config = serde_yaml::from_str(&std::fs::read_to_string(cfg_file)?)?;
 		trace!("Config read done: {config:#?}");
@@ -47,7 +47,7 @@ fn main() -> Result<()> {
 		// 	Arch::X86_64 => LiveImageCreatorX86_64::from(config).exec_iso()?,
 
 		// 	// todo: please clean this up
-		
+
 		// 	Arch::AArch64 => todo!(),
 
 		// 	_ => panic!("Unknown architecture"),

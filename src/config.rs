@@ -229,7 +229,7 @@ impl PartitionLayout {
 
 		ordered.sort_unstable_by(|(_, a), (_, b)| {
 			// trim trailing slashes
-			
+
 			let am = a.mountpoint.trim_end_matches('/').matches('/').count();
 			let bm = b.mountpoint.trim_end_matches('/').matches('/').count();
 			if a.mountpoint == "/" {

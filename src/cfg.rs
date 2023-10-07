@@ -24,7 +24,7 @@ impl From<&str> for OutputFormat {
 			_ => {
 				tracing::warn!("Unknown format: {}, setting ISO mode", value);
 				Self::Iso
-			}
+			},
 		}
 	}
 }
@@ -71,7 +71,6 @@ pub struct DiskLayout {
 	pub disk_size: String,
 }
 
-
 #[derive(Deserialize, Debug, Clone)]
 pub struct System {
 	/// The release version of the new system.
@@ -85,7 +84,7 @@ pub struct System {
 	/// More kernel parameters.
 	/// By default the kernel parameters are:
 	/// `root=live:LABEL={volid} rd.live.image selinux=0`
-	/// 
+	///
 	/// If you want to add more parameters after the default ones, use this option.
 	pub kernel_params: Option<String>,
 }

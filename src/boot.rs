@@ -1,6 +1,6 @@
-use std::path::PathBuf;
 use color_eyre::Result;
+use std::path::PathBuf;
 
 pub trait BootloaderConfig {
-    fn config(&self, chroot: PathBuf) -> Result<()>;
+	fn config(&self, chroot: PathBuf) -> Result<()>;
 }

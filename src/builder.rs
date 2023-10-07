@@ -4,7 +4,7 @@ use std::{
 	collections::{BTreeMap, HashMap},
 	fs,
 	io::{Seek, Write},
-	path::{PathBuf, Path},
+	path::{Path, PathBuf},
 };
 use tracing::{debug, info, trace, warn};
 
@@ -129,7 +129,9 @@ impl RootBuilder for DnfRootBuilder {
 
 pub fn run_script(script: Script, chroot: &Path, in_chroot: bool) -> Result<()> {
 	let id = script.id.as_ref().map_or("<NULL>", |s| &**s);
-	let Some(mut data) = script.load() else { return Err(eyre!("Cannot load script `{id}`")); };
+	let Some(mut data) = script.load() else {
+		return Err(eyre!("Cannot load script `{id}`"));
+	};
 	let name = script.name.as_ref().map_or("<Untitled>", |s| &**s);
 	info!(id, "Running script: {name}");
 
@@ -232,7 +234,7 @@ impl ImageBuilder for DiskImageBuilder {
 
 		let mut sparse_file = fs::File::create(sparse_path)?;
 
-		let Some(disk) = &manifest.disk else { 
+		let Some(disk) = &manifest.disk else {
 			return Err(eyre!("Disk layout not specified"));
 		};
 
