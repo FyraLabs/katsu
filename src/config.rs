@@ -42,6 +42,9 @@ pub struct Manifest {
 	/// Users to add to the image
 	#[serde(default)]
 	pub users: Vec<Auth>,
+
+	/// Extra parameters to the kernel command line in bootloader configs
+	pub kernel_cmdline: Option<String>,
 }
 
 impl Manifest {

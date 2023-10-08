@@ -37,6 +37,98 @@ impl From<&str> for Bootloader {
 	}
 }
 
+const VOLID: &str = "KATSU-LIVEOS";
+
+impl Bootloader {
+	pub fn install(&self, image: &Path) -> Result<()> {
+		match *self {
+			Self::Grub => todo!(),
+			Self::Limine => cmd_lib::run_cmd!(limine bios-install $image)?,
+			Self::SystemdBoot => todo!(),
+		}
+		Ok(())
+	}
+	pub fn get_bins(&self) -> (&'static str, &'static str) {
+		match *self {
+			Self::Grub => todo!(),
+			Self::Limine => ("boot/limine-uefi-cd.bin", "boot/limine-uefi-cd.bin"),
+			Self::SystemdBoot => todo!(),
+		}
+	}
+	fn cp_vmlinuz_initramfs(&self, chroot: &Path, dest: &Path) -> Result<(String, String)> {
+		let bootdir = chroot.join("boot");
+		let mut vmlinuz = None;
+		let mut initramfs = None;
+		for f in bootdir.read_dir()? {
+			let f = f?;
+			if !f.metadata()?.is_file() {
+				continue;
+			}
+			let name = f.file_name();
+			let name = name.to_string_lossy();
+			if let Some((_, s)) = name.rsplit_once('/') {
+				if s.starts_with("vmlinuz-") {
+					vmlinuz = Some(s.to_string());
+				} else if s.starts_with("initramfs-") {
+					initramfs = Some(s.to_string());
+				}
+			}
+			if vmlinuz.is_some() && initramfs.is_some() {
+				break;
+			}
+		}
+
+		let Some(initramfs) = initramfs else {
+			return Err(eyre!("Cannot find initramfs in {bootdir:?}"));
+		};
+		let Some(vmlinuz) = vmlinuz else {
+			return Err(eyre!("Cannot find vmlinuz in {bootdir:?}"));
+		};
+
+		std::fs::copy(bootdir.join(&vmlinuz), dest.join("boot").join(&vmlinuz))?;
+		std::fs::copy(bootdir.join(&initramfs), dest.join("boot").join(&initramfs))?;
+
+		Ok((vmlinuz, initramfs))
+	}
+
+	fn cp_limine(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
+		let distro = &manifest.distro.as_ref().map_or("Linux", |s| &*s);
+		let cmd = &manifest.kernel_cmdline.as_ref().map_or("", |s| &*s);
+		let root = chroot.parent().unwrap().join("image");
+		// std::fs::create_dir_all(format!("./{distro}/LiveOS"))?;
+		std::fs::copy(
+			"/usr/share/limine/limine-uefi-cd.bin",
+			root.join("boot/limine-uefi-cd.bin"),
+		)?;
+		std::fs::copy(
+			"/usr/share/limine/limine-bios-cd.bin",
+			root.join("boot/limine-bios-cd.bin"),
+		)?;
+		std::fs::copy("/usr/share/limine/limine-bios.sys", root.join("boot/limine-bios.sys"))?;
+
+		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &root)?;
+
+		// Generate limine.cfg
+		let mut f = std::fs::File::create(root.join("boot/limine.cfg"))
+			.map_err(|e| eyre!(e).wrap_err("Cannot create limine.cfg"))?;
+
+		f.write_fmt(format_args!("TIMEOUT=5\n\n:{distro}\n\tPROTOCOL=linux\n\t"))?;
+		f.write_fmt(format_args!("KERNEL_PATH=boot:///boot/{vmlinuz}\n\t"))?;
+		f.write_fmt(format_args!("MODULE_PATH=boot:///boot/{initramfs}\n\t"))?;
+		f.write_fmt(format_args!("CMDLINE=root=live:LABEL={VOLID} rd.live.image selinux=0 {cmd}"))?;
+
+		Ok(())
+	}
+	pub fn copy_liveos(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
+		match *self {
+			Self::Grub => todo!(),
+			Self::Limine => self.cp_limine(manifest, chroot)?,
+			Self::SystemdBoot => todo!(),
+		}
+		Ok(())
+	}
+}
+
 pub trait RootBuilder {
 	fn build(&self, chroot: &Path, manifest: &Manifest) -> Result<()>;
 }
@@ -102,12 +194,10 @@ impl RootBuilder for DnfRootBuilder {
 		}
 		options.append(&mut exclude.iter().map(|p| format!("--exclude={p}")).collect());
 
-		util::run_with_chroot(chroot, || -> Result<()> {
-			cmd_lib::run_cmd!(
-				dnf install -y --releasever=$releasever --installroot=$chroot $[packages] $[options] 2>&1; 				dnf clean all --installroot=$chroot;
-			)?;
-			Ok(())
-		})?;
+		crate::chroot_run_cmd!(chroot,
+			dnf install -y --releasever=$releasever --installroot=$chroot $[packages] $[options] 2>&1;
+			dnf clean all --installroot=$chroot;
+		)?;
 
 		info!("Setting up users");
 
@@ -151,14 +241,11 @@ pub fn run_script(script: Script, chroot: &Path, in_chroot: bool) -> Result<()> 
 
 	// now add execute bit
 	if in_chroot {
-		util::run_with_chroot(&chroot, || -> Result<()> {
-			cmd_lib::run_cmd!(
-				chmod +x $chroot/tmp/$name;
-				unshare -R $chroot /tmp/$name 2>&1;
-				rm -f $chroot/tmp/$name;
-			)?;
-			Ok(())
-		})?;
+		crate::chroot_run_cmd!(chroot,
+			chmod +x $chroot/tmp/$name;
+			unshare -R $chroot /tmp/$name 2>&1;
+			rm -f $chroot/tmp/$name;
+		)?;
 	} else {
 		// export envar
 		std::env::set_var("CHROOT", chroot);
@@ -304,6 +391,12 @@ impl IsoBuilder {
 		cmd_lib::run_cmd!(mkfs.erofs -d $chroot -o $image)?;
 		Ok(())
 	}
+	pub fn xorriso(&self, chroot: &Path, image: &Path) -> Result<()> {
+		let (uefi_bin, bios_bin) = self.bootloader.get_bins();
+		let root = chroot.parent().unwrap().join("image");
+		cmd_lib::run_cmd!(xorriso -as mkisofs -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $uefi_bin -efi-boot-part --efi-boot-image --protective-msdos-label $root -volid $VOLID -o $image)?;
+		Ok(())
+	}
 }
 
 impl ImageBuilder for IsoBuilder {
@@ -314,12 +407,18 @@ impl ImageBuilder for IsoBuilder {
 		fs::create_dir_all(&workspace)?;
 		self.root_builder.build(&chroot, manifest)?;
 
-		// Create image directory
-		let image_dir = workspace.join("image");
+		// temporarily store content of iso
+		let image_dir = workspace.join("image/LiveOS");
 		fs::create_dir_all(&image_dir)?;
 
 		// generate squashfs
-		self.squashfs(&chroot, &image)?;
+		self.squashfs(&chroot, &image_dir.join("squashfs.img"))?;
+
+		self.bootloader.copy_liveos(manifest, chroot)?;
+
+		self.xorriso(chroot, image)?;
+
+		self.bootloader.install(image)?;
 
 		Ok(())
 	}
