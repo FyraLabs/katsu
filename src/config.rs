@@ -8,10 +8,9 @@ use std::{
 	fs,
 	io::Write,
 	path::{Path, PathBuf},
-	str::FromStr,
 };
 use tracing::{debug, info, trace};
-use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, Layer};
+use tracing_subscriber::Layer;
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct Manifest {
@@ -263,7 +262,7 @@ impl PartitionLayout {
 
 			// clean the mountpoint so we don't have the slash at the start
 			let mp_cleaned = part.mountpoint.trim_start_matches('/');
-			let mountpoint = chroot.join(&mp_cleaned);
+			let mountpoint = chroot.join(mp_cleaned);
 
 			std::fs::create_dir_all(&mountpoint)?;
 
@@ -286,7 +285,7 @@ impl PartitionLayout {
 
 			// clean the mountpoint so we don't have the slash at the start
 			let mp_cleaned = part.mountpoint.trim_start_matches('/');
-			let mountpoint = chroot.join(&mp_cleaned);
+			let mountpoint = chroot.join(mp_cleaned);
 
 			std::fs::create_dir_all(&mountpoint)?;
 
@@ -391,7 +390,7 @@ impl PartitionLayout {
 				"1MiB".to_string()
 			} else {
 				// create partition after last partition
-				ByteSize::b(last_end).to_string_as(true).replace(" ", "")
+				ByteSize::b(last_end).to_string_as(true).replace(' ', "")
 			};
 
 			let end_string = if let Some(size) = part.size {
@@ -399,7 +398,7 @@ impl PartitionLayout {
 				last_end += size.as_u64();
 
 				// remove space for partition table
-				ByteSize::b(last_end).to_string_as(true).replace(" ", "")
+				ByteSize::b(last_end).to_string_as(true).replace(' ', "")
 			} else {
 				// create partition at end of disk
 				"100%".to_string()

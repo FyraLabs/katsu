@@ -92,13 +92,13 @@ pub trait ImageCreator {
 		Ok(())
 	}
 
-	fn copy_uboot_files(&self, bootpath: &Path) -> Result<()> {
+	fn copy_uboot_files(&self, _bootpath: &Path) -> Result<()> {
 		info!("Copying U-Boot files");
 		// copy u-boot files to bootpath
 
 		// dictionary of files to copy and destination
 
-		let files = vec![
+		let _files = vec![
 			("rpi_4/u-boot.bin", "rpi4-u-boot.bin"),
 			("rpi_3/u-boot.bin", "rpi3-u-boot.bin"),
 			("rpi_arm64/u-boot.bin", "rpi-u-boot.bin"),
@@ -206,14 +206,7 @@ pub trait ImageCreator {
 	}
 
 	fn bootloader(&self) -> Result<()> {
-		match self
-			.get_cfg()
-			.sys
-			.bootloader
-			.as_ref()
-			.map(|x| x.as_str())
-			.unwrap_or(DEFAULT_BOOTLOADER)
-		{
+		match self.get_cfg().sys.bootloader.as_deref().unwrap_or(DEFAULT_BOOTLOADER) {
 			"limine" => self.limine(),
 			"grub" => self.grub(),
 			x => Err(eyre!("Unknown bootloader: {x}")),
@@ -249,7 +242,7 @@ pub trait ImageCreator {
 			"/usr/share/limine/limine-bios.sys",
 			format!("./{distro}/boot/limine-bios.sys"),
 		)?;
-		self.limine_cfg(&*format!("./{distro}/boot/limine.cfg"), distro)?;
+		self.limine_cfg(&format!("./{distro}/boot/limine.cfg"), distro)?;
 		Ok(())
 	}
 
@@ -259,7 +252,7 @@ pub trait ImageCreator {
 		let kver = &Self::get_krnl_ver(root.to_str().unwrap())?;
 		let kver = kver.trim_start_matches("kernel-");
 		let volid = &cfg.volid;
-		let cmd = cfg.sys.kernel_params.as_ref().map(String::as_str).unwrap_or_default();
+		let cmd = cfg.sys.kernel_params.as_deref().unwrap_or_default();
 		let mut f = std::fs::File::create(path)
 			.map_err(|e| eyre!(e).wrap_err("Cannot create limine.cfg"))?;
 
@@ -281,13 +274,13 @@ pub trait ImageCreator {
 			"-as",
 			"mkisofs",
 			"-b",
-			&format!("boot/limine-bios-cd.bin"),
+			"boot/limine-bios-cd.bin",
 			"-no-emul-boot",
 			"-boot-load-size",
 			"4",
 			"-boot-info-table",
 			"--efi-boot",
-			&format!("boot/limine-uefi-cd.bin"),
+			"boot/limine-uefi-cd.bin",
 			"-efi-boot-part",
 			"--efi-boot-image",
 			"--protective-msdos-label",
@@ -457,8 +450,6 @@ pub trait ImageCreator {
 		// number to track partition number
 		let mut part_num = 1;
 		let mut efi_num: Option<i32> = None;
-		let boot_num: i32;
-		let root_num: i32;
 
 		if layout.bootloader {
 			// create EFI partition with ESP flag for the first 250MiB
@@ -499,7 +490,7 @@ pub trait ImageCreator {
 			mkfs.ext4 -F ${loop_dev}p$part_num -L BOOT;
 		)?;
 
-		boot_num = part_num;
+		let boot_num: i32 = part_num;
 
 		part_num += 1;
 
@@ -511,7 +502,7 @@ pub trait ImageCreator {
 			parted -s $loop_dev name $part_num $volid;
 		)?;
 
-		root_num = part_num;
+		let root_num: i32 = part_num;
 
 		// now format the partition
 
@@ -579,7 +570,7 @@ pub trait ImageCreator {
 	#[instrument(skip(self))]
 	fn instpkgs(&self) -> Result<()> {
 		let cfg = self.get_cfg();
-		let dnf = cfg.dnf.as_ref().map_or(DEFAULT_DNF, |x| &x);
+		let dnf = cfg.dnf.as_ref().map_or(DEFAULT_DNF, |x| x);
 		info!(dnf, "Installing packages");
 		let rel = self._rel();
 		let root = &cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");

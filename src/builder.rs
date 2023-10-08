@@ -11,7 +11,6 @@ use tracing::{debug, info, trace, warn};
 use crate::{
 	cli::OutputFormat,
 	config::{Manifest, Script},
-	util,
 };
 const WORKDIR: &str = "katsu-work";
 
@@ -92,8 +91,8 @@ impl Bootloader {
 	}
 
 	fn cp_limine(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
-		let distro = &manifest.distro.as_ref().map_or("Linux", |s| &*s);
-		let cmd = &manifest.kernel_cmdline.as_ref().map_or("", |s| &*s);
+		let distro = &manifest.distro.as_ref().map_or("Linux", |s| s);
+		let cmd = &manifest.kernel_cmdline.as_ref().map_or("", |s| s);
 		let root = chroot.parent().unwrap().join("image");
 		// std::fs::create_dir_all(format!("./{distro}/LiveOS"))?;
 		std::fs::copy(
@@ -211,7 +210,7 @@ impl RootBuilder for DnfRootBuilder {
 
 		info!("Running post-install scripts");
 
-		run_all_scripts(&manifest.scripts.post, &chroot, true)?;
+		run_all_scripts(&manifest.scripts.post, chroot, true)?;
 
 		Ok(())
 	}
@@ -265,7 +264,7 @@ pub fn run_script(script: Script, chroot: &Path, in_chroot: bool) -> Result<()> 
 
 pub fn run_all_scripts(scripts: &[Script], chroot: &Path, in_chroot: bool) -> Result<()> {
 	let mut scrs: HashMap<String, (Script, bool)> = HashMap::new();
-	scripts.into_iter().for_each(|s| {
+	scripts.iter().for_each(|s| {
 		scrs.insert(s.id.clone().unwrap_or("<?>".into()), (s.clone(), false));
 	});
 	run_scripts(scrs, chroot, in_chroot)
@@ -350,7 +349,7 @@ impl ImageBuilder for DiskImageBuilder {
 		disk.apply(&ldp)?;
 
 		// Mount partitions to chroot
-		disk.mount_to_chroot(&ldp, &chroot)?;
+		disk.mount_to_chroot(&ldp, chroot)?;
 
 		self.root_builder.build(&chroot.canonicalize()?, manifest)?;
 
@@ -370,9 +369,9 @@ pub struct DeviceInstaller {
 }
 
 impl ImageBuilder for DeviceInstaller {
-	fn build(&self, chroot: &Path, image: &Path, manifest: &Manifest) -> Result<()> {
+	fn build(&self, _chroot: &Path, _image: &Path, _manifest: &Manifest) -> Result<()> {
 		todo!();
-		self.root_builder.build(&chroot, manifest)?;
+		self.root_builder.build(_chroot, _manifest)?;
 		Ok(())
 	}
 }
@@ -405,14 +404,14 @@ impl ImageBuilder for IsoBuilder {
 		let workspace = chroot.parent().unwrap().to_path_buf();
 		debug!("Workspace: {workspace:#?}");
 		fs::create_dir_all(&workspace)?;
-		self.root_builder.build(&chroot, manifest)?;
+		self.root_builder.build(chroot, manifest)?;
 
 		// temporarily store content of iso
 		let image_dir = workspace.join("image/LiveOS");
 		fs::create_dir_all(&image_dir)?;
 
 		// generate squashfs
-		self.squashfs(&chroot, &image_dir.join("squashfs.img"))?;
+		self.squashfs(chroot, &image_dir.join("squashfs.img"))?;
 
 		self.bootloader.copy_liveos(manifest, chroot)?;
 

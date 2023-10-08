@@ -9,13 +9,13 @@ macro_rules! run {
 		run!($n; [$($arr,)*])
 	}};
 	($n:expr; $arr:expr) => {{
-		crate::util::exec($n, &$arr.to_vec(), true)
+		$crate::util::exec($n, &$arr.to_vec(), true)
 	}};
 	(~$n:expr $(, $arr:expr)* $(,)?) => {{
 		run!(~$n; [$($arr,)*])
 	}};
 	(~$n:expr; $arr:expr) => {{
-		crate::util::exec($n, &$arr.to_vec(), false)
+		$crate::util::exec($n, &$arr.to_vec(), false)
 	}};
 }
 
@@ -37,8 +37,8 @@ macro_rules! chroot_run {
 		chroot_run!($chroot, $n; [$($arr,)*])
 	}};
 	($chroot:expr, $n:expr; $arr:expr) => {{
-		crate::util::run_with_chroot(&std::path::PathBuf::from($chroot), || {
-			crate::run!($n; $arr)?;
+		$crate::util::run_with_chroot(&std::path::PathBuf::from($chroot), || {
+			$crate::run!($n; $arr)?;
 			Ok(())
 		})
 	}};
@@ -62,7 +62,7 @@ macro_rules! chroot_run {
 #[macro_export]
 macro_rules! chroot_run_cmd {
 	($chroot:expr, $($cmd:tt)*) => {{
-		crate::util::run_with_chroot(&PathBuf::from($chroot), || {
+		$crate::util::run_with_chroot(&PathBuf::from($chroot), || {
 			cmd_lib::run_cmd!($($cmd)*)?;
 			Ok(())
 		})
@@ -73,7 +73,7 @@ macro_rules! chroot_run_cmd {
 #[macro_export]
 macro_rules! chroot_run_fun {
 	($chroot:expr, $($cmd:tt)*) => {{
-		crate::util::run_with_chroot(&PathBuf::from($chroot), || {
+		$crate::util::run_with_chroot(&PathBuf::from($chroot), || {
 			cmd_lib::run_fun!($($cmd)*)?;
 			Ok(())
 		})
@@ -258,7 +258,7 @@ pub fn prepare_chroot(root: &Path) -> Result<()> {
 
 	let resolv_conf = std::fs::read_to_string("/etc/resolv.conf")?;
 
-	std::fs::create_dir_all(&root.join("etc"))?;
+	std::fs::create_dir_all(root.join("etc"))?;
 
 	std::fs::write(root.join("etc/resolv.conf"), resolv_conf)?;
 
