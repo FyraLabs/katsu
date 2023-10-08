@@ -9,10 +9,12 @@ use std::{
 use tracing::{debug, info, trace, warn};
 
 use crate::{
+	bail_let,
 	cli::OutputFormat,
 	config::{Manifest, Script},
 };
 const WORKDIR: &str = "katsu-work";
+const VOLID: &str = "KATSU-LIVEOS";
 
 #[derive(Default)]
 pub enum Bootloader {
@@ -35,8 +37,6 @@ impl From<&str> for Bootloader {
 		}
 	}
 }
-
-const VOLID: &str = "KATSU-LIVEOS";
 
 impl Bootloader {
 	pub fn install(&self, image: &Path) -> Result<()> {
@@ -77,12 +77,8 @@ impl Bootloader {
 			}
 		}
 
-		let Some(initramfs) = initramfs else {
-			return Err(eyre!("Cannot find initramfs in {bootdir:?}"));
-		};
-		let Some(vmlinuz) = vmlinuz else {
-			return Err(eyre!("Cannot find vmlinuz in {bootdir:?}"));
-		};
+		bail_let!(Some(vmlinuz) = vmlinuz => "Cannot find vmlinuz in {bootdir:?}");
+		bail_let!(Some(initramfs) = initramfs => "Cannot find initramfs in {bootdir:?}");
 
 		std::fs::copy(bootdir.join(&vmlinuz), dest.join("boot").join(&vmlinuz))?;
 		std::fs::copy(bootdir.join(&initramfs), dest.join("boot").join(&initramfs))?;
@@ -91,6 +87,7 @@ impl Bootloader {
 	}
 
 	fn cp_limine(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
+		// complaint to rust: why can't you coerce automatically with umwrap_or()????
 		let distro = &manifest.distro.as_ref().map_or("Linux", |s| s);
 		let cmd = &manifest.kernel_cmdline.as_ref().map_or("", |s| s);
 		let root = chroot.parent().unwrap().join("image");
@@ -216,15 +213,14 @@ impl RootBuilder for DnfRootBuilder {
 	}
 }
 
+#[tracing::instrument(skip(chroot, in_chroot))]
 pub fn run_script(script: Script, chroot: &Path, in_chroot: bool) -> Result<()> {
 	let id = script.id.as_ref().map_or("<NULL>", |s| &**s);
-	let Some(mut data) = script.load() else {
-		return Err(eyre!("Cannot load script `{id}`"));
-	};
-	let name = script.name.as_ref().map_or("<Untitled>", |s| &**s);
-	info!(id, "Running script: {name}");
+	bail_let!(Some(mut data) = script.load() => "Cannot load script `{id}`");
+	let name = script.name.as_ref().map_or("<Untitled>", |s| s);
+	info!(id, name, "Running script");
 
-	let name = format!("script-{}", script.id.as_ref().map_or("untitled", |s| &**s));
+	let name = format!("script-{}", script.id.as_ref().map_or("untitled", |s| s));
 	// check if data has shebang
 	if !data.starts_with("#!") {
 		warn!("Script does not have shebang, #!/bin/sh will be added. It is recommended to add a shebang to your script.");
@@ -255,10 +251,7 @@ pub fn run_script(script: Script, chroot: &Path, in_chroot: bool) -> Result<()> 
 		)?;
 	}
 
-	info!(
-		"===== Script {script} finished =====",
-		script = script.name.as_ref().map_or("<Untitled>", |s| &**s)
-	);
+	info!(id, name, "Finished script");
 	Ok(())
 }
 
@@ -270,29 +263,38 @@ pub fn run_all_scripts(scripts: &[Script], chroot: &Path, in_chroot: bool) -> Re
 	run_scripts(scrs, chroot, in_chroot)
 }
 
+#[tracing::instrument]
 pub fn run_scripts(
 	mut scripts: HashMap<String, (Script, bool)>, chroot: &Path, in_chroot: bool,
 ) -> Result<()> {
+	trace!("Running scripts");
 	for idx in scripts.clone().keys() {
 		// FIXME: if someone dares to optimize things with unsafe, go for it
 		// we can't use get_mut here because we need to do scripts.get_mut() later
 		let Some((scr, done)) = scripts.get(idx) else { unreachable!() };
 		if *done {
+			trace!(idx, "Script is done, skipping");
 			continue;
 		}
+
+		// Find needs
 		let id = scr.id.clone().unwrap_or("<NULL>".into());
 		let mut needs = HashMap::new();
 		for need in scr.needs.clone() {
-			let Some((s, done)) = scripts.get_mut(&need) else {
-				return Err(eyre!("Script `{need}` required by `{id}` not found"));
-			};
+			bail_let!(Some((s, done)) = scripts.get_mut(&need) => "Script `{need}` required by `{id}` not found");
+
 			if *done {
+				trace!("Script `{need}` (required by `{idx}`) is done, skipping");
 				continue;
 			}
 			needs.insert(need, (std::mem::take(s), false));
 			*done = true;
 		}
+
+		// Run needs
 		run_scripts(needs, chroot, in_chroot)?;
+
+		// Run the actual script
 		let Some((scr, done)) = scripts.get_mut(idx) else { unreachable!() };
 		run_script(std::mem::take(scr), chroot, in_chroot)?;
 		*done = true;
@@ -320,13 +322,8 @@ impl ImageBuilder for DiskImageBuilder {
 
 		let mut sparse_file = fs::File::create(sparse_path)?;
 
-		let Some(disk) = &manifest.disk else {
-			return Err(eyre!("Disk layout not specified"));
-		};
-
-		let Some(disk_size) = &disk.size else {
-			return Err(eyre!("Disk size not specified"));
-		};
+		bail_let!(Some(disk) = &manifest.disk => "Disk layout not specified");
+		bail_let!(Some(disk_size) = &disk.size => "Disk size not specified");
 
 		sparse_file.seek(std::io::SeekFrom::Start(disk_size.as_u64()))?;
 		sparse_file.write_all(&[0])?;
@@ -381,7 +378,23 @@ pub struct IsoBuilder {
 	pub root_builder: Box<dyn RootBuilder>,
 }
 
+const DR_MODS: &str = "livenet dmsquash-live dmsquash-live-ntfs convertfs pollcdrom qemu qemu-net";
+const DR_OMIT: &str = "plymouth multipath";
+
 impl IsoBuilder {
+	fn dracut(&self, root: &Path) -> Result<()> {
+		info!(?root, "Generating initramfs");
+		bail_let!(
+			Some(kver) = fs::read_dir(root.join("boot"))?.find_map(|f|
+				// find filename: initramfs-*.img
+				f.ok().and_then(|f| Some(f.file_name().to_str()?.rsplit_once('/')?.1.strip_prefix("initramfs-")?.strip_suffix(".img")?.to_string()))
+			) => "Can't find initramfs in /boot."
+		);
+
+		cmd_lib::run_cmd!(dracut --xz -r root -vFna $DR_MODS -o $DR_OMIT --no-early-microcode $root/boot/initramfs-$kver.img $kver)?;
+		Ok(())
+	}
+
 	pub fn squashfs(&self, chroot: &Path, image: &Path) -> Result<()> {
 		cmd_lib::run_cmd!(mksquashfs $chroot $image -comp xz -Xbcj x86 -b 1048576 -noappend)?;
 		Ok(())
@@ -405,6 +418,8 @@ impl ImageBuilder for IsoBuilder {
 		debug!("Workspace: {workspace:#?}");
 		fs::create_dir_all(&workspace)?;
 		self.root_builder.build(chroot, manifest)?;
+
+		self.dracut(chroot)?;
 
 		// temporarily store content of iso
 		let image_dir = workspace.join("image/LiveOS");

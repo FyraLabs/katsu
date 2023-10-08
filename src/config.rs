@@ -338,13 +338,7 @@ impl PartitionLayout {
 			// clean the mountpoint so we don't have the slash at the start
 			// let mp_cleaned = part.mountpoint.trim_start_matches('/');
 
-			let fsname = {
-				if part.filesystem == "efi" {
-					"vfat"
-				} else {
-					&part.filesystem
-				}
-			};
+			let fsname = if part.filesystem == "efi" { "vfat" } else { &part.filesystem };
 
 			let fsck = if part.filesystem == "efi" { "0" } else { "2" };
 

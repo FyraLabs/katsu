@@ -80,6 +80,17 @@ macro_rules! chroot_run_fun {
 	}};
 }
 
+/// Perform the let statement, else bail out with specified error message
+#[macro_export]
+macro_rules! bail_let {
+	($left:pat = $right:expr => $err:expr) => {
+		#[rustfmt::skip]
+		let $left = $right else {
+			return Err(eyre!($err));
+		};
+	};
+}
+
 #[tracing::instrument]
 pub fn exec(cmd: &str, args: &[&str], pipe: bool) -> color_eyre::Result<Vec<u8>> {
 	tracing::debug!("Executing command");
@@ -140,17 +151,24 @@ impl From<&str> for Arch {
 	}
 }
 
-impl Into<&str> for Arch {
-	fn into(self) -> &'static str {
-		match self {
-			Self::X86 => "i386",
-			Self::X86_64 => "x86_64",
-			Self::ArmV7l => "armv7l",
-			Self::AArch64 => "aarch64",
+impl From<Arch> for &str {
+	fn from(value: Arch) -> &'static str {
+		match value {
+			Arch::X86 => "i386",
+			Arch::X86_64 => "x86_64",
+			Arch::ArmV7l => "armv7l",
+			Arch::AArch64 => "aarch64",
 			_ => panic!("Unknown architecture"),
 		}
 	}
 }
+
+const MNTS: &[(Option<&str>, &str, Option<&str>, nix::mount::MsFlags, Option<&str>); 4] = &[
+	(Some("/proc"), "proc", Some("proc"), nix::mount::MsFlags::empty(), None),
+	(Some("/sys"), "sys", Some("sysfs"), nix::mount::MsFlags::empty(), None),
+	(Some("/dev"), "dev", None, nix::mount::MsFlags::MS_BIND, None),
+	(Some("/dev/pts"), "dev/pts", None, nix::mount::MsFlags::MS_BIND, None),
+];
 
 /// Prepare chroot by mounting /dev, /proc, /sys
 pub fn prepare_chroot(root: &Path) -> Result<()> {
@@ -170,30 +188,12 @@ pub fn prepare_chroot(root: &Path) -> Result<()> {
 	// )?;
 	// rewrite the above with
 
-	let mnts = vec![
-		(
-			Some("/proc"),
-			root.join("proc"),
-			Some("proc"),
-			nix::mount::MsFlags::empty(),
-			None::<&str>,
-		),
-		(Some("/sys"), root.join("sys"), Some("sysfs"), nix::mount::MsFlags::empty(), None::<&str>),
-		(Some("/dev"), root.join("dev"), None::<&str>, nix::mount::MsFlags::MS_BIND, None::<&str>),
-		(
-			Some("/dev/pts"),
-			root.join("dev/pts"),
-			None::<&str>,
-			nix::mount::MsFlags::MS_BIND,
-			None::<&str>,
-		),
-	];
-
-	for (src, target, fstype, flags, data) in mnts {
+	for (src, target, fstype, flags, data) in MNTS {
+		let target = root.join(target);
 		std::fs::create_dir_all(&target)?;
 		let mut i = 0;
 		loop {
-			if nix::mount::mount(src, &target, fstype, flags, data).is_ok() {
+			if nix::mount::mount(*src, &target, *fstype, *flags, *data).is_ok() {
 				break;
 			}
 			i += 1;

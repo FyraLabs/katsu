@@ -27,7 +27,7 @@ pub trait ImageCreator {
 		let cfg = self.get_cfg();
 		let root = cfg.instroot.canonicalize().expect("Cannot canonicalize instroot.");
 		let mut f = std::fs::File::create(format!("{}/etc/fstab", root.display()))?;
-		f.write(b"/squashfs.img\t/\tsquashfs\tdefaults\t0\t0")?;
+		f.write_all(b"/squashfs.img\t/\tsquashfs\tdefaults\t0\t0")?;
 		Ok(())
 	}
 
@@ -376,7 +376,7 @@ pub trait ImageCreator {
 		let pw = &*cfg.sys.rootpw;
 		info!(pw, "Setting root password");
 		let mut fpw = std::fs::File::create(root.join("etc/passwd"))?;
-		fpw.write(b"root:x:0:0:root:/root:/bin/sh")?;
+		fpw.write_all(b"root:x:0:0:root:/root:/bin/sh")?;
 		let pw = cmd_lib::run_fun!(mkpasswd $pw)?;
 		let mut fsh = std::fs::File::create(root.join("etc/shadow"))?;
 		fsh.write_fmt(format_args!("root:{pw}::0:99999:7:::"))?;
