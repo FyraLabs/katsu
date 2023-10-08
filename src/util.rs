@@ -46,8 +46,8 @@ macro_rules! chroot_run {
 		chroot_run!(~$chroot, $n; [$($arr,)*])
 	}};
 	(~$chroot:expr, $n:expr; $arr:expr) => {{
-		crate::util::run_with_chroot(&std::path::PathBuf::from($chroot), || {
-			crate::run!(~$n; $arr)?;
+		$crate::util::run_with_chroot(&std::path::PathBuf::from($chroot), || {
+			$crate::run!(~$n; $arr)?;
 			Ok(())
 		})
 	}};

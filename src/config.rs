@@ -10,7 +10,6 @@ use std::{
 	path::{Path, PathBuf},
 };
 use tracing::{debug, info, trace};
-use tracing_subscriber::Layer;
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct Manifest {
@@ -451,6 +450,10 @@ impl PartitionLayout {
 
 #[test]
 fn test_partlay() {
+	use std::str::FromStr;
+	use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
+	use tracing_subscriber::Layer;
+
 	// Partition layout test
 	let subscriber =
 		tracing_subscriber::Registry::default().with(tracing_error::ErrorLayer::default()).with(
