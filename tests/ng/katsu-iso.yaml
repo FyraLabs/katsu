@@ -5,4 +5,13 @@ distro: Katsu Ultramarine
 import:
   - modules/base.yaml
 
-dnf: {}
+dnf:
+  releasever: 39
+  repodir: repodir/
+  packages:
+    - dracut-config-generic
+    - dracut-live
+    - dracut-config-generic
+    - dracut-network
+    - anaconda-dracut
+    - dracut-squash

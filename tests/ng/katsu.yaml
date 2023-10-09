@@ -5,6 +5,11 @@ distro: Katsu Ultramarine
 import:
   - modules/base.yaml
 
+scripts:
+  post:
+    - id: grub-install
+      name: Install GRUB
+      file: modules/scripts/grub-install.sh
 
 disk:
   size: 8GiB

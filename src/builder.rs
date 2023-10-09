@@ -414,14 +414,38 @@ const DR_OMIT: &str = "plymouth multipath";
 impl IsoBuilder {
 	fn dracut(&self, root: &Path) -> Result<()> {
 		info!(?root, "Generating initramfs");
+		let dir = fs::read_dir(root.join("boot"))?;
+		// collect into a vector
+		let dir: Vec<_> = dir.collect::<Result<_, _>>()?;
+		debug!(?dir, "Files in /boot");
 		bail_let!(
 			Some(kver) = fs::read_dir(root.join("boot"))?.find_map(|f|
 				// find filename: initramfs-*.img
-				f.ok().and_then(|f| Some(f.file_name().to_str()?.rsplit_once('/')?.1.strip_prefix("initramfs-")?.strip_suffix(".img")?.to_string()))
+				{
+					debug!(?f, "File in /boot");
+					f.ok().and_then(|f|{
+						let filename = f.file_name();
+						let filename = filename.to_str()?;
+						let initramfs = filename.strip_prefix("initramfs-")?.strip_suffix(".img")?.to_string();
+						// remove the last suffix with the arch
+						let arch = initramfs.rsplit_once('.')?.1;
+						debug!(?arch, "Arch");
+						// if arch != "img" {
+						// 	return None;
+						// }
+						// let kver = initramfs.rsplit_once('.')?.0;
+						let kver = initramfs;
+						debug!(?kver, "Kernel version");
+						Some(kver.to_string())
+						// Some(
+						// 	f.file_name().to_str()?.rsplit_once('/')?.1.strip_prefix("initramfs-")?.strip_suffix(".img")?.to_string()
+						// )
+					} )
+				}
 			) => "Can't find initramfs in /boot."
 		);
 
-		cmd_lib::run_cmd!(dracut --xz -r root -vFna $DR_MODS -o $DR_OMIT --no-early-microcode $root/boot/initramfs-$kver.img $kver)?;
+		cmd_lib::run_cmd!(dracut --xz -r $root -vfNa $DR_MODS -o $DR_OMIT --no-early-microcode $root/boot/initramfs-$kver.img $kver 2>&1)?;
 		Ok(())
 	}
 
@@ -447,7 +471,7 @@ impl ImageBuilder for IsoBuilder {
 		let workspace = chroot.parent().unwrap().to_path_buf();
 		debug!("Workspace: {workspace:#?}");
 		fs::create_dir_all(&workspace)?;
-		self.root_builder.build(chroot, manifest)?;
+		self.root_builder.build(chroot.canonicalize()?.as_path(), manifest)?;
 
 		self.dracut(chroot)?;
 

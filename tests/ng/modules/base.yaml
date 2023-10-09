@@ -27,10 +27,6 @@ scripts:
       name: Clean up root filesystem
       file: scripts/image-cleanup.sh
 
-    - id: grub-install
-      name: Install GRUB
-      file: scripts/grub-install.sh
-
     - id: selinux-label
       name: Relabel SELinux for new filesystem
       file: scripts/selinux.sh
@@ -68,6 +64,7 @@ dnf:
     - rpm
     - libgomp
     - ultramarine-release-identity-basic
+    - ultramarine-release-basic
     - fedora-repos
 
   arch_packages:
