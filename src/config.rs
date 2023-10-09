@@ -13,7 +13,7 @@ use tracing::{debug, info, trace};
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct Manifest {
-	pub builder: String,
+	pub builder: Option<String>,
 	#[serde(default)]
 	pub import: Vec<PathBuf>,
 	/// The distro name for the build result

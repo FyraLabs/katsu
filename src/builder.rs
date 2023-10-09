@@ -43,9 +43,9 @@ impl From<&str> for Bootloader {
 impl Bootloader {
 	pub fn install(&self, image: &Path) -> Result<()> {
 		match *self {
-			Self::Grub => cmd_lib::run_cmd!(grub2-install $image)?,
-			Self::Limine => cmd_lib::run_cmd!(limine bios-install $image)?,
-			Self::SystemdBoot => cmd_lib::run_cmd!(bootctl --image=$image install)?,
+			Self::Grub => cmd_lib::run_cmd!(grub2-install $image 2>&1)?,
+			Self::Limine => cmd_lib::run_cmd!(limine bios-install $image 2>&1)?,
+			Self::SystemdBoot => cmd_lib::run_cmd!(bootctl --image=$image install 2>&1)?,
 		}
 		Ok(())
 	}
@@ -66,13 +66,20 @@ impl Bootloader {
 				continue;
 			}
 			let name = f.file_name();
+			debug!(?name, "File in /boot");
 			let name = name.to_string_lossy();
-			if let Some((_, s)) = name.rsplit_once('/') {
-				if s.starts_with("vmlinuz-") {
-					vmlinuz = Some(s.to_string());
-				} else if s.starts_with("initramfs-") {
-					initramfs = Some(s.to_string());
-				}
+			// if let Some((_, s)) = name.rsplit_once('/') {
+			// 	if s.starts_with("vmlinuz-") {
+			// 		vmlinuz = Some(s.to_string());
+			// 	} else if s.starts_with("initramfs-") {
+			// 		initramfs = Some(s.to_string());
+			// 	}
+			// }
+
+			if name.starts_with("vmlinuz-") {
+				vmlinuz = Some(name.to_string());
+			} else if name.starts_with("initramfs-") {
+				initramfs = Some(name.to_string());
 			}
 			if vmlinuz.is_some() && initramfs.is_some() {
 				break;
@@ -92,8 +99,9 @@ impl Bootloader {
 		// complaint to rust: why can't you coerce automatically with umwrap_or()????
 		let distro = &manifest.distro.as_ref().map_or("Linux", |s| s);
 		let cmd = &manifest.kernel_cmdline.as_ref().map_or("", |s| s);
-		let root = chroot.parent().unwrap().join("image");
+		let root = chroot.parent().unwrap().join(ISO_TREE);
 		// std::fs::create_dir_all(format!("./{distro}/LiveOS"))?;
+		std::fs::create_dir_all(root.join("boot"))?;
 		std::fs::copy(
 			"/usr/share/limine/limine-uefi-cd.bin",
 			root.join("boot/limine-uefi-cd.bin"),
@@ -114,7 +122,7 @@ impl Bootloader {
 		f.write_fmt(format_args!("TIMEOUT=5\n\n:{distro}\n\tPROTOCOL=linux\n\t"))?;
 		f.write_fmt(format_args!("KERNEL_PATH=boot:///boot/{vmlinuz}\n\t"))?;
 		f.write_fmt(format_args!("MODULE_PATH=boot:///boot/{initramfs}\n\t"))?;
-		f.write_fmt(format_args!("CMDLINE=root=live:LABEL={VOLID} rd.live.image selinux=0 {cmd}"))?;
+		f.write_fmt(format_args!("CMDLINE=root=live:LABEL={VOLID} rd.live.image enforcing=0 {cmd}"))?;
 
 		Ok(())
 	}
@@ -462,11 +470,14 @@ impl IsoBuilder {
 	}
 	pub fn xorriso(&self, chroot: &Path, image: &Path) -> Result<()> {
 		let (uefi_bin, bios_bin) = self.bootloader.get_bins();
-		let root = chroot.parent().unwrap().join("image");
-		cmd_lib::run_cmd!(xorriso -as mkisofs -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $uefi_bin -efi-boot-part --efi-boot-image --protective-msdos-label $root -volid $VOLID -o $image)?;
+		let root = chroot.parent().unwrap().join(ISO_TREE);
+		debug!("xorriso -as mkisofs -b {bios_bin} -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot {uefi_bin} -efi-boot-part --efi-boot-image --protective-msdos-label {root} -volid KATSU-LIVEOS -o {image}", bios_bin = bios_bin, uefi_bin = uefi_bin, root = root.display(), image = image.display());
+		cmd_lib::run_cmd!(xorriso -as mkisofs -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $uefi_bin -efi-boot-part --efi-boot-image --protective-msdos-label $root -volid $VOLID -o $image 2>&1)?;
 		Ok(())
 	}
 }
+
+const ISO_TREE: &str = "iso-tree";
 
 impl ImageBuilder for IsoBuilder {
 	fn build(&self, chroot: &Path, image: &Path, manifest: &Manifest) -> Result<()> {
@@ -479,17 +490,22 @@ impl ImageBuilder for IsoBuilder {
 		self.dracut(chroot)?;
 
 		// temporarily store content of iso
-		let image_dir = workspace.join("image/LiveOS");
+		let image_dir = workspace.join(ISO_TREE).join("LiveOS");
 		fs::create_dir_all(&image_dir)?;
+
+		// todo: fix the paths
+		// the ISO working tree should be in katsu-work/iso-tree
+		// the image output would be in katsu-work/image
 
 		// generate squashfs
 		self.squashfs(chroot, &image_dir.join("squashfs.img"))?;
 
 		self.bootloader.copy_liveos(manifest, chroot)?;
-
-		self.xorriso(chroot, image)?;
-
-		self.bootloader.install(image)?;
+		let image = format!("{}/katsu.iso", image.display());
+		let path = PathBuf::from(image);
+		
+		self.xorriso(chroot, path.as_path())?;
+		self.bootloader.install(path.as_path())?;
 
 		Ok(())
 	}
@@ -504,7 +520,7 @@ pub struct KatsuBuilder {
 
 impl KatsuBuilder {
 	pub fn new(manifest: Manifest, output_format: OutputFormat) -> Result<Self> {
-		let root_builder = match manifest.builder.as_str() {
+		let root_builder = match manifest.builder.clone().expect("A valid builder value").as_str() {
 			"dnf" => Box::new(manifest.dnf.clone()) as Box<dyn RootBuilder>,
 			_ => todo!("builder not implemented"),
 		};
