@@ -1,3 +1,8 @@
+use crate::{
+	bail_let,
+	cli::OutputFormat,
+	config::{Manifest, Script},
+};
 use color_eyre::{eyre::eyre, Result};
 use serde_derive::{Deserialize, Serialize};
 use std::{
@@ -8,13 +13,10 @@ use std::{
 };
 use tracing::{debug, info, trace, warn};
 
-use crate::{
-	bail_let,
-	cli::OutputFormat,
-	config::{Manifest, Script},
-};
 const WORKDIR: &str = "katsu-work";
 const VOLID: &str = "KATSU-LIVEOS";
+crate::prepend_comment!(GRUB_PREPEND_COMMENT: "/etc/default/grub", "Grub default configurations", katsu::builder::Bootloader::cp_grub);
+crate::prepend_comment!(LIMINE_PREPEND_COMMENT: "/boot/limine.cfg", "Limine configurations", katsu::builder::Bootloader::cp_limine);
 
 #[derive(Default)]
 pub enum Bootloader {
@@ -41,7 +43,7 @@ impl From<&str> for Bootloader {
 impl Bootloader {
 	pub fn install(&self, image: &Path) -> Result<()> {
 		match *self {
-			Self::Grub => todo!(),
+			Self::Grub => cmd_lib::run_cmd!(grub2-install $image)?,
 			Self::Limine => cmd_lib::run_cmd!(limine bios-install $image)?,
 			Self::SystemdBoot => todo!(),
 		}
@@ -50,7 +52,7 @@ impl Bootloader {
 	pub fn get_bins(&self) -> (&'static str, &'static str) {
 		match *self {
 			Self::Grub => todo!(),
-			Self::Limine => ("boot/limine-uefi-cd.bin", "boot/limine-uefi-cd.bin"),
+			Self::Limine => ("boot/limine-uefi-cd.bin", "boot/limine-bios-cd.bin"),
 			Self::SystemdBoot => todo!(),
 		}
 	}
@@ -108,6 +110,7 @@ impl Bootloader {
 		let mut f = std::fs::File::create(root.join("boot/limine.cfg"))
 			.map_err(|e| eyre!(e).wrap_err("Cannot create limine.cfg"))?;
 
+		f.write_all(LIMINE_PREPEND_COMMENT.as_bytes())?;
 		f.write_fmt(format_args!("TIMEOUT=5\n\n:{distro}\n\tPROTOCOL=linux\n\t"))?;
 		f.write_fmt(format_args!("KERNEL_PATH=boot:///boot/{vmlinuz}\n\t"))?;
 		f.write_fmt(format_args!("MODULE_PATH=boot:///boot/{initramfs}\n\t"))?;
@@ -115,9 +118,35 @@ impl Bootloader {
 
 		Ok(())
 	}
+
+	fn cp_grub(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
+		let imgd = chroot.parent().unwrap().join("image/");
+		let cmd = &manifest.kernel_cmdline.as_ref().map_or("", |s| s);
+
+		let cfg = std::fs::read_to_string(chroot.join("etc/default/grub"))?;
+		let mut f = std::fs::File::create(chroot.join("etc/default/grub"))?;
+		f.write_all(GRUB_PREPEND_COMMENT.as_bytes())?;
+		for l in cfg.lines() {
+			if l.starts_with("GRUB_CMDLINE_LINUX=") {
+				f.write_fmt(format_args!(
+					"GRUB_CMDLINE_LINUX=\"root=live:LABEL={VOLID} rd.live.image selinux=0 {cmd}\"\n"
+				))?;
+			} else {
+				f.write_all(l.as_bytes())?;
+				f.write_all(b"\n")?;
+			}
+		}
+		drop(f); // write and flush changes
+
+		crate::chroot_run_cmd!(chroot, grub2-mkconfig -o /boot/grub2/grub.cfg;)?;
+		cmd_lib::run_cmd!(cp -r $chroot/boot $imgd/)?; // too lazy to cp one by one
+		Ok(())
+	}
+
 	pub fn copy_liveos(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
+		info!("Copying bootloader files");
 		match *self {
-			Self::Grub => todo!(),
+			Self::Grub => self.cp_grub(manifest, chroot)?,
 			Self::Limine => self.cp_limine(manifest, chroot)?,
 			Self::SystemdBoot => todo!(),
 		}
