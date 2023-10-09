@@ -18,3 +18,4 @@ dnf:
     - dracut-squash
     - "@xfce-desktop"
     - anaconda-live
+    - libblockdev-nvdimm
