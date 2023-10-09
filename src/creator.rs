@@ -98,9 +98,11 @@ pub trait ImageCreator {
 
 		// dictionary of files to copy and destination
 
-		let _files = [("rpi_4/u-boot.bin", "rpi4-u-boot.bin"),
+		let _files = [
+			("rpi_4/u-boot.bin", "rpi4-u-boot.bin"),
 			("rpi_3/u-boot.bin", "rpi3-u-boot.bin"),
-			("rpi_arm64/u-boot.bin", "rpi-u-boot.bin")];
+			("rpi_arm64/u-boot.bin", "rpi-u-boot.bin"),
+		];
 
 		// fs::copy(UBOOT_DATA, bootpath)?;
 

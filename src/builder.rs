@@ -122,7 +122,9 @@ impl Bootloader {
 		f.write_fmt(format_args!("TIMEOUT=5\n\n:{distro}\n\tPROTOCOL=linux\n\t"))?;
 		f.write_fmt(format_args!("KERNEL_PATH=boot:///boot/{vmlinuz}\n\t"))?;
 		f.write_fmt(format_args!("MODULE_PATH=boot:///boot/{initramfs}\n\t"))?;
-		f.write_fmt(format_args!("CMDLINE=root=live:LABEL={VOLID} rd.live.image enforcing=0 {cmd}"))?;
+		f.write_fmt(format_args!(
+			"CMDLINE=root=live:LABEL={VOLID} rd.live.image enforcing=0 {cmd}"
+		))?;
 
 		Ok(())
 	}
@@ -503,7 +505,7 @@ impl ImageBuilder for IsoBuilder {
 		self.bootloader.copy_liveos(manifest, chroot)?;
 		let image = format!("{}/katsu.iso", image.display());
 		let path = PathBuf::from(image);
-		
+
 		self.xorriso(chroot, path.as_path())?;
 		self.bootloader.install(path.as_path())?;
 
