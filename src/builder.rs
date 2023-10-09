@@ -445,7 +445,10 @@ impl IsoBuilder {
 			) => "Can't find initramfs in /boot."
 		);
 
-		cmd_lib::run_cmd!(dracut --xz -r $root -vfNa $DR_MODS -o $DR_OMIT --no-early-microcode $root/boot/initramfs-$kver.img $kver 2>&1)?;
+		crate::chroot_run_cmd!(
+			root,
+			unshare -R $root dracut --xz -vfNa $DR_MODS -o $DR_OMIT --no-early-microcode /boot/initramfs-$kver.img $kver 2>&1;
+		)?;
 		Ok(())
 	}
 
