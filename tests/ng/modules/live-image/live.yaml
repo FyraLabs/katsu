@@ -3,4 +3,6 @@ scripts:
     - id: liveimage-setup
       name: Set up Live Image
       file: liveimage.sh
-dnf: {}
+
+dnf:
+  releasever: 39
