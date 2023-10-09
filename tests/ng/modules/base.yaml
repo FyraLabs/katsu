@@ -66,6 +66,7 @@ dnf:
     - ultramarine-release-identity-basic
     - ultramarine-release-basic
     - fedora-repos
+    - efibootmgr
 
   arch_packages:
     aarch64:
