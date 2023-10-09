@@ -27,6 +27,8 @@ env:
     mkpasswd
     clang-devel
     moby-engine
+    squashfs-tools
+    erofs-utils
 
 on:
   push:
