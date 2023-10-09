@@ -173,7 +173,7 @@ jobs:
           pushd tests/ng
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
-          katsu -o iso katsu.yaml 2>&1
+          katsu -o iso katsu-iso.yaml 2>&1
           xz -z9 katsu-work/image/katsu.iso -c > katsu-work/image/katsu.iso.xz
           popd
 
