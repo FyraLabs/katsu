@@ -4,6 +4,7 @@ distro: Katsu Ultramarine
 
 import:
   - modules/base.yaml
+  - modules/live-image/live.yaml
 
 dnf:
   releasever: 39
@@ -15,3 +16,5 @@ dnf:
     - dracut-network
     - anaconda-dracut
     - dracut-squash
+    - "@xfce-desktop"
+    - anaconda-live

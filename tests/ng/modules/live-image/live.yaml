@@ -1,0 +1,6 @@
+scripts:
+  post:
+    - id: liveimage-setup
+      name: Set up Live Image
+      file: liveimage.sh
+dnf: {}
