@@ -1,10 +1,38 @@
 name: Build test
 
+env:
+  DNF_PKGS: |
+    xorriso
+    rpm
+    limine
+    systemd
+    btrfs-progs
+    e2fsprogs
+    xfsprogs
+    dosfstools
+    grub2
+    parted
+    util-linux-core
+    systemd-container
+    grub2-efi
+    uboot-images-armv8
+    uboot-tools
+    rustc
+    qemu-user-static-aarch64
+    qemu-user-binfmt
+    qemu-kvm
+    qemu-img
+    cargo
+    systemd-devel
+    mkpasswd
+    clang-devel
+    moby-engine
+
 on:
   push:
 
 jobs:
-  integration-test:
+  image-arm:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/terrapkg/builder:f38
@@ -27,32 +55,57 @@ jobs:
 
       - name: Install dependencies
         run: |
-          dnf install -y \
-          xorriso \
-          rpm \
-          limine \
-          systemd \
-          btrfs-progs \
-          e2fsprogs \
-          xfsprogs \
-          dosfstools \
-          grub2 \
-          parted \
-          util-linux-core \
-          systemd-container \
-          grub2-efi \
-          uboot-images-armv8 \
-          uboot-tools \
-          rustc \
-          qemu-user-static-aarch64 \
-          qemu-user-binfmt \
-          qemu-kvm \
-          qemu-img \
-          cargo \
-          systemd-devel \
-          mkpasswd \
-          clang-devel \
-          moby-engine
+          dnf install -y $DNF_PKGS
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build and install katsu
+        run: |
+          cargo install --path . --debug
+
+      - name: Run test
+        run: |
+          export PATH=$HOME/.cargo/bin:$PATH
+          pushd tests/ng
+          echo "COLORBT_SHOW_HIDDEN=1" >> .env
+          echo "KATSU_LOG=trace" >> .env
+          katsu -o disk-image katsu-arm.yaml 2>&1
+          xz -z9 katsu-work/image/katsu.img -c > katsu-work/image/katsu-arm.img.xz
+          popd
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: katsudon
+          path: tests/ng/katsu-work/image/*.img.xz
+
+  image-x86_64:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/terrapkg/builder:f38
+      # Pass /dev from host to container
+      # Very hacky, but it works
+      # Microsoft/Github, if you're reading this,
+      # I'm sorry.
+      options: --privileged -v /dev:/dev
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache DNF packages
+        uses: actions/cache@v2
+        with:
+          path: /var/cache/dnf
+          key: dnf-${{ runner.os }}
+          restore-keys: |
+            dnf-${{ runner.os }}-
+            dnf-
+
+      - name: Install dependencies
+        run: |
+          dnf install -y $DNF_PKGS
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -78,3 +131,54 @@ jobs:
         with:
           name: katsudon
           path: tests/ng/katsu-work/image/*.raw.xz
+
+
+  iso-x86_64:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/terrapkg/builder:f38
+      # Pass /dev from host to container
+      # Very hacky, but it works
+      # Microsoft/Github, if you're reading this,
+      # I'm sorry.
+      options: --privileged -v /dev:/dev
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache DNF packages
+        uses: actions/cache@v2
+        with:
+          path: /var/cache/dnf
+          key: dnf-${{ runner.os }}
+          restore-keys: |
+            dnf-${{ runner.os }}-
+            dnf-
+
+      - name: Install dependencies
+        run: |
+          dnf install -y $DNF_PKGS
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build and install katsu
+        run: |
+          cargo install --path . --debug
+
+      - name: Run test
+        run: |
+          export PATH=$HOME/.cargo/bin:$PATH
+          pushd tests/ng
+          echo "COLORBT_SHOW_HIDDEN=1" >> .env
+          echo "KATSU_LOG=trace" >> .env
+          katsu -o iso katsu.yaml 2>&1
+          xz -z9 katsu-work/image/katsu.iso -c > katsu-work/image/katsu.iso.xz
+          popd
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: katsudon
+          path: tests/ng/katsu-work/image/*.iso.xz

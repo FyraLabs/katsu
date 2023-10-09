@@ -207,9 +207,11 @@ pub fn prepare_chroot(root: &Path) -> Result<()> {
 	for (src, target, fstype, flags, data) in MNTS {
 		let target = root.join(target);
 		std::fs::create_dir_all(&target)?;
+		let target = target.canonicalize()?;
+		debug!("Mounting {:?} to {:?}", src, target);
 		let mut i = 0;
 		loop {
-			if nix::mount::mount(*src, &target, *fstype, *flags, *data).is_ok() {
+			if nix::mount::mount(*src, &target.canonicalize()?, *fstype, *flags, *data).is_ok() {
 				break;
 			}
 			i += 1;
@@ -313,7 +315,7 @@ pub fn unmount_chroot(root: &Path) -> Result<()> {
 		loop {
 			// combine mntflags: MNT_FORCE | MNT_DETACH
 			if nix::mount::umount2(
-				&mount,
+				&mount.canonicalize()?,
 				nix::mount::MntFlags::MNT_FORCE.union(nix::mount::MntFlags::MNT_DETACH),
 			)
 			.is_ok()

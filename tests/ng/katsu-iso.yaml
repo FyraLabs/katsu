@@ -1,0 +1,8 @@
+# Example manifest for a Katsu build
+builder: dnf
+distro: Katsu Ultramarine
+
+import:
+  - modules/base.yaml
+
+dnf: {}

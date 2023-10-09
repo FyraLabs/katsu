@@ -45,7 +45,7 @@ impl Bootloader {
 		match *self {
 			Self::Grub => cmd_lib::run_cmd!(grub2-install $image)?,
 			Self::Limine => cmd_lib::run_cmd!(limine bios-install $image)?,
-			Self::SystemdBoot => todo!(),
+			Self::SystemdBoot => cmd_lib::run_cmd!(bootctl --image=$image install)?,
 		}
 		Ok(())
 	}
@@ -182,6 +182,7 @@ impl RootBuilder for DnfRootBuilder {
 
 		run_all_scripts(&manifest.scripts.pre, chroot, false)?;
 
+		// todo: generate different kind of fstab for iso and other builds
 		if let Some(disk) = &manifest.disk {
 			let f = disk.fstab(chroot)?;
 			trace!(fstab = ?f, "fstab");
