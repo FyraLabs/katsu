@@ -11,6 +11,10 @@ bootloader: grub
 dnf:
   releasever: 39
   repodir: repodir/
+  options:
+    - --setopt=keepcache=True
+    - --nogpgcheck
+    - --setopt=cachedir=/var/cache/dnf
   packages:
     - dracut-config-generic
     - dracut-live

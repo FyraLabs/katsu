@@ -10,7 +10,11 @@ use tracing::trace;
 use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, Layer};
 
 fn main() -> Result<()> {
-	dotenvy::dotenv()?;
+	if let Err(e) = dotenvy::dotenv() {
+		if !e.not_found() {
+			return Err(e.into());
+		}
+	}
 
 	color_eyre::install()?;
 	let subscriber =
