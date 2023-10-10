@@ -667,6 +667,7 @@ impl Auth {
 			args.push(password.to_string());
 		}
 
+		args.push(if self.create_home { "-m" } else { "-M" }.to_string());
 		if self.create_home {
 			args.push("-m".to_string());
 		} else {

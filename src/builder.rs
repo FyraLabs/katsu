@@ -252,7 +252,7 @@ impl RootBuilder for DnfRootBuilder {
 		}
 		options.append(&mut exclude.iter().map(|p| format!("--exclude={p}")).collect());
 
-		tracing::info!("Initializing system with dnf");
+		info!("Initializing system with dnf");
 		crate::chroot_run_cmd!(chroot,
 			dnf install -y --releasever=$releasever --installroot=$chroot $[packages] $[options] 2>&1;
 			dnf clean all --installroot=$chroot;
