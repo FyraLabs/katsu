@@ -252,6 +252,7 @@ impl RootBuilder for DnfRootBuilder {
 		}
 		options.append(&mut exclude.iter().map(|p| format!("--exclude={p}")).collect());
 
+		tracing::info!("Initializing system with dnf");
 		crate::chroot_run_cmd!(chroot,
 			dnf install -y --releasever=$releasever --installroot=$chroot $[packages] $[options] 2>&1;
 			dnf clean all --installroot=$chroot;
@@ -505,7 +506,7 @@ impl IsoBuilder {
 const ISO_TREE: &str = "iso-tree";
 
 impl ImageBuilder for IsoBuilder {
-	fn build(&self, chroot: &Path, image: &Path, manifest: &Manifest) -> Result<()> {
+	fn build(&self, chroot: &Path, _: &Path, manifest: &Manifest) -> Result<()> {
 		// let iso_config = manifest.iso.as_ref().expect("A valid ISO configuration");
 		let image = PathBuf::from(manifest.out_file.as_ref().map_or("out.iso", |s| s));
 		// Create workspace directory
@@ -528,11 +529,9 @@ impl ImageBuilder for IsoBuilder {
 		self.squashfs(chroot, &image_dir.join("squashfs.img"))?;
 
 		self.bootloader.copy_liveos(manifest, chroot)?;
-		let image = format!("{}/katsu.iso", image.display());
-		let path = PathBuf::from(image);
 
-		self.xorriso(chroot, path.as_path(), manifest)?;
-		self.bootloader.install(path.as_path())?;
+		self.xorriso(chroot, &image, manifest)?;
+		self.bootloader.install(&image)?;
 
 		Ok(())
 	}

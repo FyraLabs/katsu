@@ -43,9 +43,8 @@ impl std::str::FromStr for OutputFormat {
 	}
 }
 
+#[tracing::instrument]
 pub fn parse(cli: KatsuCli) -> Result<()> {
-	println!("{cli:?}");
-
 	// load manifest from config file
 
 	sudo::escalate_if_needed().unwrap();
@@ -56,6 +55,7 @@ pub fn parse(cli: KatsuCli) -> Result<()> {
 
 	let builder = KatsuBuilder::new(manifest, cli.output)?;
 
+	tracing::info!("Building image");
 	builder.build()?;
 
 	Ok(())
