@@ -1,8 +1,14 @@
+
+iso:
+  volume_id: ULTRAMARINE-TEST
+
 scripts:
   post:
     - id: liveimage-setup
       name: Set up Live Image
       file: liveimage.sh
+
+bootloader: limine
 
 dnf:
   releasever: 39

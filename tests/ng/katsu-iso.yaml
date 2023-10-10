@@ -1,10 +1,12 @@
 # Example manifest for a Katsu build
-builder: dnf
-distro: Katsu Ultramarine
-
 import:
   - modules/base.yaml
   - modules/live-image/live.yaml
+builder: dnf
+distro: Katsu Ultramarine
+
+
+bootloader: limine
 
 dnf:
   releasever: 39

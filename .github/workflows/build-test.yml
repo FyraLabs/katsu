@@ -81,7 +81,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: katsudon
+          name: image-arm
           path: tests/ng/katsu-work/image/*.img.xz
 
   image-x86_64:
@@ -131,7 +131,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: katsudon
+          name: image-x86_64
           path: tests/ng/katsu-work/image/*.raw.xz
 
 
@@ -182,5 +182,5 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: katsudon
+          name: iso-x86_64
           path: tests/ng/katsu-work/image/*.iso.xz

@@ -1,9 +1,7 @@
 mod boot;
 mod builder;
-mod cfg;
 mod cli;
 mod config;
-mod creator;
 mod util;
 
 use clap::Parser;

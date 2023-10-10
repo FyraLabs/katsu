@@ -3,6 +3,7 @@ use crate::{
 	cli::OutputFormat,
 	config::{Manifest, Script},
 };
+use cmd_lib::{run_cmd, run_fun};
 use color_eyre::{eyre::eyre, Result};
 use serde_derive::{Deserialize, Serialize};
 use std::{
@@ -14,11 +15,10 @@ use std::{
 use tracing::{debug, info, trace, warn};
 
 const WORKDIR: &str = "katsu-work";
-const VOLID: &str = "KATSU-LIVEOS";
 crate::prepend_comment!(GRUB_PREPEND_COMMENT: "/etc/default/grub", "Grub default configurations", katsu::builder::Bootloader::cp_grub);
 crate::prepend_comment!(LIMINE_PREPEND_COMMENT: "/boot/limine.cfg", "Limine configurations", katsu::builder::Bootloader::cp_limine);
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub enum Bootloader {
 	#[default]
 	Grub,
@@ -97,6 +97,7 @@ impl Bootloader {
 
 	fn cp_limine(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
 		// complaint to rust: why can't you coerce automatically with umwrap_or()????
+		info!("Copying Limine files");
 		let distro = &manifest.distro.as_ref().map_or("Linux", |s| s);
 		let cmd = &manifest.kernel_cmdline.as_ref().map_or("", |s| s);
 		let root = chroot.parent().unwrap().join(ISO_TREE);
@@ -113,9 +114,11 @@ impl Bootloader {
 		std::fs::copy("/usr/share/limine/limine-bios.sys", root.join("boot/limine-bios.sys"))?;
 
 		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &root)?;
+		let volid = manifest.get_volid();
 
 		// Generate limine.cfg
-		let mut f = std::fs::File::create(root.join("boot/limine.cfg"))
+		let limine_cfg = root.join("boot/limine.cfg");
+		let mut f = std::fs::File::create(&limine_cfg)
 			.map_err(|e| eyre!(e).wrap_err("Cannot create limine.cfg"))?;
 
 		f.write_all(LIMINE_PREPEND_COMMENT.as_bytes())?;
@@ -123,23 +126,39 @@ impl Bootloader {
 		f.write_fmt(format_args!("KERNEL_PATH=boot:///boot/{vmlinuz}\n\t"))?;
 		f.write_fmt(format_args!("MODULE_PATH=boot:///boot/{initramfs}\n\t"))?;
 		f.write_fmt(format_args!(
-			"CMDLINE=root=live:LABEL={VOLID} rd.live.image enforcing=0 {cmd}"
+			"CMDLINE=root=live:LABEL={volid} rd.live.image enforcing=0 {cmd}"
 		))?;
+
+		let binding = run_fun!(b2sum $limine_cfg)?;
+		let liminecfg_b2h = binding.split_whitespace().next().unwrap();
+
+		// enroll limine secure boot
+
+		info!("Enrolling Limine Secure Boot");
+
+		tracing::info_span!("Enrolling Limine Secure Boot").in_scope(|| -> Result<()> {
+			Ok(run_cmd!(
+				limine enroll-config $root/boot/limine-uefi-cd.bin $liminecfg_b2h 2>&1;
+				limine enroll-config $root/boot/limine-bios.sys $liminecfg_b2h 2>&1;
+			)?)
+		})?;
 
 		Ok(())
 	}
 
 	fn cp_grub(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
-		let imgd = chroot.parent().unwrap().join("image/");
+		let imgd = chroot.parent().unwrap().join(ISO_TREE);
 		let cmd = &manifest.kernel_cmdline.as_ref().map_or("", |s| s);
+		let volid = manifest.get_volid();
 
-		let cfg = std::fs::read_to_string(chroot.join("etc/default/grub"))?;
+		fs::create_dir_all(imgd.join("etc/default"))?;
 		let mut f = std::fs::File::create(chroot.join("etc/default/grub"))?;
+		let cfg = std::fs::read_to_string(chroot.join("etc/default/grub"))?;
 		f.write_all(GRUB_PREPEND_COMMENT.as_bytes())?;
 		for l in cfg.lines() {
 			if l.starts_with("GRUB_CMDLINE_LINUX=") {
 				f.write_fmt(format_args!(
-					"GRUB_CMDLINE_LINUX=\"root=live:LABEL={VOLID} rd.live.image selinux=0 {cmd}\"\n"
+					"GRUB_CMDLINE_LINUX=\"root=live:LABEL={volid} rd.live.image enforcing=0 {cmd}\"\n"
 				))?;
 			} else {
 				f.write_all(l.as_bytes())?;
@@ -470,11 +489,12 @@ impl IsoBuilder {
 		cmd_lib::run_cmd!(mkfs.erofs -d $chroot -o $image)?;
 		Ok(())
 	}
-	pub fn xorriso(&self, chroot: &Path, image: &Path) -> Result<()> {
+	pub fn xorriso(&self, chroot: &Path, image: &Path, manifest: &Manifest) -> Result<()> {
+		let volid = manifest.get_volid();
 		let (uefi_bin, bios_bin) = self.bootloader.get_bins();
 		let root = chroot.parent().unwrap().join(ISO_TREE);
 		debug!("xorriso -as mkisofs -b {bios_bin} -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot {uefi_bin} -efi-boot-part --efi-boot-image --protective-msdos-label {root} -volid KATSU-LIVEOS -o {image}", bios_bin = bios_bin, uefi_bin = uefi_bin, root = root.display(), image = image.display());
-		cmd_lib::run_cmd!(xorriso -as mkisofs -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $uefi_bin -efi-boot-part --efi-boot-image --protective-msdos-label $root -volid $VOLID -o $image 2>&1)?;
+		cmd_lib::run_cmd!(xorriso -as mkisofs -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $uefi_bin -efi-boot-part --efi-boot-image --protective-msdos-label $root -volid $volid -o $image 2>&1)?;
 		Ok(())
 	}
 }
@@ -483,6 +503,8 @@ const ISO_TREE: &str = "iso-tree";
 
 impl ImageBuilder for IsoBuilder {
 	fn build(&self, chroot: &Path, image: &Path, manifest: &Manifest) -> Result<()> {
+		// let iso_config = manifest.iso.as_ref().expect("A valid ISO configuration");
+
 		// Create workspace directory
 		let workspace = chroot.parent().unwrap().to_path_buf();
 		debug!("Workspace: {workspace:#?}");
@@ -506,7 +528,7 @@ impl ImageBuilder for IsoBuilder {
 		let image = format!("{}/katsu.iso", image.display());
 		let path = PathBuf::from(image);
 
-		self.xorriso(chroot, path.as_path())?;
+		self.xorriso(chroot, path.as_path(), manifest)?;
 		self.bootloader.install(path.as_path())?;
 
 		Ok(())
@@ -527,13 +549,14 @@ impl KatsuBuilder {
 			_ => todo!("builder not implemented"),
 		};
 
+		let bootloader = manifest.bootloader.clone();
+
 		let image_builder = match output_format {
 			OutputFormat::Iso => {
-				Box::new(IsoBuilder { bootloader: Bootloader::Limine, root_builder })
-					as Box<dyn ImageBuilder>
+				Box::new(IsoBuilder { bootloader, root_builder }) as Box<dyn ImageBuilder>
 			},
 			OutputFormat::DiskImage => Box::new(DiskImageBuilder {
-				bootloader: Bootloader::Limine,
+				bootloader,
 				root_builder,
 				image: PathBuf::from("./katsu-work/image/katsu.img"),
 			}) as Box<dyn ImageBuilder>,

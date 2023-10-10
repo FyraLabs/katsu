@@ -1,8 +1,9 @@
-use crate::chroot_run_cmd;
+use crate::{builder::Bootloader, chroot_run_cmd};
 use bytesize::ByteSize;
 use color_eyre::Result;
 use merge_struct::merge;
-use serde_derive::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde_derive::Serialize;
 use std::{
 	collections::BTreeMap,
 	fs,
@@ -10,6 +11,24 @@ use std::{
 	path::{Path, PathBuf},
 };
 use tracing::{debug, info, trace};
+const DEFAULT_VOLID: &str = "KATSU-LIVEOS";
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+pub struct IsoConfig {
+	/// Volume ID for the ISO image
+	#[serde(default)]
+	pub volume_id: Option<String>,
+}
+
+impl IsoConfig {
+	pub fn get_volid(&self) -> String {
+		if let Some(volid) = &self.volume_id {
+			volid.clone()
+		} else {
+			DEFAULT_VOLID.to_string()
+		}
+	}
+}
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct Manifest {
@@ -31,6 +50,7 @@ pub struct Manifest {
 
 	/// DNF configuration
 	// todo: dynamically load this?
+	#[serde(default)]
 	pub dnf: crate::builder::DnfRootBuilder,
 
 	/// Scripts to run before and after the build
@@ -43,9 +63,35 @@ pub struct Manifest {
 
 	/// Extra parameters to the kernel command line in bootloader configs
 	pub kernel_cmdline: Option<String>,
+
+	/// ISO config (optional)
+	/// This is only used for ISO images
+	#[serde(default)]
+	pub iso: Option<IsoConfig>,
+
+	// deserialize with From<&str>
+	#[serde(default, deserialize_with = "deseralize_bootloader")]
+	pub bootloader: Bootloader,
+}
+
+// Function to deserialize String into Bootloader
+
+fn deseralize_bootloader<'de, D>(deserializer: D) -> Result<Bootloader, D::Error>
+where
+	D: serde::Deserializer<'de>,
+{
+	let s = String::deserialize(deserializer)?;
+	Ok(Bootloader::from(s.as_str()))
 }
 
 impl Manifest {
+	pub fn get_volid(&self) -> String {
+		if let Some(iso) = &self.iso {
+			iso.get_volid()
+		} else {
+			DEFAULT_VOLID.to_string()
+		}
+	}
 	/// Loads a single manifest from a file
 	pub fn load(path: &Path) -> Result<Self> {
 		let mut manifest: Self = serde_yaml::from_str(&std::fs::read_to_string(path)?)?;
