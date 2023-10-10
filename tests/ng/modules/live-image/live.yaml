@@ -8,7 +8,7 @@ scripts:
       name: Set up Live Image
       file: liveimage.sh
 
-bootloader: limine
+bootloader: grub
 
 dnf:
   releasever: 39
