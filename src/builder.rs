@@ -92,6 +92,7 @@ impl Bootloader {
 		bail_let!(Some(vmlinuz) = vmlinuz => "Cannot find vmlinuz in {bootdir:?}");
 		bail_let!(Some(initramfs) = initramfs => "Cannot find initramfs in {bootdir:?}");
 
+		std::fs::create_dir_all(dest.join("boot"))?;
 		std::fs::copy(bootdir.join(&vmlinuz), dest.join("boot").join(&vmlinuz))?;
 		std::fs::copy(bootdir.join(&initramfs), dest.join("boot").join(&initramfs))?;
 
