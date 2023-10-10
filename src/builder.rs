@@ -505,14 +505,9 @@ impl IsoBuilder {
 const ISO_TREE: &str = "iso-tree";
 
 impl ImageBuilder for IsoBuilder {
-<<<<<<< HEAD
 	fn build(&self, chroot: &Path, image: &Path, manifest: &Manifest) -> Result<()> {
 		// let iso_config = manifest.iso.as_ref().expect("A valid ISO configuration");
-
-=======
-	fn build(&self, chroot: &Path, _: &Path, manifest: &Manifest) -> Result<()> {
 		let image = PathBuf::from(manifest.out_file.as_ref().map_or("out.iso", |s| s));
->>>>>>> c356b19 (I just don't know)
 		// Create workspace directory
 		let workspace = chroot.parent().unwrap().to_path_buf();
 		debug!("Workspace: {workspace:#?}");
@@ -536,14 +531,8 @@ impl ImageBuilder for IsoBuilder {
 		let image = format!("{}/katsu.iso", image.display());
 		let path = PathBuf::from(image);
 
-<<<<<<< HEAD
 		self.xorriso(chroot, path.as_path(), manifest)?;
 		self.bootloader.install(path.as_path())?;
-=======
-		self.xorriso(chroot, &image)?;
-
-		self.bootloader.install(&image)?;
->>>>>>> c356b19 (I just don't know)
 
 		Ok(())
 	}
