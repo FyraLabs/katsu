@@ -51,7 +51,10 @@ impl Bootloader {
 	}
 	pub fn get_bins(&self) -> (&'static str, &'static str) {
 		match *self {
-			Self::Grub => todo!(),
+			Self::Grub => (
+				"boot/efi/EFI/*/shim${efiarch64|lower}.efi",
+				"boot/efi/EFI/*/mm${efiarch64|lower}.efi",
+			),
 			Self::Limine => ("boot/limine-uefi-cd.bin", "boot/limine-bios-cd.bin"),
 			Self::SystemdBoot => todo!(),
 		}
@@ -274,7 +277,7 @@ impl RootBuilder for DnfRootBuilder {
 
 #[tracing::instrument(skip(chroot, in_chroot))]
 pub fn run_script(script: Script, chroot: &Path, in_chroot: bool) -> Result<()> {
-	let id = script.id.as_ref().map_or("<NULL>", |s| &**s);
+	let id = script.id.as_ref().map_or("<NULL>", |s| s);
 	bail_let!(Some(mut data) = script.load() => "Cannot load script `{id}`");
 	let name = script.name.as_ref().map_or("<Untitled>", |s| s);
 	info!(id, name, "Running script");
@@ -502,9 +505,14 @@ impl IsoBuilder {
 const ISO_TREE: &str = "iso-tree";
 
 impl ImageBuilder for IsoBuilder {
+<<<<<<< HEAD
 	fn build(&self, chroot: &Path, image: &Path, manifest: &Manifest) -> Result<()> {
 		// let iso_config = manifest.iso.as_ref().expect("A valid ISO configuration");
 
+=======
+	fn build(&self, chroot: &Path, _: &Path, manifest: &Manifest) -> Result<()> {
+		let image = PathBuf::from(manifest.out_file.as_ref().map_or("out.iso", |s| s));
+>>>>>>> c356b19 (I just don't know)
 		// Create workspace directory
 		let workspace = chroot.parent().unwrap().to_path_buf();
 		debug!("Workspace: {workspace:#?}");
@@ -528,8 +536,14 @@ impl ImageBuilder for IsoBuilder {
 		let image = format!("{}/katsu.iso", image.display());
 		let path = PathBuf::from(image);
 
+<<<<<<< HEAD
 		self.xorriso(chroot, path.as_path(), manifest)?;
 		self.bootloader.install(path.as_path())?;
+=======
+		self.xorriso(chroot, &image)?;
+
+		self.bootloader.install(&image)?;
+>>>>>>> c356b19 (I just don't know)
 
 		Ok(())
 	}
