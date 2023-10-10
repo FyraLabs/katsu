@@ -169,8 +169,47 @@ impl Bootloader {
 			}
 		}
 		drop(f); // write and flush changes
+		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &imgd)?;
+		let volid = manifest.get_volid();
 
-		crate::chroot_run_cmd!(chroot, grub2-mkconfig -o /boot/grub2/grub.cfg 2>&1)?;
+		fs::create_dir_all(imgd.join("boot/grub2"))?;
+		let grub_config = imgd.join("boot/grub2/grub.cfg");
+
+		let distro_name = &manifest.distro.as_ref().map_or("Linux", |s| s);
+		let config_template = r#"
+set default="1"
+
+function load_video {
+  insmod all_video
+}
+
+load_video
+set gfxpayload=keep
+insmod gzio
+insmod part_gpt
+insmod ext2
+insmod chain
+set timeout=60
+"#;
+		let template_2 = format!(
+			r#"
+search --no-floppy --set=root --label '{volid}'
+menuentry '{distro_name}' --class ultramarine --class gnu-linux --class gnu --class os {{
+	linuxefi /boot/{vmlinuz} root=live:LABEL={volid} rd.live.image enforcing=0 {cmd}
+	initrdefi /boot/{initramfs}
+}}
+			"#
+		);
+
+		let mut f = std::fs::File::create(&grub_config)?;
+
+		f.write_all(config_template.as_bytes())?;
+		f.write_all(template_2.as_bytes())?;
+
+		f.flush()?;
+
+
+		// crate::chroot_run_cmd!(chroot, grub2-mkconfig -o /boot/grub2/grub.cfg 2>&1)?;
 		cmd_lib::run_cmd!(cp -r $chroot/boot $imgd/)?; // too lazy to cp one by one
 		Ok(())
 	}
