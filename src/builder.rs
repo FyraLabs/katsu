@@ -170,7 +170,7 @@ impl Bootloader {
 		}
 		drop(f); // write and flush changes
 
-		crate::chroot_run_cmd!(chroot, grub2-mkconfig -o /boot/grub2/grub.cfg;)?;
+		crate::chroot_run_cmd!(chroot, grub2-mkconfig -o /boot/grub2/grub.cfg 2>&1)?;
 		cmd_lib::run_cmd!(cp -r $chroot/boot $imgd/)?; // too lazy to cp one by one
 		Ok(())
 	}
