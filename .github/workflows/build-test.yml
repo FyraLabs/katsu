@@ -29,6 +29,7 @@ env:
     moby-engine
     squashfs-tools
     erofs-utils
+    grub2-tools
 
 on:
   push:
