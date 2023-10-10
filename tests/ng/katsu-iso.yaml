@@ -6,7 +6,7 @@ builder: dnf
 distro: Katsu Ultramarine
 
 
-bootloader: limine
+bootloader: grub
 
 dnf:
   releasever: 39
