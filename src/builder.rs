@@ -214,6 +214,16 @@ menuentry '{distro_name}' --class ultramarine --class gnu-linux --class gnu --cl
 
 		f.flush()?;
 
+		std::fs::create_dir_all(imgd.join("EFI/BOOT"))?;
+
+		// Funny script to install GRUB
+		cmd_lib::run_cmd!(
+			mkdir -p $imgd/EFI/BOOT/fonts;
+			cp -av $imgd/boot/efi/EFI/BOOT/ $imgd/EFI/;
+			cp -av $imgd/boot/efi/EFI/fedora/. $imgd/EFI/;
+			cp -av $imgd/boot/grub/grub.cfg $imgd/EFI/BOOT/BOOT.conf;
+		)?;
+
 		// and then we need to generate eltorito.img
 		let host_arch = cmd_lib::run_fun!(uname -m;)?;
 
@@ -566,13 +576,51 @@ impl IsoBuilder {
 		let volid = manifest.get_volid();
 		let (uefi_bin, bios_bin) = self.bootloader.get_bins();
 		let root = chroot.parent().unwrap().join(ISO_TREE);
+
 		// TODO: refactor to new fn in Bootloader
+		let grub2_mbr_hybrid =
+			chroot.join("usr/lib/grub/i386-pc/boot_hybrid.img").display().to_string();
+		let efiboot = chroot.join("boot/efiboot.img").display().to_string();
+		let eltorito = chroot.join("boot/eltorito.img").display().to_string();
 		let args = match self.bootloader {
-			Bootloader::Grub => vec!["-eltorito-alt-boot"],
+			Bootloader::Grub => vec![
+				"-eltorito-alt-boot",
+				// "--grub2-mbr",
+				// grub2_mbr_hybrid.as_str(),
+				// "-partition_offset",
+				// "16",
+				// "-appended_part_as_gpt",
+				// "-append_partition",
+				// "2",
+				// "C12A7328-F81F-11D2-BA4B-00A0C93EC93B",
+				// efiboot.as_str(),
+				// "-iso_mbr_part_type",
+				// "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7",
+				// "-c",
+				// "boot.cat",
+				// "--boot-catalog-hide",
+				// "-e",
+				// "--interval:appended_partition_2:all::",
+				// "-b",
+				// eltorito.as_str(),
+
+			],
+			Bootloader::Limine => vec![
+				"--efi-boot",
+				uefi_bin,
+			],
 			_ => vec![],
 		};
-		debug!("xorriso -as mkisofs {args:?} -b {bios_bin} -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot {uefi_bin} -efi-boot-part --efi-boot-image --protective-msdos-label {root} -volid KATSU-LIVEOS -o {image}", root = root.display(), image = image.display());
-		cmd_lib::run_cmd!(xorriso -as mkisofs $[args] -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $uefi_bin -efi-boot-part --efi-boot-image --protective-msdos-label $root -volid $volid -o $image 2>&1)?;
+
+		match self.bootloader {
+			Bootloader::Grub => {
+				cmd_lib::run_cmd!(grub2-mkrescue $[args] -o $image $root -volid $volid 2>&1)?;
+			},
+			_ => {
+				debug!("xorriso -as mkisofs {args:?} -b {bios_bin} -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot {uefi_bin} -efi-boot-part --efi-boot-image --protective-msdos-label {root} -volid KATSU-LIVEOS -o {image}", root = root.display(), image = image.display());
+				cmd_lib::run_cmd!(xorriso -as mkisofs $[args] -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $uefi_bin -efi-boot-part --efi-boot-image --protective-msdos-label $root -volid $volid -o $image 2>&1)?;
+			},
+		}
 		Ok(())
 	}
 }
@@ -587,9 +635,9 @@ impl ImageBuilder for IsoBuilder {
 		let workspace = chroot.parent().unwrap().to_path_buf();
 		debug!("Workspace: {workspace:#?}");
 		fs::create_dir_all(&workspace)?;
-		self.root_builder.build(chroot.canonicalize()?.as_path(), manifest)?;
+		// self.root_builder.build(chroot.canonicalize()?.as_path(), manifest)?;
 
-		self.dracut(chroot)?;
+		// self.dracut(chroot)?;
 
 		// temporarily store content of iso
 		let image_dir = workspace.join(ISO_TREE).join("LiveOS");
@@ -600,7 +648,7 @@ impl ImageBuilder for IsoBuilder {
 		// the image output would be in katsu-work/image
 
 		// generate squashfs
-		self.squashfs(chroot, &image_dir.join("squashfs.img"))?;
+		// self.squashfs(chroot, &image_dir.join("squashfs.img"))?;
 
 		self.bootloader.copy_liveos(manifest, chroot)?;
 
