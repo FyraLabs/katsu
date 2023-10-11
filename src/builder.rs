@@ -700,7 +700,7 @@ impl IsoBuilder {
 					-eltorito-alt-boot
 					-e --interval:appended_partition_2:all::
 					-no-emul-boot
-
+					-vvvvv
 					$tree  -o $image 2>&1)?;
 			},
 			_ => {
