@@ -30,6 +30,7 @@ env:
     squashfs-tools
     erofs-utils
     grub2-tools
+    grub2-tools-extra
 
 on:
   push:
