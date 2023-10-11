@@ -177,7 +177,7 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o iso katsu-iso.yaml 2>&1
-          xz -z9 katsu-work/image/out.iso -c > katsu-work/image/katsu.iso.xz
+          xz -z9 out.iso -c > katsu-work/image/katsu.iso.xz
           popd
 
       - name: Upload artifacts
