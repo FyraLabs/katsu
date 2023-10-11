@@ -173,8 +173,13 @@ impl Bootloader {
 		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &imgd)?;
 		let volid = manifest.get_volid();
 
-		fs::create_dir_all(imgd.join("boot/grub2"))?;
-		let grub_config = imgd.join("boot/grub2/grub.cfg");
+		// crate::chroot_run_cmd!(chroot, grub2-mkconfig -o /boot/grub2/grub.cfg 2>&1)?;
+		cmd_lib::run_cmd!(
+			cp -r $chroot/boot $imgd/;
+			mv $imgd/boot/grub2 $imgd/boot/grub;
+		)?;
+
+		let grub_config = imgd.join("boot/grub/grub.cfg");
 
 		let distro_name = &manifest.distro.as_ref().map_or("Linux", |s| s);
 		let config_template = r#"
@@ -209,9 +214,6 @@ menuentry '{distro_name}' --class ultramarine --class gnu-linux --class gnu --cl
 
 		f.flush()?;
 
-		// crate::chroot_run_cmd!(chroot, grub2-mkconfig -o /boot/grub2/grub.cfg 2>&1)?;
-		cmd_lib::run_cmd!(cp -r $chroot/boot $imgd/)?; // too lazy to cp one by one
-
 		// and then we need to generate eltorito.img
 		let host_arch = cmd_lib::run_fun!(uname -m;)?;
 
@@ -220,7 +222,10 @@ menuentry '{distro_name}' --class ultramarine --class gnu-linux --class gnu --cl
 			"aarch64" => "aa64-pc",
 			_ => unimplemented!(),
 		};
-		cmd_lib::run_cmd!(grub2-mkimage	-O $arch-eltorito -d $chroot/usr/lib/grub/$arch -o $imgd/boot/eltorito.img -p boot/grub2 iso9660 biosdisk)?;
+		cmd_lib::run_cmd!(
+			grub2-mkimage -O $arch-eltorito -d $chroot/usr/lib/grub/$arch -o $imgd/boot/eltorito.img -p boot/grub iso9660 biosdisk
+			// grub2-mkrescue -o efiboot.img $imgd;
+		)?;
 		Ok(())
 	}
 
@@ -546,8 +551,13 @@ impl IsoBuilder {
 		let volid = manifest.get_volid();
 		let (uefi_bin, bios_bin) = self.bootloader.get_bins();
 		let root = chroot.parent().unwrap().join(ISO_TREE);
-		debug!("xorriso -as mkisofs -b {bios_bin} -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot {uefi_bin} -efi-boot-part --efi-boot-image --protective-msdos-label {root} -volid KATSU-LIVEOS -o {image}", bios_bin = bios_bin, uefi_bin = uefi_bin, root = root.display(), image = image.display());
-		cmd_lib::run_cmd!(xorriso -as mkisofs -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $uefi_bin -efi-boot-part --efi-boot-image --protective-msdos-label $root -volid $volid -o $image 2>&1)?;
+		// TODO: refactor to new fn in Bootloader
+		let args = match self.bootloader {
+			Bootloader::Grub => vec!["-eltorito-alt-boot"],
+			_ => vec![],
+		};
+		debug!("xorriso -as mkisofs {args:?} -b {bios_bin} -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot {uefi_bin} -efi-boot-part --efi-boot-image --protective-msdos-label {root} -volid KATSU-LIVEOS -o {image}", root = root.display(), image = image.display());
+		cmd_lib::run_cmd!(xorriso -as mkisofs $[args] -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $uefi_bin -efi-boot-part --efi-boot-image --protective-msdos-label $root -volid $volid -o $image 2>&1)?;
 		Ok(())
 	}
 }
