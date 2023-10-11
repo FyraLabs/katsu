@@ -173,8 +173,8 @@ impl Bootloader {
 		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &imgd)?;
 		let volid = manifest.get_volid();
 
-		// crate::chroot_run_cmd!(chroot, grub2-mkconfig -o /boot/grub2/grub.cfg 2>&1)?;
 		cmd_lib::run_cmd!(
+			rm -rf $imgd/boot/;
 			cp -r $chroot/boot $imgd/;
 			mv $imgd/boot/grub2 $imgd/boot/grub;
 		)?;
@@ -223,9 +223,24 @@ menuentry '{distro_name}' --class ultramarine --class gnu-linux --class gnu --cl
 			_ => unimplemented!(),
 		};
 		cmd_lib::run_cmd!(
-			grub2-mkimage -O $arch-eltorito -d $chroot/usr/lib/grub/$arch -o $imgd/boot/eltorito.img -p boot/grub iso9660 biosdisk
-			// grub2-mkrescue -o efiboot.img $imgd;
+			grub2-mkimage -O $arch-eltorito -d $chroot/usr/lib/grub/$arch -o $imgd/boot/eltorito.img -p boot/grub iso9660 biosdisk 2>&1;
+			grub2-mkrescue -o $imgd/../efiboot.img;
 		)?;
+
+		let lc = loopdev::LoopControl::open()?;
+		let loopdev = lc.next_free()?;
+		loopdev.attach_file(imgd.join("../efiboot.img"))?;
+		let ldp = loopdev.path().expect("Failed to unwrap loopdev.path() = None");
+
+		cmd_lib::run_cmd!(
+			mkdir -p /tmp/katsu-efiboot;
+			mount $ldp /tmp/katsu-efiboot;
+			cp -r /tmp/katsu-efiboot/boot/grub $imgd/boot/;
+			umount /tmp/katsu-efiboot;
+		)?;
+
+		loopdev.detach()?;
+
 		Ok(())
 	}
 

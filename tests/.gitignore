@@ -5,3 +5,4 @@ out.iso
 *.raw
 *.zip
 *.xz
+efiboot.img
