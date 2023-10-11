@@ -182,18 +182,18 @@ impl Bootloader {
 
 		cmd_lib::run_cmd!(
 			parted -s $ldp mklabel gpt;
-			parted -s $ldp mkpart primary fat32 1MiB 100%;
+			parted -s $ldp mkpart primary fat32 0 100%;
 			parted -s $ldp set 1 boot on;
 		)?;
 
 		// Format disk with mkfs.fat
-		cmd_lib::run_cmd!(mkfs.msdos $ldp -n $volid)?;
+		cmd_lib::run_cmd!(mkfs.msdos ${ldp}p1 -v -n EFI 2>&1)?;
 
 		// Mount disk to /tmp/katsu.efiboot
 
 		cmd_lib::run_cmd!(
 			mkdir -p /tmp/katsu.efiboot;
-			mount $ldp /tmp/katsu.efiboot;
+			mount ${ldp}p1 /tmp/katsu.efiboot;
 		)?;
 
 		// Copy files to /tmp/katsu.efiboot
@@ -203,8 +203,8 @@ impl Bootloader {
 		// ];
 
 		cmd_lib::run_cmd!(
-			cp -avr $tree/boot/grub /tmp/katsu.efiboot;
-			cp -avr $tree/boot/efi/EFI /tmp/katsu.efiboot;
+			mkdir -p /tmp/katsu.efiboot/efi/boot;
+			cp -avr $tree/boot/efi/EFI/BOOT /tmp/katsu.efiboot/efi/boot/;
 		)?;
 
 		cmd_lib::run_cmd!(
@@ -676,14 +676,6 @@ impl IsoBuilder {
 				"EBD0A0A2-B9E5-4433-87C0-68B6B72699C7",
 				"-c",
 				"boot.cat",
-				"--boot-catalog-hide",
-				"-eltorito-alt-boot",
-				"-e",
-				"--interval:appended_partition_2:all::",
-				"-b",
-				eltorito.as_str(),
-				"-graft-points",
-				grub2.as_str(),
 			],
 			Bootloader::Limine => vec!["--efi-boot", uefi_bin],
 			_ => vec![],
@@ -697,7 +689,19 @@ impl IsoBuilder {
 				// however, while grub2-mkrescue works, it does not use shim, so we still need to manually call xorriso if we want to use shim
 				// - @korewaChino, cc @madomado
 				// It works, but we still need to make it use shim somehow
-				cmd_lib::run_cmd!(xorriso -as mkisofs -R $[args] -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table -efi-boot-part --efi-boot-image --protective-msdos-label $tree -volid $volid -o $image 2>&1)?;
+				// ok so, the partition layout should be like this:
+				// 1. blank partition with 145,408 bytes
+				// 2. EFI partition (fat12)
+				// 3. data
+				cmd_lib::run_cmd!(xorriso -as mkisofs -R -V $volid $[args]
+					-b boot/eltorito.img
+					-boot-load-size 4
+					-boot-info-table --grub2-boot-info
+					-eltorito-alt-boot
+					-e --interval:appended_partition_2:all::
+					-no-emul-boot
+
+					$tree  -o $image 2>&1)?;
 			},
 			_ => {
 				debug!("xorriso -as mkisofs {args:?} -b {bios_bin} -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot {uefi_bin} -efi-boot-part --efi-boot-image --protective-msdos-label {root} -volid KATSU-LIVEOS -o {image}", root = tree.display(), image = image.display());
