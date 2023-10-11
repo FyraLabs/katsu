@@ -232,9 +232,18 @@ menuentry '{distro_name}' --class ultramarine --class gnu-linux --class gnu --cl
 			"aarch64" => "aa64-pc",
 			_ => unimplemented!(),
 		};
+
+		let arch_64 = match &**manifest.dnf.arch.as_ref().unwrap_or(&host_arch) {
+			"x86_64" => "x86_64",
+			"aarch64" => "aa64",
+			_ => unimplemented!(),
+		};
 		cmd_lib::run_cmd!(
-			grub2-mkimage -O $arch-eltorito -d $chroot/usr/lib/grub/$arch -o $imgd/boot/eltorito.img -p boot/grub iso9660 biosdisk 2>&1;
+			// todo: uefi support
+			grub2-mkimage -O $arch-eltorito -d $chroot/usr/lib/grub/$arch -o $imgd/boot/eltorito.img -p /boot/grub iso9660 biosdisk 2>&1;
+			grub2-mkimage -O $arch_64-efi -d $chroot/usr/lib/grub/$arch_64-efi -o $imgd/boot/efiboot.img -p /boot/grub iso9660 efi_gop efi_uga 2>&1;
 			grub2-mkrescue -o $imgd/../efiboot.img;
+
 		)?;
 
 		let lc = loopdev::LoopControl::open()?;
@@ -580,45 +589,49 @@ impl IsoBuilder {
 		// TODO: refactor to new fn in Bootloader
 		let grub2_mbr_hybrid =
 			chroot.join("usr/lib/grub/i386-pc/boot_hybrid.img").display().to_string();
-		let efiboot = chroot.join("boot/efiboot.img").display().to_string();
-		let eltorito = chroot.join("boot/eltorito.img").display().to_string();
+		let grub2 = chroot.join("usr/lib/grub/i386-pc").display().to_string();
+
+		let efiboot = root.join("boot/efiboot.img").display().to_string();
+		let eltorito = root.join("boot/eltorito.img").display().to_string();
+		let grub2 = format!("boot/grub/i386-pc={}", grub2);
 		let args = match self.bootloader {
 			Bootloader::Grub => vec![
+				"--grub2-mbr",
+				grub2_mbr_hybrid.as_str(),
+				"-partition_offset",
+				"16",
+				"-appended_part_as_gpt",
+				"-append_partition",
+				"2",
+				"C12A7328-F81F-11D2-BA4B-00A0C93EC93B",
+				efiboot.as_str(),
+				"-iso_mbr_part_type",
+				"EBD0A0A2-B9E5-4433-87C0-68B6B72699C7",
+				"-c",
+				"boot.cat",
+				"--boot-catalog-hide",
 				"-eltorito-alt-boot",
-				// "--grub2-mbr",
-				// grub2_mbr_hybrid.as_str(),
-				// "-partition_offset",
-				// "16",
-				// "-appended_part_as_gpt",
-				// "-append_partition",
-				// "2",
-				// "C12A7328-F81F-11D2-BA4B-00A0C93EC93B",
-				// efiboot.as_str(),
-				// "-iso_mbr_part_type",
-				// "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7",
-				// "-c",
-				// "boot.cat",
-				// "--boot-catalog-hide",
-				// "-e",
-				// "--interval:appended_partition_2:all::",
-				// "-b",
-				// eltorito.as_str(),
-
+				"-e",
+				"--interval:appended_partition_2:all::",
+				"-b",
+				eltorito.as_str(),
+				"-graft-points",
+				grub2.as_str(),
 			],
-			Bootloader::Limine => vec![
-				"--efi-boot",
-				uefi_bin,
-			],
+			Bootloader::Limine => vec!["--efi-boot", uefi_bin],
 			_ => vec![],
 		};
 
 		match self.bootloader {
 			Bootloader::Grub => {
-				cmd_lib::run_cmd!(grub2-mkrescue $[args] -o $image $root -volid $volid 2>&1)?;
+				cmd_lib::run_cmd!(grub2-mkrescue -o $image $root -volid $volid 2>&1)?;
+				// todo: normal xorriso command does not work for some reason, errors out with some GPT partition shenanigans
+				// todo: maybe we need to replicate mkefiboot? (see lorax/efiboot)
+				// cmd_lib::run_cmd!(xorriso -as mkisofs -R $[args] -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table -efi-boot-part --efi-boot-image --protective-msdos-label $root -volid $volid -o $image 2>&1)?;
 			},
 			_ => {
 				debug!("xorriso -as mkisofs {args:?} -b {bios_bin} -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot {uefi_bin} -efi-boot-part --efi-boot-image --protective-msdos-label {root} -volid KATSU-LIVEOS -o {image}", root = root.display(), image = image.display());
-				cmd_lib::run_cmd!(xorriso -as mkisofs $[args] -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $uefi_bin -efi-boot-part --efi-boot-image --protective-msdos-label $root -volid $volid -o $image 2>&1)?;
+				cmd_lib::run_cmd!(xorriso -as mkisofs -R $[args] -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $uefi_bin -efi-boot-part --efi-boot-image --protective-msdos-label $root -volid $volid -o $image 2>&1)?;
 			},
 		}
 		Ok(())
@@ -635,9 +648,9 @@ impl ImageBuilder for IsoBuilder {
 		let workspace = chroot.parent().unwrap().to_path_buf();
 		debug!("Workspace: {workspace:#?}");
 		fs::create_dir_all(&workspace)?;
-		// self.root_builder.build(chroot.canonicalize()?.as_path(), manifest)?;
+		self.root_builder.build(chroot.canonicalize()?.as_path(), manifest)?;
 
-		// self.dracut(chroot)?;
+		self.dracut(chroot)?;
 
 		// temporarily store content of iso
 		let image_dir = workspace.join(ISO_TREE).join("LiveOS");
@@ -648,7 +661,7 @@ impl ImageBuilder for IsoBuilder {
 		// the image output would be in katsu-work/image
 
 		// generate squashfs
-		// self.squashfs(chroot, &image_dir.join("squashfs.img"))?;
+		self.squashfs(chroot, &image_dir.join("squashfs.img"))?;
 
 		self.bootloader.copy_liveos(manifest, chroot)?;
 
