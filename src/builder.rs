@@ -627,6 +627,9 @@ impl IsoBuilder {
 				cmd_lib::run_cmd!(grub2-mkrescue -o $image $root -volid $volid 2>&1)?;
 				// todo: normal xorriso command does not work for some reason, errors out with some GPT partition shenanigans
 				// todo: maybe we need to replicate mkefiboot? (see lorax/efiboot)
+				// however, while grub2-mkrescue works, it does not use shim, so we still need to manually call xorriso if we want to use shim
+				// - @korewaChino, cc @madomado
+				// It works, but we still need to make it use shim somehow
 				// cmd_lib::run_cmd!(xorriso -as mkisofs -R $[args] -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table -efi-boot-part --efi-boot-image --protective-msdos-label $root -volid $volid -o $image 2>&1)?;
 			},
 			_ => {
