@@ -149,6 +149,72 @@ impl Bootloader {
 
 		Ok(())
 	}
+	/// A clone of mkefiboot from lorax
+	/// Currently only works for PC, no mac support
+	fn mkefiboot(&self, chroot: &Path, manifest: &Manifest) -> Result<()> {
+		let volid = manifest.get_volid();
+		let tree = chroot.parent().unwrap().join(ISO_TREE);
+		let tmp = PathBuf::from("/tmp/katsu.efiboot");
+		std::fs::create_dir_all(&tmp)?;
+		// glob the funny
+
+		// make EFI disk
+		// create sparse file of 50MiB
+		let sparse_path = &tree.join("boot/efiboot.img");
+		debug!(image = ?sparse_path, "Creating sparse file");
+
+		// allocate 50MiB
+		let mut sparse_file = fs::File::create(sparse_path)?;
+
+		sparse_file.seek(std::io::SeekFrom::Start(5 * 1024 * 1024))?;
+		sparse_file.write_all(&[0])?;
+		trace!(sparse = ?sparse_path, "Allocated 5MiB to sparse file");
+
+		// let's mount the disk as a loop device
+
+		let lc = loopdev::LoopControl::open()?;
+		let loopdev = lc.next_free()?;
+		loopdev.attach_file(sparse_path)?;
+
+		// Partition disk with parted
+
+		let ldp = loopdev.path().ok_or(eyre!("Failed to unwrap loopdev.path() = None"))?;
+
+		cmd_lib::run_cmd!(
+			parted -s $ldp mklabel gpt;
+			parted -s $ldp mkpart primary fat32 1MiB 100%;
+			parted -s $ldp set 1 boot on;
+		)?;
+
+		// Format disk with mkfs.fat
+		cmd_lib::run_cmd!(mkfs.msdos $ldp -n $volid)?;
+
+		// Mount disk to /tmp/katsu.efiboot
+
+		cmd_lib::run_cmd!(
+			mkdir -p /tmp/katsu.efiboot;
+			mount $ldp /tmp/katsu.efiboot;
+		)?;
+
+		// Copy files to /tmp/katsu.efiboot
+
+		// let globs = vec![
+		// 	glob::glob(&format!("{}/boot/grub", &tree.display()))?,
+		// ];
+
+		cmd_lib::run_cmd!(
+			cp -avr $tree/boot/grub /tmp/katsu.efiboot;
+			cp -avr $tree/boot/efi/EFI /tmp/katsu.efiboot;
+		)?;
+
+		cmd_lib::run_cmd!(
+			umount /tmp/katsu.efiboot;
+		)?;
+
+		loopdev.detach()?;
+
+		Ok(())
+	}
 
 	fn cp_grub(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
 		let imgd = chroot.parent().unwrap().join(ISO_TREE);
@@ -233,17 +299,16 @@ menuentry '{distro_name}' --class ultramarine --class gnu-linux --class gnu --cl
 			_ => unimplemented!(),
 		};
 
-		let arch_64 = match &**manifest.dnf.arch.as_ref().unwrap_or(&host_arch) {
-			"x86_64" => "x86_64",
-			"aarch64" => "aa64",
-			_ => unimplemented!(),
-		};
+		// let arch_64 = match &**manifest.dnf.arch.as_ref().unwrap_or(&host_arch) {
+		// 	"x86_64" => "x86_64",
+		// 	"aarch64" => "aa64",
+		// 	_ => unimplemented!(),
+		// };
 		cmd_lib::run_cmd!(
 			// todo: uefi support
 			grub2-mkimage -O $arch-eltorito -d $chroot/usr/lib/grub/$arch -o $imgd/boot/eltorito.img -p /boot/grub iso9660 biosdisk 2>&1;
-			grub2-mkimage -O $arch_64-efi -d $chroot/usr/lib/grub/$arch_64-efi -o $imgd/boot/efiboot.img -p /boot/grub iso9660 efi_gop efi_uga 2>&1;
+			// grub2-mkimage -O $arch_64-efi -d $chroot/usr/lib/grub/$arch_64-efi -o $imgd/boot/efiboot.img -p /boot/grub iso9660 efi_gop efi_uga 2>&1;
 			grub2-mkrescue -o $imgd/../efiboot.img;
-
 		)?;
 
 		let lc = loopdev::LoopControl::open()?;
@@ -259,6 +324,8 @@ menuentry '{distro_name}' --class ultramarine --class gnu-linux --class gnu --cl
 		)?;
 
 		loopdev.detach()?;
+
+		self.mkefiboot(chroot, manifest)?;
 
 		Ok(())
 	}
@@ -581,18 +648,18 @@ impl IsoBuilder {
 		cmd_lib::run_cmd!(mkfs.erofs -d $chroot -o $image)?;
 		Ok(())
 	}
+	// TODO: add mac support
 	pub fn xorriso(&self, chroot: &Path, image: &Path, manifest: &Manifest) -> Result<()> {
 		let volid = manifest.get_volid();
 		let (uefi_bin, bios_bin) = self.bootloader.get_bins();
-		let root = chroot.parent().unwrap().join(ISO_TREE);
+		let tree = chroot.parent().unwrap().join(ISO_TREE);
 
 		// TODO: refactor to new fn in Bootloader
 		let grub2_mbr_hybrid =
 			chroot.join("usr/lib/grub/i386-pc/boot_hybrid.img").display().to_string();
 		let grub2 = chroot.join("usr/lib/grub/i386-pc").display().to_string();
-
-		let efiboot = root.join("boot/efiboot.img").display().to_string();
-		let eltorito = root.join("boot/eltorito.img").display().to_string();
+		let efiboot = tree.join("boot/efiboot.img").display().to_string();
+		let eltorito = tree.join("boot/eltorito.img").display().to_string();
 		let grub2 = format!("boot/grub/i386-pc={}", grub2);
 		let args = match self.bootloader {
 			Bootloader::Grub => vec![
@@ -624,17 +691,17 @@ impl IsoBuilder {
 
 		match self.bootloader {
 			Bootloader::Grub => {
-				cmd_lib::run_cmd!(grub2-mkrescue -o $image $root -volid $volid 2>&1)?;
+				// cmd_lib::run_cmd!(grub2-mkrescue -o $image $tree -volid $volid 2>&1)?;
 				// todo: normal xorriso command does not work for some reason, errors out with some GPT partition shenanigans
 				// todo: maybe we need to replicate mkefiboot? (see lorax/efiboot)
 				// however, while grub2-mkrescue works, it does not use shim, so we still need to manually call xorriso if we want to use shim
 				// - @korewaChino, cc @madomado
 				// It works, but we still need to make it use shim somehow
-				// cmd_lib::run_cmd!(xorriso -as mkisofs -R $[args] -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table -efi-boot-part --efi-boot-image --protective-msdos-label $root -volid $volid -o $image 2>&1)?;
+				cmd_lib::run_cmd!(xorriso -as mkisofs -R $[args] -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table -efi-boot-part --efi-boot-image --protective-msdos-label $tree -volid $volid -o $image 2>&1)?;
 			},
 			_ => {
-				debug!("xorriso -as mkisofs {args:?} -b {bios_bin} -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot {uefi_bin} -efi-boot-part --efi-boot-image --protective-msdos-label {root} -volid KATSU-LIVEOS -o {image}", root = root.display(), image = image.display());
-				cmd_lib::run_cmd!(xorriso -as mkisofs -R $[args] -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $uefi_bin -efi-boot-part --efi-boot-image --protective-msdos-label $root -volid $volid -o $image 2>&1)?;
+				debug!("xorriso -as mkisofs {args:?} -b {bios_bin} -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot {uefi_bin} -efi-boot-part --efi-boot-image --protective-msdos-label {root} -volid KATSU-LIVEOS -o {image}", root = tree.display(), image = image.display());
+				cmd_lib::run_cmd!(xorriso -as mkisofs -R $[args] -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $uefi_bin -efi-boot-part --efi-boot-image --protective-msdos-label $tree -volid $volid -o $image 2>&1)?;
 			},
 		}
 		Ok(())
