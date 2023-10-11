@@ -767,6 +767,7 @@ dependencies = [
  "glob",
  "gpt",
  "in-container",
+ "lazy_static",
  "loopdev",
  "merge-struct",
  "nix",

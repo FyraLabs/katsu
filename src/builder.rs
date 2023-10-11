@@ -51,10 +51,7 @@ impl Bootloader {
 	}
 	pub fn get_bins(&self) -> (&'static str, &'static str) {
 		match *self {
-			Self::Grub => (
-				"boot/efi/EFI/*/shim${efiarch64|lower}.efi",
-				"boot/efi/EFI/*/mm${efiarch64|lower}.efi",
-			),
+			Self::Grub => ("boot/efi/EFI/fedora/shim.efi", "boot/eltorito.img"),
 			Self::Limine => ("boot/limine-uefi-cd.bin", "boot/limine-bios-cd.bin"),
 			Self::SystemdBoot => todo!(),
 		}
@@ -209,9 +206,18 @@ menuentry '{distro_name}' --class ultramarine --class gnu-linux --class gnu --cl
 
 		f.flush()?;
 
-
 		// crate::chroot_run_cmd!(chroot, grub2-mkconfig -o /boot/grub2/grub.cfg 2>&1)?;
 		cmd_lib::run_cmd!(cp -r $chroot/boot $imgd/)?; // too lazy to cp one by one
+
+		// and then we need to generate eltorito.img
+		let host_arch = cmd_lib::run_fun!(uname -m;)?;
+
+		let arch = match &**manifest.dnf.arch.as_ref().unwrap_or(&host_arch) {
+			"x86_64" => "i386-pc",
+			"aarch64" => "aa64-pc",
+			_ => unimplemented!(),
+		};
+		cmd_lib::run_cmd!(grub2-mkimage	-O $arch-eltorito -d $chroot/usr/lib/grub/$arch -o $imgd/boot/eltorito.img -p boot/grub2 iso9660 biosdisk)?;
 		Ok(())
 	}
 
