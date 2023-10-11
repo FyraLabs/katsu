@@ -43,7 +43,10 @@ impl From<&str> for Bootloader {
 impl Bootloader {
 	pub fn install(&self, image: &Path) -> Result<()> {
 		match *self {
-			Self::Grub => cmd_lib::run_cmd!(grub2-install $image 2>&1)?,
+			Self::Grub => {
+				// no-op
+				info!("GRUB is not required to be installed to image, skipping");
+			},
 			Self::Limine => cmd_lib::run_cmd!(limine bios-install $image 2>&1)?,
 			Self::SystemdBoot => cmd_lib::run_cmd!(bootctl --image=$image install 2>&1)?,
 		}
