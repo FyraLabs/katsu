@@ -668,11 +668,6 @@ impl Auth {
 		}
 
 		args.push(if self.create_home { "-m" } else { "-M" }.to_string());
-		if self.create_home {
-			args.push("-m".to_string());
-		} else {
-			args.push("-M".to_string());
-		}
 
 		// add groups
 		for group in &self.groups {
