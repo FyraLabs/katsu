@@ -166,7 +166,7 @@ impl Bootloader {
 		// allocate 50MiB
 		let mut sparse_file = fs::File::create(sparse_path)?;
 
-		sparse_file.seek(std::io::SeekFrom::Start(5 * 1024 * 1024))?;
+		sparse_file.seek(std::io::SeekFrom::Start(2880000))?;
 		sparse_file.write_all(&[0])?;
 		trace!(sparse = ?sparse_path, "Allocated 5MiB to sparse file");
 
@@ -181,33 +181,15 @@ impl Bootloader {
 		let ldp = loopdev.path().ok_or(eyre!("Failed to unwrap loopdev.path() = None"))?;
 
 		cmd_lib::run_cmd!(
-			parted -s $ldp mklabel gpt;
-			parted -s $ldp mkpart primary fat32 0 100%;
-			parted -s $ldp set 1 boot on;
-		)?;
+			// Format disk with mkfs.fat
+			mkfs.msdos $ldp -v -n EFI 2>&1;
 
-		// Format disk with mkfs.fat
-		cmd_lib::run_cmd!(mkfs.msdos ${ldp}p1 -v -n EFI 2>&1)?;
-
-		// Mount disk to /tmp/katsu.efiboot
-
-		cmd_lib::run_cmd!(
+			// Mount disk to /tmp/katsu.efiboot
 			mkdir -p /tmp/katsu.efiboot;
-			mount ${ldp}p1 /tmp/katsu.efiboot;
-		)?;
+			mount $ldp /tmp/katsu.efiboot;
 
-		// Copy files to /tmp/katsu.efiboot
+			cp -avr $tree/boot/efi/EFI/BOOT /tmp/katsu.efiboot/boot/efi;
 
-		// let globs = vec![
-		// 	glob::glob(&format!("{}/boot/grub", &tree.display()))?,
-		// ];
-
-		cmd_lib::run_cmd!(
-			mkdir -p /tmp/katsu.efiboot/efi/boot;
-			cp -avr $tree/boot/efi/EFI/BOOT /tmp/katsu.efiboot/;
-		)?;
-
-		cmd_lib::run_cmd!(
 			umount /tmp/katsu.efiboot;
 		)?;
 
@@ -307,6 +289,8 @@ menuentry '{distro_name}' --class ultramarine --class gnu-linux --class gnu --cl
 		cmd_lib::run_cmd!(
 			// todo: uefi support
 			grub2-mkimage -O $arch-eltorito -d $chroot/usr/lib/grub/$arch -o $imgd/boot/eltorito.img -p /boot/grub iso9660 biosdisk 2>&1;
+			// make it 2.88 MB
+			fallocate -l 1228800 $imgd/boot/eltorito.img;
 			// grub2-mkimage -O $arch_64-efi -d $chroot/usr/lib/grub/$arch_64-efi -o $imgd/boot/efiboot.img -p /boot/grub iso9660 efi_gop efi_uga 2>&1;
 			grub2-mkrescue -o $imgd/../efiboot.img;
 		)?;
@@ -659,8 +643,7 @@ impl IsoBuilder {
 			chroot.join("usr/lib/grub/i386-pc/boot_hybrid.img").display().to_string();
 		let grub2 = chroot.join("usr/lib/grub/i386-pc").display().to_string();
 		let efiboot = tree.join("boot/efiboot.img").display().to_string();
-		let eltorito = tree.join("boot/eltorito.img").display().to_string();
-		let grub2 = format!("boot/grub/i386-pc={}", grub2);
+		let grub2 = format!("boot/grub/i386-pc={grub2}");
 		let args = match self.bootloader {
 			Bootloader::Grub => vec![
 				"--grub2-mbr",
@@ -671,7 +654,7 @@ impl IsoBuilder {
 				"-append_partition",
 				"2",
 				"C12A7328-F81F-11D2-BA4B-00A0C93EC93B",
-				efiboot.as_str(),
+				&efiboot,
 				"-iso_mbr_part_type",
 				"EBD0A0A2-B9E5-4433-87C0-68B6B72699C7",
 				"-c",
@@ -722,9 +705,9 @@ impl ImageBuilder for IsoBuilder {
 		let workspace = chroot.parent().unwrap().to_path_buf();
 		debug!("Workspace: {workspace:#?}");
 		fs::create_dir_all(&workspace)?;
-		self.root_builder.build(chroot.canonicalize()?.as_path(), manifest)?;
+		// self.root_builder.build(chroot.canonicalize()?.as_path(), manifest)?;
 
-		self.dracut(chroot)?;
+		// self.dracut(chroot)?;
 
 		// temporarily store content of iso
 		let image_dir = workspace.join(ISO_TREE).join("LiveOS");
@@ -735,7 +718,7 @@ impl ImageBuilder for IsoBuilder {
 		// the image output would be in katsu-work/image
 
 		// generate squashfs
-		self.squashfs(chroot, &image_dir.join("squashfs.img"))?;
+		// self.squashfs(chroot, &image_dir.join("squashfs.img"))?;
 
 		self.bootloader.copy_liveos(manifest, chroot)?;
 
