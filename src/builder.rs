@@ -1,6 +1,6 @@
 use crate::{
 	bail_let,
-	cli::OutputFormat,
+	cli::{OutputFormat, SkipPhases},
 	config::{Manifest, Script},
 };
 use cmd_lib::{run_cmd, run_fun};
@@ -166,7 +166,7 @@ impl Bootloader {
 		// allocate 50MiB
 		let mut sparse_file = fs::File::create(sparse_path)?;
 
-		sparse_file.seek(std::io::SeekFrom::Start(2880000))?;
+		sparse_file.seek(std::io::SeekFrom::Start(15 * 1024 * 1024))?; // 15MiB
 		sparse_file.write_all(&[0])?;
 		trace!(sparse = ?sparse_path, "Allocated 5MiB to sparse file");
 
@@ -188,7 +188,8 @@ impl Bootloader {
 			mkdir -p /tmp/katsu.efiboot;
 			mount $ldp /tmp/katsu.efiboot;
 
-			cp -avr $tree/boot/efi/EFI/BOOT /tmp/katsu.efiboot/boot/efi;
+			mkdir -p /tmp/katsu.efiboot/EFI/BOOT;
+			cp -avr $tree/EFI/BOOT/. /tmp/katsu.efiboot/EFI/BOOT 2>&1;
 
 			umount /tmp/katsu.efiboot;
 		)?;
@@ -267,9 +268,13 @@ menuentry '{distro_name}' --class ultramarine --class gnu-linux --class gnu --cl
 		// Funny script to install GRUB
 		cmd_lib::run_cmd!(
 			mkdir -p $imgd/EFI/BOOT/fonts;
-			cp -av $imgd/boot/efi/EFI/BOOT/ $imgd/EFI/;
-			cp -av $imgd/boot/efi/EFI/fedora/. $imgd/EFI/;
-			cp -av $imgd/boot/grub/grub.cfg $imgd/EFI/BOOT/BOOT.conf;
+			cp -av $imgd/boot/efi/EFI/fedora/. $imgd/EFI/BOOT;
+			cp -av $imgd/boot/grub/grub.cfg $imgd/EFI/BOOT/BOOT.conf 2>&1;
+			cp -av $imgd/boot/grub/grub.cfg $imgd/EFI/BOOT/grub.cfg 2>&1;
+			mkdir -p $imgd/EFI/BOOT/fonts;
+			cp -av $imgd/boot/grub/fonts/unicode.pf2 $imgd/EFI/BOOT/fonts;
+			cp -av $imgd/EFI/BOOT/shimx64.efi $imgd/EFI/BOOT/BOOTX64.efi;
+			cp -av $imgd/EFI/BOOT/shim.efi $imgd/EFI/BOOT/BOOTIA32.efi;
 		)?;
 
 		// and then we need to generate eltorito.img
@@ -505,7 +510,9 @@ pub fn run_scripts(
 }
 
 pub trait ImageBuilder {
-	fn build(&self, chroot: &Path, image: &Path, manifest: &Manifest) -> Result<()>;
+	fn build(
+		&self, chroot: &Path, image: &Path, manifest: &Manifest, skip_phases: &SkipPhases,
+	) -> Result<()>;
 }
 /// Creates a disk image, then installs to it
 pub struct DiskImageBuilder {
@@ -515,7 +522,9 @@ pub struct DiskImageBuilder {
 }
 
 impl ImageBuilder for DiskImageBuilder {
-	fn build(&self, chroot: &Path, image: &Path, manifest: &Manifest) -> Result<()> {
+	fn build(
+		&self, chroot: &Path, image: &Path, manifest: &Manifest, skip_phases: &SkipPhases,
+	) -> Result<()> {
 		// create sparse file on disk
 		let sparse_path = &image.canonicalize()?.join("katsu.img");
 		debug!(image = ?sparse_path, "Creating sparse file");
@@ -568,7 +577,9 @@ pub struct DeviceInstaller {
 }
 
 impl ImageBuilder for DeviceInstaller {
-	fn build(&self, _chroot: &Path, _image: &Path, _manifest: &Manifest) -> Result<()> {
+	fn build(
+		&self, _chroot: &Path, _image: &Path, _manifest: &Manifest, skip_phases: &SkipPhases,
+	) -> Result<()> {
 		todo!();
 		self.root_builder.build(_chroot, _manifest)?;
 		Ok(())
@@ -698,15 +709,27 @@ impl IsoBuilder {
 const ISO_TREE: &str = "iso-tree";
 
 impl ImageBuilder for IsoBuilder {
-	fn build(&self, chroot: &Path, _: &Path, manifest: &Manifest) -> Result<()> {
+	fn build(
+		&self, chroot: &Path, _: &Path, manifest: &Manifest, skip_phases: &SkipPhases,
+	) -> Result<()> {
 		// let iso_config = manifest.iso.as_ref().expect("A valid ISO configuration");
+
+		// You can now skip phases by adding environment variable `KATSU_SKIP_PHASES` with a comma-separated list of phases to skip
+
 		let image = PathBuf::from(manifest.out_file.as_ref().map_or("out.iso", |s| s));
 		// Create workspace directory
 		let workspace = chroot.parent().unwrap().to_path_buf();
 		debug!("Workspace: {workspace:#?}");
 		fs::create_dir_all(&workspace)?;
+
+		if !skip_phases.contains("root") {
+			self.root_builder.build(chroot, manifest)?;
+		}
 		// self.root_builder.build(chroot.canonicalize()?.as_path(), manifest)?;
 
+		if !skip_phases.contains("dracut") {
+			self.dracut(chroot)?;
+		}
 		// self.dracut(chroot)?;
 
 		// temporarily store content of iso
@@ -718,12 +741,26 @@ impl ImageBuilder for IsoBuilder {
 		// the image output would be in katsu-work/image
 
 		// generate squashfs
+
+		if !skip_phases.contains("rootimg") {
+			self.squashfs(chroot, &image_dir.join("squashfs.img"))?;
+		}
 		// self.squashfs(chroot, &image_dir.join("squashfs.img"))?;
 
-		self.bootloader.copy_liveos(manifest, chroot)?;
+		if !skip_phases.contains("copy-live") {
+			self.bootloader.copy_liveos(manifest, chroot)?;
+		}
+		// self.bootloader.copy_liveos(manifest, chroot)?;
 
-		self.xorriso(chroot, &image, manifest)?;
-		self.bootloader.install(&image)?;
+		if !skip_phases.contains("iso") {
+			self.xorriso(chroot, &image, manifest)?;
+		}
+		// self.xorriso(chroot, &image, manifest)?;
+		// self.bootloader.install(&image)?;
+
+		if !skip_phases.contains("bootloader") {
+			self.bootloader.install(&image)?;
+		}
 
 		Ok(())
 	}
@@ -734,10 +771,13 @@ impl ImageBuilder for IsoBuilder {
 pub struct KatsuBuilder {
 	pub image_builder: Box<dyn ImageBuilder>,
 	pub manifest: Manifest,
+	pub skip_phases: SkipPhases,
 }
 
 impl KatsuBuilder {
-	pub fn new(manifest: Manifest, output_format: OutputFormat) -> Result<Self> {
+	pub fn new(
+		manifest: Manifest, output_format: OutputFormat, skip_phases: SkipPhases,
+	) -> Result<Self> {
 		let root_builder = match manifest.builder.clone().expect("A valid builder value").as_str() {
 			"dnf" => Box::new(manifest.dnf.clone()) as Box<dyn RootBuilder>,
 			_ => todo!("builder not implemented"),
@@ -757,7 +797,7 @@ impl KatsuBuilder {
 			_ => todo!(),
 		};
 
-		Ok(Self { image_builder, manifest })
+		Ok(Self { image_builder, manifest, skip_phases })
 	}
 
 	pub fn build(&self) -> Result<()> {
@@ -770,7 +810,7 @@ impl KatsuBuilder {
 		let image = workdir.join("image");
 		fs::create_dir_all(&image)?;
 
-		self.image_builder.build(&chroot, &image, &self.manifest)?;
+		self.image_builder.build(&chroot, &image, &self.manifest, &self.skip_phases)?;
 
 		// chroot_run_cmd!(chroot, unshare -R ${chroot} bash -c "echo woo")?;
 		Ok(())

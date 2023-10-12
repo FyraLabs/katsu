@@ -23,6 +23,24 @@ pub struct KatsuCli {
 
 	#[arg(short, long, value_parser = value_parser!(OutputFormat))]
 	output: OutputFormat,
+	#[arg(short, long,env = "KATSU_SKIP_PHASES", value_parser = value_parser!(SkipPhases))]
+	skip_phases: SkipPhases,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct SkipPhases(Vec<String>);
+
+impl SkipPhases {
+	pub fn contains(&self, phase: &str) -> bool {
+		self.0.contains(&phase.to_string())
+	}
+}
+
+impl std::str::FromStr for SkipPhases {
+	type Err = String;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Ok(SkipPhases(s.split(',').map(|s| s.to_string()).collect()))
+	}
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -53,7 +71,7 @@ pub fn parse(cli: KatsuCli) -> Result<()> {
 
 	trace!(?manifest, "Loaded manifest");
 
-	let builder = KatsuBuilder::new(manifest, cli.output)?;
+	let builder = KatsuBuilder::new(manifest, cli.output, cli.skip_phases)?;
 
 	tracing::info!("Building image");
 	builder.build()?;
