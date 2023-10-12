@@ -671,8 +671,6 @@ impl IsoBuilder {
 				&efiboot,
 				"-iso_mbr_part_type",
 				"EBD0A0A2-B9E5-4433-87C0-68B6B72699C7",
-				"-c",
-				"boot.cat",
 			],
 			Bootloader::Limine => vec!["--efi-boot", uefi_bin],
 			_ => vec![],
@@ -690,15 +688,21 @@ impl IsoBuilder {
 				// 1. blank partition with 145,408 bytes
 				// 2. EFI partition (fat12)
 				// 3. data
-				cmd_lib::run_cmd!(xorriso -as mkisofs -R -V $volid $[args]
+				cmd_lib::run_cmd!(xorrisofs -R -V $volid $[args]
+					-c boot.cat
+					--boot-catalog-hide
 					-b $bios_bin
+					-no-emul-boot
 					-boot-load-size 4
-					-boot-info-table --grub2-boot-info
+					-boot-info-table
+					--grub2-boot-info
 					-eltorito-alt-boot
 					-e --interval:appended_partition_2:all::
 					-no-emul-boot
 					-vvvvv
-					$tree  -o $image 2>&1)?;
+					// -isohybrid-gpt-basdat
+					// -b grub2_mbr=$grub2_mbr_hybrid
+					$tree -o $image 2>&1)?;
 			},
 			_ => {
 				debug!("xorriso -as mkisofs {args:?} -b {bios_bin} -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot {uefi_bin} -efi-boot-part --efi-boot-image --protective-msdos-label {root} -volid KATSU-LIVEOS -o {image}", root = tree.display(), image = image.display());
