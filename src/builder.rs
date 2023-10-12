@@ -295,7 +295,8 @@ menuentry '{distro_name}' --class ultramarine --class gnu-linux --class gnu --cl
 			// todo: uefi support
 			grub2-mkimage -O $arch-eltorito -d $chroot/usr/lib/grub/$arch -o $imgd/boot/eltorito.img -p /boot/grub iso9660 biosdisk 2>&1;
 			// make it 2.88 MB
-			fallocate -l 1228800 $imgd/boot/eltorito.img;
+			// fallocate -l 1228800 $imgd/boot/eltorito.img;
+			// ^ Commented out because it just wiped the entire file - @korewaChino
 			// grub2-mkimage -O $arch_64-efi -d $chroot/usr/lib/grub/$arch_64-efi -o $imgd/boot/efiboot.img -p /boot/grub iso9660 efi_gop efi_uga 2>&1;
 			grub2-mkrescue -o $imgd/../efiboot.img;
 		)?;
