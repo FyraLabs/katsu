@@ -204,7 +204,7 @@ impl Bootloader {
 
 		cmd_lib::run_cmd!(
 			mkdir -p /tmp/katsu.efiboot/efi/boot;
-			cp -avr $tree/boot/efi/EFI/BOOT /tmp/katsu.efiboot/efi/boot/;
+			cp -avr $tree/boot/efi/EFI/BOOT /tmp/katsu.efiboot/;
 		)?;
 
 		cmd_lib::run_cmd!(
