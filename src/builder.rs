@@ -386,6 +386,8 @@ impl RootBuilder for DnfRootBuilder {
 			options.push(format!("--setopt=reposdir={reposdir}"));
 		}
 
+		let chroot = chroot.canonicalize()?;
+
 		// Get host architecture using uname
 		let host_arch = cmd_lib::run_fun!(uname -m;)?;
 
