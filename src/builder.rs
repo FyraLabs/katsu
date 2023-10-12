@@ -387,6 +387,7 @@ impl RootBuilder for DnfRootBuilder {
 		}
 
 		let chroot = chroot.canonicalize()?;
+		let chroot = chroot.as_path();
 
 		// Get host architecture using uname
 		let host_arch = cmd_lib::run_fun!(uname -m;)?;
