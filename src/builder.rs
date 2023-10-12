@@ -158,6 +158,8 @@ impl Bootloader {
 		std::fs::create_dir_all(&tmp)?;
 		// glob the funny
 
+		// TODO: Add mac boot support
+
 		// make EFI disk
 		// create sparse file of 50MiB
 		let sparse_path = &tree.join("boot/efiboot.img");
@@ -706,6 +708,8 @@ impl IsoBuilder {
 					-e --interval:appended_partition_2:all::
 					-no-emul-boot
 					-vvvvv
+					// implant MD5 checksums
+					--md5
 					// -isohybrid-gpt-basdat
 					// -b grub2_mbr=$grub2_mbr_hybrid
 					$tree -o $image 2>&1)?;
@@ -715,6 +719,10 @@ impl IsoBuilder {
 				cmd_lib::run_cmd!(xorriso -as mkisofs -R $[args] -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $uefi_bin -efi-boot-part --efi-boot-image --protective-msdos-label $tree -volid $volid -o $image 2>&1)?;
 			},
 		}
+
+		// implant MD5 checksums
+
+		cmd_lib::run_cmd!(implantisomd5 --force --supported-iso $image)?;
 		Ok(())
 	}
 }

@@ -5,6 +5,7 @@ import:
 builder: dnf
 distro: Katsu Ultramarine
 
+kernel_cmdline: "quiet rhgb"
 
 bootloader: grub
 
@@ -25,3 +26,4 @@ dnf:
     - "@xfce-desktop"
     - anaconda-live
     - libblockdev-nvdimm
+    - isomd5sum
