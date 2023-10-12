@@ -249,9 +249,14 @@ set timeout=60
 		let template_2 = format!(
 			r#"
 search --no-floppy --set=root --label '{volid}'
-menuentry '{distro_name}' --class ultramarine --class gnu-linux --class gnu --class os {{
-	linuxefi /boot/{vmlinuz} root=live:LABEL={volid} rd.live.image enforcing=0 {cmd}
-	initrdefi /boot/{initramfs}
+menuentry '{distro_name}' --class gnu-linux --class gnu --class os {{
+	linux /boot/{vmlinuz} root=live:LABEL={volid} rd.live.image enforcing=0 {cmd}
+	initrd /boot/{initramfs}
+}}
+
+menuentry '{distro_name} (Check Image)' --class gnu-linux --class gnu --class os {{
+	linux /boot/{vmlinuz} root=live:LABEL={volid} rd.live.image rd.live.check enforcing=0 {cmd}
+	initrd /boot/{initramfs}
 }}
 			"#
 		);
