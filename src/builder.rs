@@ -232,7 +232,7 @@ impl Bootloader {
 
 		let distro_name = &manifest.distro.as_ref().map_or("Linux", |s| s);
 		let config_template = r#"
-set default="1"
+set default="0"
 
 function load_video {
   insmod all_video
