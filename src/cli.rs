@@ -23,7 +23,7 @@ pub struct KatsuCli {
 
 	#[arg(short, long, value_parser = value_parser!(OutputFormat))]
 	output: OutputFormat,
-	#[arg(short, long,env = "KATSU_SKIP_PHASES", value_parser = value_parser!(SkipPhases))]
+	#[arg(short, long,env = "KATSU_SKIP_PHASES", value_parser = value_parser!(SkipPhases), default_value = "")]
 	skip_phases: SkipPhases,
 }
 

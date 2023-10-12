@@ -688,7 +688,7 @@ impl IsoBuilder {
 				// 2. EFI partition (fat12)
 				// 3. data
 				cmd_lib::run_cmd!(xorriso -as mkisofs -R -V $volid $[args]
-					-b boot/eltorito.img
+					-b $bios_bin
 					-boot-load-size 4
 					-boot-info-table --grub2-boot-info
 					-eltorito-alt-boot
