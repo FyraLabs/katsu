@@ -107,6 +107,28 @@ macro_rules! prepend_comment {
 	};
 }
 
+/// Generates the file content using the template given
+#[macro_export]
+macro_rules! tpl {
+	(@match $name:ident) => {
+		$name
+	};
+	(@match $name:ident: $var:expr) => {
+		($var)
+	};
+	($tmpl:expr => {$($name:ident$(: $var:expr)?),*} $(=>$out:expr)?) => {{
+		let mut tera = tera::Tera::default();
+		let mut ctx = tera::Context::new();
+		$(
+			ctx.insert(stringify!($name), &$crate::tpl!(@match $name$(: $var)?));
+		)*
+		let out = tera.render_str(include_str!(concat!("../templates/", $tmpl)), &ctx)?;
+		tracing::trace!(out, path = $tmpl, "tpl!() Template output");
+		$(std::fs::File::create($out)?.write_all(out.as_bytes())?;)?
+		out
+	}};
+}
+
 #[tracing::instrument]
 pub fn exec(cmd: &str, args: &[&str], pipe: bool) -> color_eyre::Result<Vec<u8>> {
 	tracing::debug!("Executing command");

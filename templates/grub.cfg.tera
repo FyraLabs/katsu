@@ -1,0 +1,24 @@
+set default="0"
+
+function load_video {
+  insmod all_video
+}
+
+load_video
+set gfxpayload=keep
+insmod gzio
+insmod part_gpt
+insmod ext2
+insmod chain
+set timeout=60
+
+search --no-floppy --set=root --label {{volid}}
+menuentry {{ distro }} --class gnu-linux --class gnu --class os {
+	linux /boot/{{ vmlinuz }} root=live:LABEL={{ volid }} rd.live.image enforcing=0 {{ cmd }}
+	initrd /boot/{{ initramfs }}
+}
+
+menuentry '{{ distro }} (Check Image)' --class gnu-linux --class gnu --class os {
+	linux /boot/{{ vmlinuz }} root=live:LABEL={{ volid }} rd.live.image rd.live.check enforcing=0 {{ cmd }}
+	initrd /boot/{{ initramfs }}
+}

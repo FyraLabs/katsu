@@ -1,0 +1,10 @@
+{{ LIMINE_PREPEND_COMMENT }}
+
+TIMEOUT=5
+
+
+:{{ distro }}
+	PROTOCOL=linux
+	KERNEL_PATH=boot:///boot/{{ vmlinuz }}
+	MODULE_PATH=boot:///boot/{{ initramfs }}
+	CMDLINE=root=live:LABEL={{ volid }} rd.live.image enforcing=0 {{ cmd }}

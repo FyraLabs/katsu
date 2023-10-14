@@ -122,16 +122,7 @@ impl Bootloader {
 
 		// Generate limine.cfg
 		let limine_cfg = root.join("boot/limine.cfg");
-		let mut f = std::fs::File::create(&limine_cfg)
-			.map_err(|e| eyre!(e).wrap_err("Cannot create limine.cfg"))?;
-
-		f.write_all(LIMINE_PREPEND_COMMENT.as_bytes())?;
-		f.write_fmt(format_args!("TIMEOUT=5\n\n:{distro}\n\tPROTOCOL=linux\n\t"))?;
-		f.write_fmt(format_args!("KERNEL_PATH=boot:///boot/{vmlinuz}\n\t"))?;
-		f.write_fmt(format_args!("MODULE_PATH=boot:///boot/{initramfs}\n\t"))?;
-		f.write_fmt(format_args!(
-			"CMDLINE=root=live:LABEL={volid} rd.live.image enforcing=0 {cmd}"
-		))?;
+		crate::tpl!("limine.cfg.tera" => { LIMINE_PREPEND_COMMENT, distro, vmlinuz, initramfs, cmd, volid } => &limine_cfg);
 
 		let binding = run_fun!(b2sum $limine_cfg)?;
 		let liminecfg_b2h = binding.split_whitespace().next().unwrap();
@@ -151,8 +142,7 @@ impl Bootloader {
 	}
 	/// A clone of mkefiboot from lorax
 	/// Currently only works for PC, no mac support
-	fn mkefiboot(&self, chroot: &Path, manifest: &Manifest) -> Result<()> {
-		let volid = manifest.get_volid();
+	fn mkefiboot(&self, chroot: &Path, _: &Manifest) -> Result<()> {
 		let tree = chroot.parent().unwrap().join(ISO_TREE);
 		let tmp = PathBuf::from("/tmp/katsu.efiboot");
 		std::fs::create_dir_all(&tmp)?;
@@ -222,7 +212,6 @@ impl Bootloader {
 		}
 		drop(f); // write and flush changes
 		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &imgd)?;
-		let volid = manifest.get_volid();
 
 		cmd_lib::run_cmd!(
 			rm -rf $imgd/boot/;
@@ -230,47 +219,9 @@ impl Bootloader {
 			mv $imgd/boot/grub2 $imgd/boot/grub;
 		)?;
 
-		let grub_config = imgd.join("boot/grub/grub.cfg");
+		let distro = &manifest.distro.as_ref().map_or("Linux", |s| s);
 
-		let distro_name = &manifest.distro.as_ref().map_or("Linux", |s| s);
-		let config_template = r#"
-set default="0"
-
-function load_video {
-  insmod all_video
-}
-
-load_video
-set gfxpayload=keep
-insmod gzio
-insmod part_gpt
-insmod ext2
-insmod chain
-set timeout=60
-"#;
-		let template_2 = format!(
-			r#"
-search --no-floppy --set=root --label '{volid}'
-menuentry '{distro_name}' --class gnu-linux --class gnu --class os {{
-	linux /boot/{vmlinuz} root=live:LABEL={volid} rd.live.image enforcing=0 {cmd}
-	initrd /boot/{initramfs}
-}}
-
-menuentry '{distro_name} (Check Image)' --class gnu-linux --class gnu --class os {{
-	linux /boot/{vmlinuz} root=live:LABEL={volid} rd.live.image rd.live.check enforcing=0 {cmd}
-	initrd /boot/{initramfs}
-}}
-			"#
-		);
-
-		let mut f = std::fs::File::create(&grub_config)?;
-
-		f.write_all(config_template.as_bytes())?;
-		f.write_all(template_2.as_bytes())?;
-
-		f.flush()?;
-
-		std::fs::create_dir_all(imgd.join("EFI/BOOT"))?;
+		crate::tpl!("grub.cfg.tera" => {volid, distro, vmlinuz, initramfs, cmd} => imgd.join("boot/grub/grub.cfg"));
 
 		// Funny script to install GRUB
 		cmd_lib::run_cmd!(
@@ -751,7 +702,6 @@ impl ImageBuilder for IsoBuilder {
 		if !skip_phases.contains("dracut") {
 			self.dracut(chroot)?;
 		}
-		// self.dracut(chroot)?;
 
 		// temporarily store content of iso
 		let image_dir = workspace.join(ISO_TREE).join("LiveOS");
@@ -766,18 +716,14 @@ impl ImageBuilder for IsoBuilder {
 		if !skip_phases.contains("rootimg") {
 			self.squashfs(chroot, &image_dir.join("squashfs.img"))?;
 		}
-		// self.squashfs(chroot, &image_dir.join("squashfs.img"))?;
 
 		if !skip_phases.contains("copy-live") {
 			self.bootloader.copy_liveos(manifest, chroot)?;
 		}
-		// self.bootloader.copy_liveos(manifest, chroot)?;
 
 		if !skip_phases.contains("iso") {
 			self.xorriso(chroot, &image, manifest)?;
 		}
-		// self.xorriso(chroot, &image, manifest)?;
-		// self.bootloader.install(&image)?;
 
 		if !skip_phases.contains("bootloader") {
 			self.bootloader.install(&image)?;

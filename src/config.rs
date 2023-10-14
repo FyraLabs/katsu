@@ -228,6 +228,14 @@ pub struct PartitionLayout {
 	pub partitions: Vec<Partition>,
 }
 
+#[derive(Serialize, Debug)]
+struct TplFstabEntry<'a> {
+	uuid: String,
+	mp: String,
+	fsname: &'a str,
+	fsck: u8,
+}
+
 impl PartitionLayout {
 	pub fn new() -> Self {
 		Self::default()
@@ -346,53 +354,32 @@ impl PartitionLayout {
 		// sort partitions by mountpoint
 		let ordered = self.sort_partitions();
 
-		let mut fstab = String::new();
+		crate::prepend_comment!(PREPEND: "/etc/fstab", "static file system information.", katsu::config::PartitionLayout::fstab);
 
-		crate::prepend_comment!(PREPEND_COMMENT: "/etc/fstab", "static file system information.", katsu::config::PartitionLayout::fstab);
+		let mut entries = vec![];
 
-		fstab.push_str(PREPEND_COMMENT);
-
-		const LEGEND: &str =
-			"# <file system>\t<mount point>\t<type>\t<options>\t<dump>\t<pass>\n\n";
-
-		fstab.push_str(LEGEND);
-
-		for part in ordered.iter().map(|(_, p)| p) {
-			// get devname by finding from mount, instead of index because we won't be using it as much
-			let mountpoint = PathBuf::from(&part.mountpoint);
+		ordered.iter().try_for_each(|(_, part)| -> Result<()> {
+			let mp = PathBuf::from(&part.mountpoint).to_string_lossy().to_string();
 			let mountpoint_chroot = part.mountpoint.trim_start_matches('/');
 			let mountpoint_chroot = chroot.join(mountpoint_chroot);
-
-			debug!(?mountpoint, "Mountpoint of partition");
-			debug!(?mountpoint_chroot, "Mountpoint of partition in chroot");
-
 			let devname = cmd_lib::run_fun!(findmnt -n -o SOURCE $mountpoint_chroot)?;
 
-			debug!(?devname, "Device name of partition");
-
 			// We will generate by UUID
-
 			let uuid = cmd_lib::run_fun!(blkid -s UUID -o value $devname)?;
-
-			debug!(?uuid, "UUID of partition");
 
 			// clean the mountpoint so we don't have the slash at the start
 			// let mp_cleaned = part.mountpoint.trim_start_matches('/');
 
 			let fsname = if part.filesystem == "efi" { "vfat" } else { &part.filesystem };
+			let fsck = if part.filesystem == "efi" { 0 } else { 2 };
 
-			let fsck = if part.filesystem == "efi" { "0" } else { "2" };
+			entries.push(TplFstabEntry { uuid, mp, fsname, fsck });
+			Ok(())
+		})?;
 
-			let entry = format!(
-				"UUID={uuid}\t{mp}\t{fsname}\tdefaults\t0\t{fsck}",
-				mp = mountpoint.to_string_lossy(),
-			);
+		trace!(?entries, "fstab entries generated");
 
-			fstab.push_str(&entry);
-			fstab.push('\n');
-		}
-
-		Ok(fstab)
+		Ok(crate::tpl!("fstab.tera" => { PREPEND, entries }))
 	}
 
 	pub fn apply(&self, disk: &PathBuf) -> Result<()> {
