@@ -525,8 +525,8 @@ fn test_partlay() {
 
 	let lay = partlay.sort_partitions();
 
-	println!("{:#?}", partlay);
-	println!("sorted: {:#?}", lay);
+	println!("{partlay:#?}");
+	println!("sorted: {lay:#?}");
 
 	// Assert that:
 
@@ -636,8 +636,7 @@ impl Auth {
 
 		if let Some(uid) = self.uid {
 			args.push("-u".to_string());
-			let binding = uid.to_string();
-			args.push(binding.to_string());
+			args.push(uid.to_string());
 		}
 		if let Some(gid) = self.gid {
 			args.push("-g".to_string());

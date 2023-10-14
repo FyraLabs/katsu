@@ -129,6 +129,19 @@ macro_rules! tpl {
 	}};
 }
 
+#[macro_export]
+macro_rules! gen_phase {
+	($skip_phases: ident) => {
+		macro_rules! phase {
+			($key:literal: $run:expr) => {
+				if !$skip_phases.contains($key) {
+					$run?;
+				}
+			};
+		}
+	};
+}
+
 #[tracing::instrument]
 pub fn exec(cmd: &str, args: &[&str], pipe: bool) -> color_eyre::Result<Vec<u8>> {
 	tracing::debug!("Executing command");

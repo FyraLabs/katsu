@@ -28,7 +28,7 @@ pub enum Bootloader {
 
 impl From<&str> for Bootloader {
 	fn from(value: &str) -> Self {
-		match value.to_lowercase().as_str() {
+		match &*value.to_lowercase() {
 			"limine" => Self::Limine,
 			"grub" | "grub2" => Self::Grub,
 			"systemd-boot" => Self::SystemdBoot,
@@ -485,7 +485,7 @@ pub struct DiskImageBuilder {
 
 impl ImageBuilder for DiskImageBuilder {
 	fn build(
-		&self, chroot: &Path, image: &Path, manifest: &Manifest, skip_phases: &SkipPhases,
+		&self, chroot: &Path, image: &Path, manifest: &Manifest, _: &SkipPhases,
 	) -> Result<()> {
 		// create sparse file on disk
 		let sparse_path = &image.canonicalize()?.join("katsu.img");
@@ -559,35 +559,27 @@ const DR_OMIT: &str = "plymouth multipath";
 impl IsoBuilder {
 	fn dracut(&self, root: &Path) -> Result<()> {
 		info!(?root, "Generating initramfs");
-		let dir = fs::read_dir(root.join("boot"))?;
-		// collect into a vector
-		let dir: Vec<_> = dir.collect::<Result<_, _>>()?;
-		debug!(?dir, "Files in /boot");
 		bail_let!(
-			Some(kver) = fs::read_dir(root.join("boot"))?.find_map(|f|
+			Some(kver) = fs::read_dir(root.join("boot"))?.find_map(|f| {
 				// find filename: initramfs-*.img
-				{
-					debug!(?f, "File in /boot");
-					f.ok().and_then(|f|{
-						let filename = f.file_name();
-						let filename = filename.to_str()?;
-						let initramfs = filename.strip_prefix("initramfs-")?.strip_suffix(".img")?.to_string();
-						// remove the last suffix with the arch
-						let arch = initramfs.rsplit_once('.')?.1;
-						debug!(?arch, "Arch");
-						// if arch != "img" {
-						// 	return None;
-						// }
-						// let kver = initramfs.rsplit_once('.')?.0;
-						let kver = initramfs;
-						debug!(?kver, "Kernel version");
-						Some(kver.to_string())
-						// Some(
-						// 	f.file_name().to_str()?.rsplit_once('/')?.1.strip_prefix("initramfs-")?.strip_suffix(".img")?.to_string()
-						// )
-					} )
-				}
-			) => "Can't find initramfs in /boot."
+				trace!(?f, "File in /boot");
+				f.ok().and_then(|f| {
+					let filename = f.file_name();
+					let filename = filename.to_str()?;
+					let kver = filename.strip_prefix("initramfs-")?.strip_suffix(".img")?;
+					// remove the last suffix with the arch
+					let arch = kver.rsplit_once('.')?.1;
+					debug!(?arch, "Arch");
+					// if arch != "img" {
+					// 	return None;
+					// }
+					debug!(?kver, "Kernel version");
+					Some(kver.to_string())
+					// Some(
+					// 	f.file_name().to_str()?.rsplit_once('/')?.1.strip_prefix("initramfs-")?.strip_suffix(".img")?.to_string()
+					// )
+				})
+			}) => "Can't find initramfs in /boot."
 		);
 
 		crate::chroot_run_cmd!(
@@ -612,28 +604,8 @@ impl IsoBuilder {
 		let tree = chroot.parent().unwrap().join(ISO_TREE);
 
 		// TODO: refactor to new fn in Bootloader
-		let grub2_mbr_hybrid =
-			chroot.join("usr/lib/grub/i386-pc/boot_hybrid.img").display().to_string();
-		let grub2 = chroot.join("usr/lib/grub/i386-pc").display().to_string();
-		let efiboot = tree.join("boot/efiboot.img").display().to_string();
-		let grub2 = format!("boot/grub/i386-pc={grub2}");
-		let args = match self.bootloader {
-			Bootloader::Grub => vec![
-				"--grub2-mbr",
-				grub2_mbr_hybrid.as_str(),
-				"-partition_offset",
-				"16",
-				"-appended_part_as_gpt",
-				"-append_partition",
-				"2",
-				"C12A7328-F81F-11D2-BA4B-00A0C93EC93B",
-				&efiboot,
-				"-iso_mbr_part_type",
-				"EBD0A0A2-B9E5-4433-87C0-68B6B72699C7",
-			],
-			Bootloader::Limine => vec!["--efi-boot", uefi_bin],
-			_ => vec![],
-		};
+		let grub2_mbr_hybrid = chroot.join("usr/lib/grub/i386-pc/boot_hybrid.img");
+		let efiboot = tree.join("boot/efiboot.img");
 
 		match self.bootloader {
 			Bootloader::Grub => {
@@ -647,7 +619,12 @@ impl IsoBuilder {
 				// 1. blank partition with 145,408 bytes
 				// 2. EFI partition (fat12)
 				// 3. data
-				cmd_lib::run_cmd!(xorrisofs -R -V $volid $[args]
+				cmd_lib::run_cmd!(xorrisofs -R -V $volid
+					--grub2-mbr $grub2_mbr_hybrid
+					-partition_offset 16
+					-appended_part_as_gpt
+					-append_partition 2 C12A7328-F81F-11D2-BA4B-00A0C93EC93B $efiboot
+					-iso_mbr_part_type EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
 					-c boot.cat
 					--boot-catalog-hide
 					-b $bios_bin
@@ -666,8 +643,8 @@ impl IsoBuilder {
 					$tree -o $image 2>&1)?;
 			},
 			_ => {
-				debug!("xorriso -as mkisofs {args:?} -b {bios_bin} -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot {uefi_bin} -efi-boot-part --efi-boot-image --protective-msdos-label {root} -volid KATSU-LIVEOS -o {image}", root = tree.display(), image = image.display());
-				cmd_lib::run_cmd!(xorriso -as mkisofs -R $[args] -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $uefi_bin -efi-boot-part --efi-boot-image --protective-msdos-label $tree -volid $volid -o $image 2>&1)?;
+				debug!("xorriso -as mkisofs --efi-boot {uefi_bin} -b {bios_bin} -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot {uefi_bin} -efi-boot-part --efi-boot-image --protective-msdos-label {root} -volid KATSU-LIVEOS -o {image}", root = tree.display(), image = image.display());
+				cmd_lib::run_cmd!(xorriso -as mkisofs -R --efi-boot $uefi_bin -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $uefi_bin -efi-boot-part --efi-boot-image --protective-msdos-label $tree -volid $volid -o $image 2>&1)?;
 			},
 		}
 
@@ -684,6 +661,7 @@ impl ImageBuilder for IsoBuilder {
 	fn build(
 		&self, chroot: &Path, _: &Path, manifest: &Manifest, skip_phases: &SkipPhases,
 	) -> Result<()> {
+		crate::gen_phase!(skip_phases);
 		// let iso_config = manifest.iso.as_ref().expect("A valid ISO configuration");
 
 		// You can now skip phases by adding environment variable `KATSU_SKIP_PHASES` with a comma-separated list of phases to skip
@@ -694,14 +672,10 @@ impl ImageBuilder for IsoBuilder {
 		debug!("Workspace: {workspace:#?}");
 		fs::create_dir_all(&workspace)?;
 
-		if !skip_phases.contains("root") {
-			self.root_builder.build(chroot, manifest)?;
-		}
+		phase!("root": self.root_builder.build(chroot, manifest));
 		// self.root_builder.build(chroot.canonicalize()?.as_path(), manifest)?;
 
-		if !skip_phases.contains("dracut") {
-			self.dracut(chroot)?;
-		}
+		phase!("dracut": self.dracut(chroot));
 
 		// temporarily store content of iso
 		let image_dir = workspace.join(ISO_TREE).join("LiveOS");
@@ -713,21 +687,13 @@ impl ImageBuilder for IsoBuilder {
 
 		// generate squashfs
 
-		if !skip_phases.contains("rootimg") {
-			self.squashfs(chroot, &image_dir.join("squashfs.img"))?;
-		}
+		phase!("rootimg": self.squashfs(chroot, &image_dir.join("squashfs.img")));
 
-		if !skip_phases.contains("copy-live") {
-			self.bootloader.copy_liveos(manifest, chroot)?;
-		}
+		phase!("copy-live": self.bootloader.copy_liveos(manifest, chroot));
 
-		if !skip_phases.contains("iso") {
-			self.xorriso(chroot, &image, manifest)?;
-		}
+		phase!("iso": self.xorriso(chroot, &image, manifest));
 
-		if !skip_phases.contains("bootloader") {
-			self.bootloader.install(&image)?;
-		}
+		phase!("bootloader": self.bootloader.install(&image));
 
 		Ok(())
 	}
