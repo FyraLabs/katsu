@@ -144,9 +144,6 @@ impl Bootloader {
 	/// Currently only works for PC, no mac support
 	fn mkefiboot(&self, chroot: &Path, _: &Manifest) -> Result<()> {
 		let tree = chroot.parent().unwrap().join(ISO_TREE);
-		let tmp = PathBuf::from("/tmp/katsu.efiboot");
-		std::fs::create_dir_all(&tmp)?;
-		// glob the funny
 
 		// TODO: Add mac boot support
 
@@ -424,11 +421,9 @@ pub fn run_script(script: Script, chroot: &Path, in_chroot: bool) -> Result<()> 
 	Ok(())
 }
 
-pub fn run_all_scripts(scripts: &[Script], chroot: &Path, in_chroot: bool) -> Result<()> {
-	let mut scrs: HashMap<String, (Script, bool)> = HashMap::new();
-	scripts.iter().for_each(|s| {
-		scrs.insert(s.id.clone().unwrap_or("<?>".into()), (s.clone(), false));
-	});
+pub fn run_all_scripts(scrs: &[Script], chroot: &Path, in_chroot: bool) -> Result<()> {
+	let scrs =
+		scrs.iter().map(|s| (s.id.clone().unwrap_or("<?>".into()), (s.clone(), false))).collect();
 	run_scripts(scrs, chroot, in_chroot)
 }
 
@@ -523,7 +518,7 @@ impl ImageBuilder for DiskImageBuilder {
 
 		self.root_builder.build(&chroot.canonicalize()?, manifest)?;
 
-		disk.unmount_from_chroot(&ldp, chroot)?;
+		disk.unmount_from_chroot()?;
 		loopdev.detach()?;
 
 		Ok(())
@@ -540,11 +535,11 @@ pub struct DeviceInstaller {
 
 impl ImageBuilder for DeviceInstaller {
 	fn build(
-		&self, _chroot: &Path, _image: &Path, _manifest: &Manifest, skip_phases: &SkipPhases,
+		&self, _chroot: &Path, _image: &Path, _manifest: &Manifest, _skip_phases: &SkipPhases,
 	) -> Result<()> {
 		todo!();
-		self.root_builder.build(_chroot, _manifest)?;
-		Ok(())
+		// self.root_builder.build(_chroot, _manifest)?;
+		// Ok(())
 	}
 }
 

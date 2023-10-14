@@ -383,6 +383,3 @@ pub fn run_with_chroot<T>(root: &Path, f: impl FnOnce() -> Result<T>) -> Result<
 	unmount_chroot(root)?;
 	res
 }
-
-
-

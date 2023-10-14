@@ -248,7 +248,6 @@ impl PartitionLayout {
 
 	pub fn get_index(&self, mountpoint: &str) -> Option<usize> {
 		// index should be +1 of the actual partition number (sda1 is index 0)
-
 		self.partitions.iter().position(|p| p.mountpoint == mountpoint).map(|i| i + 1)
 	}
 
@@ -284,7 +283,6 @@ impl PartitionLayout {
 
 		ordered.sort_unstable_by(|(_, a), (_, b)| {
 			// trim trailing slashes
-
 			let am = a.mountpoint.trim_end_matches('/').matches('/').count();
 			let bm = b.mountpoint.trim_end_matches('/').matches('/').count();
 			if a.mountpoint == "/" {
@@ -327,24 +325,16 @@ impl PartitionLayout {
 		Ok(())
 	}
 
-	pub fn unmount_from_chroot(&self, disk: &Path, chroot: &Path) -> Result<()> {
+	pub fn unmount_from_chroot(&self) -> Result<()> {
 		// unmount partitions from chroot
 
 		// sort partitions by mountpoint
-		let ordered = self.sort_partitions().into_iter().rev().collect::<Vec<_>>();
+		let ordered =
+			self.sort_partitions().into_iter().map(|(_, p)| p.mountpoint).rev().collect::<Vec<_>>();
 
-		for (index, part) in &ordered {
-			let devname = partition_name(&disk.to_string_lossy(), *index);
-
-			// clean the mountpoint so we don't have the slash at the start
-			let mp_cleaned = part.mountpoint.trim_start_matches('/');
-			let mountpoint = chroot.join(mp_cleaned);
-
-			std::fs::create_dir_all(&mountpoint)?;
-
-			trace!("umount {devname} {mountpoint:?}");
-
-			cmd_lib::run_cmd!(umount $devname 2>&1)?;
+		for mp in &ordered {
+			trace!("umount {mp}");
+			cmd_lib::run_cmd!(umount $mp 2>&1)?;
 		}
 		Ok(())
 	}
