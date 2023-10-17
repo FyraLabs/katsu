@@ -214,11 +214,11 @@ impl From<Arch> for &str {
 	}
 }
 
-const MNTS: &[(Option<&str>, &str, Option<&str>, nix::mount::MsFlags, Option<&str>); 4] = &[
-	(Some("/proc"), "proc", Some("proc"), nix::mount::MsFlags::empty(), None),
-	(Some("/sys"), "sys", Some("sysfs"), nix::mount::MsFlags::empty(), None),
-	(Some("/dev"), "dev", None, nix::mount::MsFlags::MS_BIND, None),
-	(Some("/dev/pts"), "dev/pts", None, nix::mount::MsFlags::MS_BIND, None),
+const MNTS: &[(&str, &str, Option<&str>, nix::mount::MsFlags); 4] = &[
+	("/proc", "proc", Some("proc"), nix::mount::MsFlags::empty()),
+	("/sys", "sys", Some("sysfs"), nix::mount::MsFlags::empty()),
+	("/dev", "dev", None, nix::mount::MsFlags::MS_BIND),
+	("/dev/pts", "dev/pts", None, nix::mount::MsFlags::MS_BIND),
 ];
 
 /// Prepare chroot by mounting /dev, /proc, /sys
@@ -239,18 +239,18 @@ pub fn prepare_chroot(root: &Path) -> Result<()> {
 	// )?;
 	// rewrite the above with
 
-	for (src, target, fstype, flags, data) in MNTS {
+	for (src, target, fstype, flags) in MNTS {
 		let target = root.join(target);
 		std::fs::create_dir_all(&target)?;
 		let target = target.canonicalize()?;
-		debug!("Mounting {:?} to {:?}", src, target);
+		debug!("Mounting {src:?} to {target:?}");
 		let mut i = 0;
 		loop {
-			if nix::mount::mount(*src, &target.canonicalize()?, *fstype, *flags, *data).is_ok() {
+			if nix::mount::mount(Some(*src), &target, *fstype, *flags, None::<&str>).is_ok() {
 				break;
 			}
 			i += 1;
-			error!("Failed to mount {:?}, {time} tries out of 10", target, time = i);
+			error!("Failed to mount {target:?}, {i} tries out of 10");
 			// wait 500ms
 			std::thread::sleep(std::time::Duration::from_millis(500));
 			if i > 10 {
@@ -259,73 +259,8 @@ pub fn prepare_chroot(root: &Path) -> Result<()> {
 		}
 	}
 
-	// std::fs::create_dir_all(root.clone())?;
-
-	// let proc_pbuf = root.join("proc");
-
-	// std::fs::create_dir_all(&proc_pbuf)?;
-
-	// nix::mount::mount(
-	// 	Some("/proc"),
-	// 	&root.join("proc"),
-	// 	Some("proc"),
-	// 	nix::mount::MsFlags::empty(),
-	// 	None::<&str>,
-	// )?;
-
-	// let sys_pbuf = root.join("sys");
-
-	// std::fs::create_dir_all(&sys_pbuf)?;
-
-	// nix::mount::mount(
-	// 	Some("/sys"),
-	// 	&root.join("sys"),
-	// 	Some("sysfs"),
-	// 	nix::mount::MsFlags::empty(),
-	// 	None::<&str>,
-	// )?;
-
-	// let dev_pbuf = root.join("dev");
-
-	// std::fs::create_dir_all(&dev_pbuf.join("pts"))?;
-
-	// // bind mount this one instead
-
-	// nix::mount::mount(
-	// 	Some("/dev"),
-	// 	&root.join("dev"),
-	// 	None::<&str>,
-	// 	nix::mount::MsFlags::MS_BIND,
-	// 	None::<&str>,
-	// )?;
-
-	// nix::mount::mount(
-	// 	Some("/dev/pts"),
-	// 	&root.join("dev/pts"),
-	// 	None::<&str>,
-	// 	nix::mount::MsFlags::MS_BIND,
-	// 	None::<&str>,
-	// )?;
-
-	// copy resolv.conf
-
-	let resolv_conf = std::fs::read_to_string("/etc/resolv.conf")?;
-
 	std::fs::create_dir_all(root.join("etc"))?;
-
-	std::fs::write(root.join("etc/resolv.conf"), resolv_conf)?;
-
-	// mount resolv.conf
-
-	/* 	std::fs::create_dir_all(&root.join("etc"))?;
-
-	nix::mount::mount(
-		Some("/etc/resolv.conf"),
-		&root.join("etc/resolv.conf"),
-		None::<&str>,
-		nix::mount::MsFlags::MS_BIND,
-		None::<&str>,
-	)?; */
+	std::fs::copy("/etc/resolv.conf", root.join("etc/resolv.conf"))?;
 
 	Ok(())
 }
@@ -358,7 +293,7 @@ pub fn unmount_chroot(root: &Path) -> Result<()> {
 				break;
 			}
 			i += 1;
-			error!("Failed to unmount {:?}, {time} tries out of 10", mount, time = i);
+			error!("Failed to unmount {mount:?}, {i} tries out of 10");
 			// wait 500ms
 			std::thread::sleep(std::time::Duration::from_millis(500));
 			if i > 10 {
