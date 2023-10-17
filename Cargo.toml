@@ -8,8 +8,10 @@ authors = [
     "Madomado <mado@fyralabs.com>",
     "Lleyton Gray <lleyton@fyralabs.com>",
 ]
-description = "A rusty tool to build OS images"
+description = "The vicious image builder"
 license = "MIT"
+repository = "https://github.com/FyraLabs/katsu"
+documentation = "https://developer.fyralabs.com/katsu"
 categories = ["system", "utilities"]
 keywords = ["build", "image", "os", "linux", "chroot", "container"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

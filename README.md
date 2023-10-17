@@ -2,7 +2,7 @@
 
 > An experimental image builder for RPM/DNF based systems.
 
-Katsu is a tool for building bootable images from RPM based systems. It is an alternative Lennart Poettering's [mkosi](https://github.com/systemd/mkosi) tool, designed to be robust, fast, and easy to use while still providing many output formats. It is Ultramarine Linux's new image builder from Ultramarine 39 onwards.
+Katsu is a tool for building bootable images from RPM based systems. It is an alternative to Lennart Poettering's [mkosi](https://github.com/systemd/mkosi) tool, designed to be robust, fast, and easy to use while still providing many output formats. It is Ultramarine Linux's new image builder from Ultramarine 39 onwards.
 
 Katsu currently supports the following output formats:
 
@@ -26,3 +26,8 @@ Katsu uses YAML configuration files to describe the image, with modular manifest
 - `rpm`
 - `dnf` or `dnf5`
 - `systemd-devel`
+- `dracut-live`
+- `dracut-config-generic`
+- `dracut-config-rescue`
+- `grub2-tools-extra`
+- `dracut-squash`
