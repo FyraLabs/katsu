@@ -236,6 +236,6 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: iso-x86_64
+          name: iso-limine-x86_64
           path: tests/ng/katsu-work/image/*.iso.xz
 
