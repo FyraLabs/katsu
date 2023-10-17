@@ -33,7 +33,7 @@ impl From<&str> for Bootloader {
 			"grub" | "grub2" => Self::Grub,
 			"systemd-boot" => Self::SystemdBoot,
 			_ => {
-				tracing::warn!("Unknown bootloader: {value}, falling back to GRUB");
+				warn!("Unknown bootloader: {value}, falling back to GRUB");
 				Self::Grub
 			},
 		}
@@ -60,6 +60,7 @@ impl Bootloader {
 		}
 	}
 	fn cp_vmlinuz_initramfs(&self, chroot: &Path, dest: &Path) -> Result<(String, String)> {
+		trace!("Finding vmlinuz and initramfs");
 		let bootdir = chroot.join("boot");
 		let mut vmlinuz = None;
 		let mut initramfs = None;
@@ -92,6 +93,7 @@ impl Bootloader {
 		bail_let!(Some(vmlinuz) = vmlinuz => "Cannot find vmlinuz in {bootdir:?}");
 		bail_let!(Some(initramfs) = initramfs => "Cannot find initramfs in {bootdir:?}");
 
+		trace!(vmlinuz, initramfs, "Copying vmlinuz and initramfs");
 		std::fs::create_dir_all(dest.join("boot"))?;
 		std::fs::copy(bootdir.join(&vmlinuz), dest.join("boot").join(&vmlinuz))?;
 		std::fs::copy(bootdir.join(&initramfs), dest.join("boot").join(&initramfs))?;
@@ -128,9 +130,6 @@ impl Bootloader {
 		let liminecfg_b2h = binding.split_whitespace().next().unwrap();
 
 		// enroll limine secure boot
-
-		info!("Enrolling Limine Secure Boot");
-
 		tracing::info_span!("Enrolling Limine Secure Boot").in_scope(|| -> Result<()> {
 			Ok(run_cmd!(
 				limine enroll-config $root/boot/limine-uefi-cd.bin $liminecfg_b2h 2>&1;
@@ -223,6 +222,7 @@ impl Bootloader {
 			_ => unimplemented!(),
 		};
 
+		debug!("Generating Grub images");
 		cmd_lib::run_cmd!(
 			// todo: uefi support
 			grub2-mkimage -O $arch-eltorito -d $chroot/usr/lib/grub/$arch -o $imgd/boot/eltorito.img -p /boot/grub iso9660 biosdisk 2>&1;
@@ -233,6 +233,7 @@ impl Bootloader {
 			grub2-mkrescue -o $imgd/../efiboot.img;
 		)?;
 
+		debug!("Copying EFI files from Grub rescue image");
 		let lc = loopdev::LoopControl::open()?;
 		let loopdev = lc.next_free()?;
 		loopdev.attach_file(imgd.join("../efiboot.img"))?;
@@ -462,8 +463,6 @@ impl ImageBuilder for DiskImageBuilder {
 		let sparse_path = &image.canonicalize()?.join("katsu.img");
 		debug!(image = ?sparse_path, "Creating sparse file");
 
-		// Error checking
-
 		let mut sparse_file = fs::File::create(sparse_path)?;
 
 		bail_let!(Some(disk) = &manifest.disk => "Disk layout not specified");
@@ -538,12 +537,6 @@ impl IsoBuilder {
 					let filename = f.file_name();
 					let filename = filename.to_str()?;
 					let kver = filename.strip_prefix("initramfs-")?.strip_suffix(".img")?;
-					// remove the last suffix with the arch
-					let arch = kver.rsplit_once('.')?.1;
-					debug!(?arch, "Arch");
-					// if arch != "img" {
-					// 	return None;
-					// }
 					debug!(?kver, "Kernel version");
 					Some(kver.to_string())
 					// Some(
@@ -553,14 +546,14 @@ impl IsoBuilder {
 			}) => "Can't find initramfs in /boot."
 		);
 
-		crate::chroot_run_cmd!(
-			root,
+		crate::chroot_run_cmd!(root,
 			unshare -R $root dracut --xz -vfNa $DR_MODS -o $DR_OMIT --no-early-microcode /boot/initramfs-$kver.img $kver 2>&1;
 		)?;
 		Ok(())
 	}
 
 	pub fn squashfs(&self, chroot: &Path, image: &Path) -> Result<()> {
+		info!("Squashing file system (mksquashfs)");
 		cmd_lib::run_cmd!(mksquashfs $chroot $image -comp xz -Xbcj x86 -b 1048576 -noappend)?;
 		Ok(())
 	}
@@ -571,6 +564,7 @@ impl IsoBuilder {
 	}
 	// TODO: add mac support
 	pub fn xorriso(&self, chroot: &Path, image: &Path, manifest: &Manifest) -> Result<()> {
+		info!("Generating ISO image");
 		let volid = manifest.get_volid();
 		let (uefi_bin, bios_bin) = self.bootloader.get_bins();
 		let tree = chroot.parent().unwrap().join(ISO_TREE);
@@ -621,7 +615,7 @@ impl IsoBuilder {
 		}
 
 		// implant MD5 checksums
-
+		info!("Implanting MD5 checksums into ISO");
 		cmd_lib::run_cmd!(implantisomd5 --force --supported-iso $image)?;
 		Ok(())
 	}
@@ -683,7 +677,7 @@ impl KatsuBuilder {
 	pub fn new(
 		manifest: Manifest, output_format: OutputFormat, skip_phases: SkipPhases,
 	) -> Result<Self> {
-		let root_builder = match manifest.builder.clone().expect("A valid builder value").as_str() {
+		let root_builder = match manifest.builder.as_ref().expect("Builder unspecified").as_str() {
 			"dnf" => Box::new(manifest.dnf.clone()) as Box<dyn RootBuilder>,
 			_ => todo!("builder not implemented"),
 		};
@@ -707,7 +701,6 @@ impl KatsuBuilder {
 
 	pub fn build(&self) -> Result<()> {
 		let workdir = PathBuf::from(WORKDIR);
-		fs::create_dir_all(&workdir)?;
 
 		let chroot = workdir.join("chroot");
 		fs::create_dir_all(&chroot)?;

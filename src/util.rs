@@ -117,6 +117,7 @@ macro_rules! tpl {
 		($var)
 	};
 	($tmpl:expr => {$($name:ident$(: $var:expr)?),*} $(=>$out:expr)?) => {{
+		tracing::debug!(tmpl=?$tmpl, "Generating file from template");
 		let mut tera = tera::Tera::default();
 		let mut ctx = tera::Context::new();
 		$(
@@ -124,7 +125,10 @@ macro_rules! tpl {
 		)*
 		let out = tera.render_str(include_str!(concat!("../templates/", $tmpl)), &ctx)?;
 		tracing::trace!(out, path = $tmpl, "tpl!() Template output");
-		$(std::fs::File::create($out)?.write_all(out.as_bytes())?;)?
+		$(
+			tracing::debug!(tmpl=?$tmpl, outfile=?$out, "Writing template output to file");
+			std::fs::File::create($out)?.write_all(out.as_bytes())?;
+		)?
 		out
 	}};
 }
@@ -135,7 +139,15 @@ macro_rules! gen_phase {
 		macro_rules! phase {
 			($key:literal: $run:expr) => {
 				if !$skip_phases.contains($key) {
-					$run?;
+					tracing::info_span!("Running phase `{}`", $key).in_scope(
+						|| -> color_eyre::Result<()> {
+							$run?;
+							Ok(())
+						},
+					)?;
+					tracing::info!("Finished phase `{}`", $key);
+				} else {
+					tracing::info!("Skipping phase `{}`", $key);
 				}
 			};
 		}
