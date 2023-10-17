@@ -141,6 +141,8 @@ impl Manifest {
 	pub fn load_all(path: &Path) -> Result<Self> {
 		// get all imports, then merge them all
 		let mut manifest = Self::load(path)?;
+		// keep bootloader
+		let bootloader = std::mem::take(&mut manifest.bootloader);
 
 		// get dir of path
 
@@ -152,6 +154,7 @@ impl Manifest {
 			manifest = merge(&manifest, &imported_manifest)?;
 		}
 
+		manifest.bootloader = bootloader;
 		Ok(manifest)
 	}
 }
