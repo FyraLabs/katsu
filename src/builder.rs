@@ -15,7 +15,7 @@ use std::{
 use tracing::{debug, info, trace, warn};
 
 const WORKDIR: &str = "katsu-work";
-crate::prepend_comment!(GRUB_PREPEND_COMMENT: "/etc/default/grub", "Grub default configurations", katsu::builder::Bootloader::cp_grub);
+crate::prepend_comment!(GRUB_PREPEND_COMMENT: "/boot/grub/grub.cfg", "Grub configurations", katsu::builder::Bootloader::cp_grub);
 crate::prepend_comment!(LIMINE_PREPEND_COMMENT: "/boot/limine.cfg", "Limine configurations", katsu::builder::Bootloader::cp_limine);
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -193,22 +193,6 @@ impl Bootloader {
 		let cmd = &manifest.kernel_cmdline.as_ref().map_or("", |s| s);
 		let volid = manifest.get_volid();
 
-		let _ = fs::create_dir_all(imgd.join("etc/default"));
-		let cfg = std::fs::read_to_string(chroot.join("etc/default/grub"))?;
-		let mut f = std::fs::File::create(chroot.join("etc/default/grub"))?;
-		f.write_all(GRUB_PREPEND_COMMENT.as_bytes())?;
-		for l in cfg.lines() {
-			if l.starts_with("GRUB_CMDLINE_LINUX=") {
-				f.write_fmt(format_args!(
-					"GRUB_CMDLINE_LINUX=\"root=live:LABEL={volid} rd.live.image enforcing=0 {cmd}\"\n"
-				))?;
-				continue;
-			}
-			f.write_all(l.as_bytes())?;
-			f.write_all(b"\n")?;
-		}
-		drop((f, cfg)); // write and flush changes
-
 		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &imgd)?;
 
 		let _ = std::fs::remove_dir_all(imgd.join("boot"));
@@ -217,7 +201,7 @@ impl Bootloader {
 
 		let distro = &manifest.distro.as_ref().map_or("Linux", |s| s);
 
-		crate::tpl!("grub.cfg.tera" => {volid, distro, vmlinuz, initramfs, cmd} => imgd.join("boot/grub/grub.cfg"));
+		crate::tpl!("grub.cfg.tera" => { GRUB_PREPEND_COMMENT, volid, distro, vmlinuz, initramfs, cmd } => imgd.join("boot/grub/grub.cfg"));
 
 		// Funny script to install GRUB
 		let _ = std::fs::create_dir_all(imgd.join("EFI/BOOT/fonts"));
