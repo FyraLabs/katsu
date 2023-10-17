@@ -193,40 +193,38 @@ impl Bootloader {
 		let cmd = &manifest.kernel_cmdline.as_ref().map_or("", |s| s);
 		let volid = manifest.get_volid();
 
-		fs::create_dir_all(imgd.join("etc/default"))?;
-		let mut f = std::fs::File::create(chroot.join("etc/default/grub"))?;
+		let _ = fs::create_dir_all(imgd.join("etc/default"));
 		let cfg = std::fs::read_to_string(chroot.join("etc/default/grub"))?;
+		let mut f = std::fs::File::create(chroot.join("etc/default/grub"))?;
 		f.write_all(GRUB_PREPEND_COMMENT.as_bytes())?;
 		for l in cfg.lines() {
 			if l.starts_with("GRUB_CMDLINE_LINUX=") {
 				f.write_fmt(format_args!(
 					"GRUB_CMDLINE_LINUX=\"root=live:LABEL={volid} rd.live.image enforcing=0 {cmd}\"\n"
 				))?;
-			} else {
-				f.write_all(l.as_bytes())?;
-				f.write_all(b"\n")?;
+				continue;
 			}
+			f.write_all(l.as_bytes())?;
+			f.write_all(b"\n")?;
 		}
-		drop(f); // write and flush changes
+		drop((f, cfg)); // write and flush changes
+
 		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &imgd)?;
 
-		cmd_lib::run_cmd!(
-			rm -rf $imgd/boot/;
-			cp -r $chroot/boot $imgd/;
-			mv $imgd/boot/grub2 $imgd/boot/grub;
-		)?;
+		let _ = std::fs::remove_dir_all(imgd.join("boot"));
+		cmd_lib::run_cmd!(cp -r $chroot/boot $imgd/)?;
+		std::fs::rename(imgd.join("boot/grub2"), imgd.join("boot/grub"))?;
 
 		let distro = &manifest.distro.as_ref().map_or("Linux", |s| s);
 
 		crate::tpl!("grub.cfg.tera" => {volid, distro, vmlinuz, initramfs, cmd} => imgd.join("boot/grub/grub.cfg"));
 
 		// Funny script to install GRUB
+		let _ = std::fs::create_dir_all(imgd.join("EFI/BOOT/fonts"));
 		cmd_lib::run_cmd!(
-			mkdir -p $imgd/EFI/BOOT/fonts;
 			cp -av $imgd/boot/efi/EFI/fedora/. $imgd/EFI/BOOT;
 			cp -av $imgd/boot/grub/grub.cfg $imgd/EFI/BOOT/BOOT.conf 2>&1;
 			cp -av $imgd/boot/grub/grub.cfg $imgd/EFI/BOOT/grub.cfg 2>&1;
-			mkdir -p $imgd/EFI/BOOT/fonts;
 			cp -av $imgd/boot/grub/fonts/unicode.pf2 $imgd/EFI/BOOT/fonts;
 			cp -av $imgd/EFI/BOOT/shimx64.efi $imgd/EFI/BOOT/BOOTX64.efi;
 			cp -av $imgd/EFI/BOOT/shim.efi $imgd/EFI/BOOT/BOOTIA32.efi;
@@ -241,11 +239,6 @@ impl Bootloader {
 			_ => unimplemented!(),
 		};
 
-		// let arch_64 = match &**manifest.dnf.arch.as_ref().unwrap_or(&host_arch) {
-		// 	"x86_64" => "x86_64",
-		// 	"aarch64" => "aa64",
-		// 	_ => unimplemented!(),
-		// };
 		cmd_lib::run_cmd!(
 			// todo: uefi support
 			grub2-mkimage -O $arch-eltorito -d $chroot/usr/lib/grub/$arch -o $imgd/boot/eltorito.img -p /boot/grub iso9660 biosdisk 2>&1;
@@ -320,8 +313,7 @@ impl RootBuilder for DnfRootBuilder {
 			trace!(fstab = ?f, "fstab");
 			// write fstab to chroot
 			std::fs::create_dir_all(chroot.join("etc"))?;
-			let fstab_path = chroot.join("etc/fstab");
-			let mut fstab_file = fs::File::create(fstab_path)?;
+			let mut fstab_file = fs::File::create(chroot.join("etc/fstab"))?;
 			fstab_file.write_all(f.as_bytes())?;
 		}
 
