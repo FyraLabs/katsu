@@ -72,6 +72,9 @@ impl Bootloader {
 			let name = f.file_name();
 			debug!(?name, "File in /boot");
 			let name = name.to_string_lossy();
+			if name.contains("-rescue-") {
+				continue;
+			}
 			// if let Some((_, s)) = name.rsplit_once('/') {
 			// 	if s.starts_with("vmlinuz-") {
 			// 		vmlinuz = Some(s.to_string());
@@ -537,6 +540,9 @@ impl IsoBuilder {
 					let filename = f.file_name();
 					let filename = filename.to_str()?;
 					let kver = filename.strip_prefix("initramfs-")?.strip_suffix(".img")?;
+					if kver.contains("-rescue-") {
+						return None;
+					}
 					debug!(?kver, "Kernel version");
 					Some(kver.to_string())
 					// Some(
