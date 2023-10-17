@@ -187,3 +187,55 @@ jobs:
         with:
           name: iso-x86_64
           path: tests/ng/katsu-work/image/*.iso.xz
+
+
+  iso-limine-x86_64:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/terrapkg/builder:f38
+      # Pass /dev from host to container
+      # Very hacky, but it works
+      # Microsoft/Github, if you're reading this,
+      # I'm sorry.
+      options: --privileged -v /dev:/dev
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache DNF packages
+        uses: actions/cache@v2
+        with:
+          path: /var/cache/dnf
+          key: dnf-${{ runner.os }}
+          restore-keys: |
+            dnf-${{ runner.os }}-
+            dnf-
+
+      - name: Install dependencies
+        run: |
+          dnf install -y $DNF_PKGS
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build and install katsu
+        run: |
+          cargo install --path . --debug
+
+      - name: Run test
+        run: |
+          export PATH=$HOME/.cargo/bin:$PATH
+          pushd tests/ng
+          echo "COLORBT_SHOW_HIDDEN=1" >> .env
+          echo "KATSU_LOG=trace" >> .env
+          katsu -o iso katsu-iso-limine.yaml 2>&1
+          xz -z9 out.iso -c > katsu-work/image/katsu.iso.xz
+          popd
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: iso-x86_64
+          path: tests/ng/katsu-work/image/*.iso.xz
+
