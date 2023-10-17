@@ -329,7 +329,8 @@ impl PartitionLayout {
 	pub fn unmount_from_chroot(&self, chroot: &Path) -> Result<()> {
 		// unmount partitions from chroot
 		// sort partitions by mountpoint
-		for mp in self.sort_partitions().into_iter().rev().map(|(_, p)| chroot.join(p.mountpoint)) {
+		for mp in self.sort_partitions().into_iter().rev().map(|(_, p)| p.mountpoint) {
+			let mp = chroot.join(mp.trim_start_matches('/'));
 			trace!("umount {mp:?}");
 			cmd_lib::run_cmd!(umount $mp 2>&1)?;
 		}
