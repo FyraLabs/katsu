@@ -139,13 +139,14 @@ macro_rules! gen_phase {
 		macro_rules! phase {
 			($key:literal: $run:expr) => {
 				if !$skip_phases.contains($key) {
-					tracing::info_span!("Running phase `{}`", $key).in_scope(
+					tracing::info_span!(concat!("phase$", $key)).in_scope(
 						|| -> color_eyre::Result<()> {
+							tracing::info!("Starting phase `{}`", $key);
 							$run?;
+							tracing::info!("Finished phase `{}`", $key);
 							Ok(())
 						},
 					)?;
-					tracing::info!("Finished phase `{}`", $key);
 				} else {
 					tracing::info!("Skipping phase `{}`", $key);
 				}
