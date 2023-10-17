@@ -236,6 +236,7 @@ struct TplFstabEntry<'a> {
 	fsck: u8,
 }
 
+#[allow(dead_code)]
 impl PartitionLayout {
 	pub fn new() -> Self {
 		Self::default()
@@ -325,15 +326,11 @@ impl PartitionLayout {
 		Ok(())
 	}
 
-	pub fn unmount_from_chroot(&self) -> Result<()> {
+	pub fn unmount_from_chroot(&self, chroot: &Path) -> Result<()> {
 		// unmount partitions from chroot
-
 		// sort partitions by mountpoint
-		let ordered =
-			self.sort_partitions().into_iter().map(|(_, p)| p.mountpoint).rev().collect::<Vec<_>>();
-
-		for mp in &ordered {
-			trace!("umount {mp}");
+		for mp in self.sort_partitions().into_iter().rev().map(|(_, p)| chroot.join(p.mountpoint)) {
+			trace!("umount {mp:?}");
 			cmd_lib::run_cmd!(umount $mp 2>&1)?;
 		}
 		Ok(())

@@ -510,7 +510,7 @@ impl ImageBuilder for DiskImageBuilder {
 
 		self.root_builder.build(&chroot.canonicalize()?, manifest)?;
 
-		disk.unmount_from_chroot()?;
+		disk.unmount_from_chroot(chroot)?;
 		loopdev.detach()?;
 
 		Ok(())
@@ -580,6 +580,7 @@ impl IsoBuilder {
 		cmd_lib::run_cmd!(mksquashfs $chroot $image -comp xz -Xbcj x86 -b 1048576 -noappend)?;
 		Ok(())
 	}
+	#[allow(dead_code)]
 	pub fn erofs(&self, chroot: &Path, image: &Path) -> Result<()> {
 		cmd_lib::run_cmd!(mkfs.erofs -d $chroot -o $image)?;
 		Ok(())
