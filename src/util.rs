@@ -19,8 +19,6 @@ macro_rules! run {
 	}};
 }
 
-// todo: write macro that wraps around cmd_lib::run_cmd!, but runs it in a chroot
-
 /// Macro that wraps around cmd_lib::run_cmd!, but runs it in a chroot
 ///
 /// First argument is the chroot path, the following arguments are the command and arguments
@@ -86,7 +84,7 @@ macro_rules! bail_let {
 	($left:pat = $right:expr => $err:expr) => {
 		#[rustfmt::skip]
 		let $left = $right else {
-			return Err(eyre!($err));
+			return Err(color_eyre::eyre::eyre!($err));
 		};
 	};
 }
@@ -127,7 +125,7 @@ macro_rules! tpl {
 		tracing::trace!(out, path = $tmpl, "tpl!() Template output");
 		$(
 			tracing::debug!(tmpl=?$tmpl, outfile=?$out, "Writing template output to file");
-			std::fs::File::create($out)?.write_all(out.as_bytes())?;
+			$crate::util::just_write($out, &out)?;
 		)?
 		out
 	}};
@@ -330,4 +328,41 @@ pub fn run_with_chroot<T>(root: &Path, f: impl FnOnce() -> Result<T>) -> Result<
 	let res = f();
 	unmount_chroot(root)?;
 	res
+}
+
+/// Create an empty sparse file with given size
+pub fn create_sparse(path: &Path, pos: u64) -> Result<std::fs::File> {
+	use std::io::{Seek, Write};
+	debug!(?path, "Creating sparse file");
+	let mut f = std::fs::File::create(path)?;
+	f.seek(std::io::SeekFrom::Start(pos))?;
+	f.write_all(&[0])?;
+	Ok(f)
+}
+
+pub struct LoopDevHdl(loopdev::LoopDevice);
+
+impl Drop for LoopDevHdl {
+	fn drop(&mut self) {
+		let Err(e) = self.0.detach() else { return };
+		tracing::warn!("Fail to detach loopdev: {e:#}");
+	}
+}
+
+pub fn loopdev_with_file(path: &Path) -> Result<(std::path::PathBuf, LoopDevHdl)> {
+	let lc = loopdev::LoopControl::open()?;
+	let loopdev = lc.next_free()?;
+	loopdev.attach_file(path)?;
+	crate::bail_let!(Some(ldp) = loopdev.path() => "Fail to unwrap loopdev.path() = None");
+	Ok((ldp, LoopDevHdl(loopdev)))
+}
+
+pub fn just_write(path: impl AsRef<Path>, content: impl AsRef<str>) -> Result<()> {
+	use std::io::Write;
+	let (path, content) = (path.as_ref(), content.as_ref());
+	tracing::trace!(?path, content, "Writing content to file");
+	crate::bail_let!(Some(parent) = path.parent() => "Invalid file path");
+	let _ = std::fs::create_dir_all(parent);
+	std::fs::File::create(path)?.write_all(content.as_bytes())?;
+	Ok(())
 }

@@ -2,14 +2,14 @@ use crate::{
 	bail_let,
 	cli::{OutputFormat, SkipPhases},
 	config::{Manifest, Script},
+	util::{just_write, loopdev_with_file},
 };
 use cmd_lib::{run_cmd, run_fun};
-use color_eyre::{eyre::eyre, Result};
+use color_eyre::Result;
 use serde_derive::{Deserialize, Serialize};
 use std::{
 	collections::{BTreeMap, HashMap},
 	fs,
-	io::{Seek, Write},
 	path::{Path, PathBuf},
 };
 use tracing::{debug, info, trace, warn};
@@ -43,10 +43,7 @@ impl From<&str> for Bootloader {
 impl Bootloader {
 	pub fn install(&self, image: &Path) -> Result<()> {
 		match *self {
-			Self::Grub => {
-				// no-op
-				info!("GRUB is not required to be installed to image, skipping");
-			},
+			Self::Grub => info!("GRUB is not required to be installed to image, skipping"),
 			Self::Limine => cmd_lib::run_cmd!(limine bios-install $image 2>&1)?,
 			Self::SystemdBoot => cmd_lib::run_cmd!(bootctl --image=$image install 2>&1)?,
 		}
@@ -75,13 +72,6 @@ impl Bootloader {
 			if name.contains("-rescue-") {
 				continue;
 			}
-			// if let Some((_, s)) = name.rsplit_once('/') {
-			// 	if s.starts_with("vmlinuz-") {
-			// 		vmlinuz = Some(s.to_string());
-			// 	} else if s.starts_with("initramfs-") {
-			// 		initramfs = Some(s.to_string());
-			// 	}
-			// }
 
 			if name.starts_with("vmlinuz-") {
 				vmlinuz = Some(name.to_string());
@@ -150,26 +140,11 @@ impl Bootloader {
 		// TODO: Add mac boot support
 
 		// make EFI disk
-		// create sparse file of 50MiB
 		let sparse_path = &tree.join("boot/efiboot.img");
-		debug!(image = ?sparse_path, "Creating sparse file");
-
-		// allocate 50MiB
-		let mut sparse_file = fs::File::create(sparse_path)?;
-
-		sparse_file.seek(std::io::SeekFrom::Start(15 * 1024 * 1024))?; // 15MiB
-		sparse_file.write_all(&[0])?;
-		trace!(sparse = ?sparse_path, "Allocated 5MiB to sparse file");
+		crate::util::create_sparse(sparse_path, 15 * 1024 * 1024)?; // 15MiB
 
 		// let's mount the disk as a loop device
-
-		let lc = loopdev::LoopControl::open()?;
-		let loopdev = lc.next_free()?;
-		loopdev.attach_file(sparse_path)?;
-
-		// Partition disk with parted
-
-		let ldp = loopdev.path().ok_or(eyre!("Failed to unwrap loopdev.path() = None"))?;
+		let (ldp, hdl) = loopdev_with_file(sparse_path)?;
 
 		cmd_lib::run_cmd!(
 			// Format disk with mkfs.fat
@@ -185,8 +160,7 @@ impl Bootloader {
 			umount /tmp/katsu.efiboot;
 		)?;
 
-		loopdev.detach()?;
-
+		drop(hdl);
 		Ok(())
 	}
 
@@ -237,10 +211,7 @@ impl Bootloader {
 		)?;
 
 		debug!("Copying EFI files from Grub rescue image");
-		let lc = loopdev::LoopControl::open()?;
-		let loopdev = lc.next_free()?;
-		loopdev.attach_file(imgd.join("../efiboot.img"))?;
-		let ldp = loopdev.path().expect("Failed to unwrap loopdev.path() = None");
+		let (ldp, hdl) = loopdev_with_file(&imgd.join("../efiboot.img"))?;
 
 		cmd_lib::run_cmd!(
 			mkdir -p /tmp/katsu-efiboot;
@@ -249,7 +220,7 @@ impl Bootloader {
 			umount /tmp/katsu-efiboot;
 		)?;
 
-		loopdev.detach()?;
+		drop(hdl);
 
 		self.mkefiboot(chroot, manifest)?;
 
@@ -297,12 +268,8 @@ impl RootBuilder for DnfRootBuilder {
 
 		// todo: generate different kind of fstab for iso and other builds
 		if let Some(disk) = &manifest.disk {
-			let f = disk.fstab(chroot)?;
-			trace!(fstab = ?f, "fstab");
 			// write fstab to chroot
-			std::fs::create_dir_all(chroot.join("etc"))?;
-			let mut fstab_file = fs::File::create(chroot.join("etc/fstab"))?;
-			fstab_file.write_all(f.as_bytes())?;
+			crate::util::just_write(chroot.join("etc/fstab"), disk.fstab(chroot)?)?;
 		}
 
 		let mut packages = self.packages.clone();
@@ -323,7 +290,6 @@ impl RootBuilder for DnfRootBuilder {
 		}
 
 		let chroot = chroot.canonicalize()?;
-		let chroot = chroot.as_path();
 
 		// Get host architecture using uname
 		let host_arch = cmd_lib::run_fun!(uname -m;)?;
@@ -336,7 +302,7 @@ impl RootBuilder for DnfRootBuilder {
 		options.append(&mut exclude.iter().map(|p| format!("--exclude={p}")).collect());
 
 		info!("Initializing system with dnf");
-		crate::chroot_run_cmd!(chroot,
+		crate::chroot_run_cmd!(&chroot,
 			dnf install -y --releasever=$releasever --installroot=$chroot $[packages] $[options] 2>&1;
 			dnf clean all --installroot=$chroot;
 		)?;
@@ -346,16 +312,14 @@ impl RootBuilder for DnfRootBuilder {
 		if manifest.users.is_empty() {
 			warn!("No users specified, no users will be created!");
 		} else {
-			manifest.users.iter().try_for_each(|user| user.add_to_chroot(chroot))?;
+			manifest.users.iter().try_for_each(|user| user.add_to_chroot(&chroot))?;
 		}
 
 		// now, let's run some funny post-install scripts
 
 		info!("Running post-install scripts");
 
-		run_all_scripts(&manifest.scripts.post, chroot, true)?;
-
-		Ok(())
+		run_all_scripts(&manifest.scripts.post, &chroot, true)
 	}
 }
 
@@ -378,7 +342,7 @@ pub fn run_script(script: Script, chroot: &Path, in_chroot: bool) -> Result<()> 
 	} else {
 		PathBuf::from(format!("katsu-work/{name}"))
 	};
-	fs::File::create(fpath)?.write_all(data.as_bytes())?;
+	just_write(fpath, data)?;
 
 	// now add execute bit
 	if in_chroot {
@@ -463,22 +427,10 @@ impl ImageBuilder for DiskImageBuilder {
 		&self, chroot: &Path, image: &Path, manifest: &Manifest, _: &SkipPhases,
 	) -> Result<()> {
 		// create sparse file on disk
-		let sparse_path = &image.canonicalize()?.join("katsu.img");
-		debug!(image = ?sparse_path, "Creating sparse file");
-
-		let mut sparse_file = fs::File::create(sparse_path)?;
-
 		bail_let!(Some(disk) = &manifest.disk => "Disk layout not specified");
 		bail_let!(Some(disk_size) = &disk.size => "Disk size not specified");
-
-		sparse_file.seek(std::io::SeekFrom::Start(disk_size.as_u64()))?;
-		sparse_file.write_all(&[0])?;
-
-		// let's mount the disk as a loop device
-		let lc = loopdev::LoopControl::open()?;
-		let loopdev = lc.next_free()?;
-
-		loopdev.attach_file(sparse_path)?;
+		let sparse_path = &image.canonicalize()?.join("katsu.img");
+		crate::util::create_sparse(sparse_path, disk_size.as_u64())?;
 
 		// if let Some(disk) = manifest.disk.as_ref() {
 		// 	disk.apply(&loopdev.path().unwrap())?;
@@ -486,7 +438,7 @@ impl ImageBuilder for DiskImageBuilder {
 		// 	disk.unmount_from_chroot(&loopdev.path().unwrap(), &chroot)?;
 		// }
 
-		let ldp = loopdev.path().expect("Failed to unwrap loopdev.path() = None");
+		let (ldp, hdl) = loopdev_with_file(sparse_path)?;
 
 		// Partition disk
 		disk.apply(&ldp)?;
@@ -497,8 +449,8 @@ impl ImageBuilder for DiskImageBuilder {
 		self.root_builder.build(&chroot.canonicalize()?, manifest)?;
 
 		disk.unmount_from_chroot(chroot)?;
-		loopdev.detach()?;
 
+		drop(hdl);
 		Ok(())
 	}
 }
@@ -634,8 +586,6 @@ impl ImageBuilder for IsoBuilder {
 		&self, chroot: &Path, _: &Path, manifest: &Manifest, skip_phases: &SkipPhases,
 	) -> Result<()> {
 		crate::gen_phase!(skip_phases);
-		// let iso_config = manifest.iso.as_ref().expect("A valid ISO configuration");
-
 		// You can now skip phases by adding environment variable `KATSU_SKIP_PHASES` with a comma-separated list of phases to skip
 
 		let image = PathBuf::from(manifest.out_file.as_ref().map_or("out.iso", |s| s));
@@ -652,12 +602,6 @@ impl ImageBuilder for IsoBuilder {
 		// temporarily store content of iso
 		let image_dir = workspace.join(ISO_TREE).join("LiveOS");
 		fs::create_dir_all(&image_dir)?;
-
-		// todo: fix the paths
-		// the ISO working tree should be in katsu-work/iso-tree
-		// the image output would be in katsu-work/image
-
-		// generate squashfs
 
 		phase!("rootimg": self.squashfs(chroot, &image_dir.join("squashfs.img")));
 
@@ -714,9 +658,6 @@ impl KatsuBuilder {
 		let image = workdir.join("image");
 		fs::create_dir_all(&image)?;
 
-		self.image_builder.build(&chroot, &image, &self.manifest, &self.skip_phases)?;
-
-		// chroot_run_cmd!(chroot, unshare -R ${chroot} bash -c "echo woo")?;
-		Ok(())
+		self.image_builder.build(&chroot, &image, &self.manifest, &self.skip_phases)
 	}
 }
