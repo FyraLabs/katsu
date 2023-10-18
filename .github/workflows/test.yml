@@ -1,0 +1,104 @@
+name: Continuous Integration
+
+on:
+  push:
+
+env:
+  DNF_PACKAGES: |
+    --setopt=keepcache=1
+    --setopt=install_weak_deps=False
+    limine
+    util-linux-core
+    systemd-container
+    qemu-user-static-aarch64
+    qemu-user-binfmt
+    qemu-kvm
+    qemu-img
+    systemd-devel
+    mkpasswd
+    clang-devel
+
+jobs:
+  check:
+    container:
+      image: ghcr.io/terrapkg/builder:f38
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Cache DNF packages
+        uses: actions/cache@v2
+        with:
+          path: /var/cache/dnf
+          key: dnf-${{ runner.os }}
+          restore-keys: |
+            dnf-${{ runner.os }}
+      - name: Install dependencies
+        run: |
+          dnf install -y $DNF_PACKAGES
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: check
+
+  clippy:
+    name: Clippy
+    container:
+      image: ghcr.io/terrapkg/builder:f38
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Cache DNF packages
+        uses: actions/cache@v2
+        with:
+          path: /var/cache/dnf
+          key: dnf-${{ runner.os }}
+          restore-keys: |
+            dnf-${{ runner.os }}
+      - name: Install dependencies
+        run: |
+          dnf install -y $DNF_PACKAGES
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - run: rustup component add clippy
+      - uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: -- -D warnings
+
+  unit-test:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/terrapkg/builder:f38
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache DNF packages
+        uses: actions/cache@v2
+        with:
+          path: /var/cache/dnf
+          key: dnf-${{ runner.os }}
+          restore-keys: |
+            dnf-${{ runner.os }}
+
+      - name: Install dependencies
+        run: |
+          dnf install -y $DNF_PACKAGES
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test

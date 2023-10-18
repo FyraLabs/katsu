@@ -1,18 +1,20 @@
-mod cfg;
-mod config;
-mod creator;
-mod util;
-mod builder;
 mod boot;
+mod builder;
+mod cli;
+mod config;
+mod util;
 
-use crate::creator::{ImageCreator, KatsuCreator};
-use cfg::Config;
+use clap::Parser;
 use color_eyre::Result;
 use tracing::trace;
 use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, Layer};
 
 fn main() -> Result<()> {
-	dotenvy::dotenv()?;
+	if let Err(e) = dotenvy::dotenv() {
+		if !e.not_found() {
+			return Err(e.into());
+		}
+	}
 
 	color_eyre::install()?;
 	let subscriber =
@@ -22,9 +24,13 @@ fn main() -> Result<()> {
 				.with_filter(tracing_subscriber::EnvFilter::from_env("KATSU_LOG")),
 		);
 	tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
-	sudo::escalate_if_needed().unwrap();
+	// sudo::escalate_if_needed().unwrap();
 	trace!("カツ丼は最高！");
-	for cfg_file in std::env::args().skip(1) {
+	let cli = cli::KatsuCli::parse();
+
+	cli::parse(cli)
+
+	/* 	for cfg_file in std::env::args().skip(1) {
 		trace!(cfg_file, "Reading/Parsing config");
 		let config: Config = serde_yaml::from_str(&std::fs::read_to_string(cfg_file)?)?;
 		trace!("Config read done: {config:#?}");
@@ -43,12 +49,12 @@ fn main() -> Result<()> {
 		// 	Arch::X86_64 => LiveImageCreatorX86_64::from(config).exec_iso()?,
 
 		// 	// todo: please clean this up
-		
+
 		// 	Arch::AArch64 => todo!(),
 
 		// 	_ => panic!("Unknown architecture"),
 		// }
 		KatsuCreator::from(config).exec()?;
 	}
-	Ok(())
+	Ok(()) */
 }

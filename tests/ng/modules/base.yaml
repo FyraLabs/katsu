@@ -1,0 +1,89 @@
+builder: dnf
+
+users:
+  - username: ultramarine
+    # plaintext password: ultramarine
+    password: "$y$j9T$6/DebcxXazPrtBYnNXtEM.$yaUJHww5Mo1L8xNJ9IDJ.bvKOrIJxAG9PGQKWioBMx3"
+    groups:
+      - wheel
+
+scripts:
+  pre:
+    - id: pre-test
+      name: Preinstall test
+      inline: |
+        echo "Hello from pre.sh"
+    - id: pre-test2
+      name: Preinstall test 2
+      file: scripts/pre-test2.sh
+
+  post:
+    - id: post-test
+      name: Postinstall test
+      inline: |
+        echo "Hello from post.sh"
+
+    - id: image-cleanup
+      name: Clean up root filesystem
+      file: scripts/image-cleanup.sh
+
+    - id: selinux-label
+      name: Relabel SELinux for new filesystem
+      file: scripts/selinux.sh
+
+
+dnf:
+  releasever: 39
+  repodir: repodir/
+  options:
+    - --setopt=cachedir=/var/cache/dnf
+    - --nogpgcheck
+    - --setopt=keepcache=True
+  exclude:
+    - fedora-release*
+    - generic-release*
+  packages:
+    - filesystem
+    - setup
+    - lvm2
+    - btrfs-progs
+    - dmraid
+    - nvme-cli
+    - kernel
+    - glibc
+    - glibc-common
+    - dracut-config-generic
+    - dracut-tools
+    - dnf
+    - dracut
+    # - mkpasswd # maybe not needed soon
+    - "@core"
+    - "@standard"
+    - grub2-tools
+    - "@hardware-support"
+    - NetworkManager
+    - rpm
+    - libgomp
+    - ultramarine-release-identity-basic
+    - ultramarine-release-basic
+    - fedora-repos
+    - efibootmgr
+
+  arch_packages:
+    aarch64:
+      - grub2-efi-aa64
+      - grub2-efi-aa64-modules
+      - grub2-efi-aa64-cdboot
+      - shim-aa64
+      - shim-unsigned-aarch64
+      - bcm283x-firmware
+      - bcm283x-overlays
+      - "@arm-tools"
+    x86_64:
+      - grub2-efi-x64
+      - grub2-efi-x64-modules
+      - grub2-efi-x64-cdboot
+      - grub2-pc
+      - grub2-pc-modules
+      - shim-x64
+      - shim-unsigned-x64

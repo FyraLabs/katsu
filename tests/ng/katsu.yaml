@@ -1,9 +1,31 @@
 # Example manifest for a Katsu build
-scripts:
-  pre:
-    - inline: |
-        echo "Hello from pre.sh"
+builder: dnf
+distro: Katsu Ultramarine
 
+import:
+  - modules/base.yaml
+
+scripts:
   post:
-    - inline: |
-        echo "Hello from post.sh"
+    - id: grub-install
+      name: Install GRUB
+      file: modules/scripts/grub-install.sh
+
+disk:
+  size: 8GiB
+  partitions:
+    - label: EFI
+      size: 512MiB
+      filesystem: efi
+      mountpoint: /boot/efi
+
+    - label: boot
+      size: 1GiB
+      filesystem: ext4
+      mountpoint: /boot
+
+    - label: root
+      # size: 2.5MiB
+      filesystem: ext4
+      mountpoint: /
+dnf:

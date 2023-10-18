@@ -1,0 +1,8 @@
+{{ PREPEND }}
+
+# <file system>	<mount point>	<type>	<options>	<dump>	<pass>
+
+{% for entry in entries %}
+UUID={{ entry.uuid }}	{{ entry.mp }}	{{ entry.fsname }}	defaults	0	{{ entry.fsck }}
+{% endfor %}
+

@@ -1,0 +1,9 @@
+{
+    "recommendations": [
+        "karunamurti.tera",
+        "dustypomerleau.rust-syntax",
+        "serayuzgur.crates",
+        "rust-lang.rust-analyzer",
+        "hangxingliu.vscode-systemd-support"
+    ]
+}
