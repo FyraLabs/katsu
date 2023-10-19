@@ -1,6 +1,5 @@
-use std::path::Path;
-
 use color_eyre::Result;
+use std::path::Path;
 use tracing::{debug, error};
 
 #[macro_export]
@@ -251,9 +250,8 @@ pub fn prepare_chroot(root: &Path) -> Result<()> {
 	// rewrite the above with
 
 	for (src, target, fstype, flags) in MNTS {
-		let target = root.join(target);
+		let target = root.join(target).canonicalize()?;
 		std::fs::create_dir_all(&target)?;
-		let target = target.canonicalize()?;
 		debug!("Mounting {src:?} to {target:?}");
 		let mut i = 0;
 		loop {
