@@ -141,7 +141,7 @@ impl Bootloader {
 
 		// make EFI disk
 		let sparse_path = &tree.join("boot/efiboot.img");
-		crate::util::create_sparse(sparse_path, 15 * 1024 * 1024)?; // 15MiB
+		crate::util::create_sparse(sparse_path, 25 * 1024 * 1024)?; // 15MiB
 
 		// let's mount the disk as a loop device
 		let (ldp, hdl) = loopdev_with_file(sparse_path)?;
