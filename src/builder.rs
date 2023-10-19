@@ -512,7 +512,12 @@ impl IsoBuilder {
 
 	pub fn squashfs(&self, chroot: &Path, image: &Path) -> Result<()> {
 		info!("Squashing file system (mksquashfs)");
-		cmd_lib::run_cmd!(mksquashfs $chroot $image -comp xz -Xbcj x86 -b 1048576 -noappend -e /dev/ -e /proc/ -e /sys/;)?;
+		cmd_lib::run_cmd!(
+			mksquashfs $chroot $image -comp xz -Xbcj x86 -b 1048576 -noappend -e /dev/ -e /proc/ -e /sys/
+			-p "/dev 755 0 0"
+			-p "/proc 755 0 0"
+			-p "/sys 755 0 0"
+		)?;
 		Ok(())
 	}
 	#[allow(dead_code)]
