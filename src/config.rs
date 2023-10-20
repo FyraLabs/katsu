@@ -1,7 +1,6 @@
-use crate::{builder::Bootloader, chroot_run_cmd};
+use crate::{builder::Bootloader, chroot_run_cmd, cli::OutputFormat};
 use bytesize::ByteSize;
 use color_eyre::Result;
-use merge_struct::merge;
 use serde::Deserialize;
 use serde_derive::Serialize;
 use std::{
@@ -128,33 +127,34 @@ impl Manifest {
 		Ok(manifest)
 	}
 
-	/* 	pub fn list_all_imports(&self) -> Vec<PathBuf> {
-		let mut imports = Vec::new();
-		for import in self.import.clone() {
-			let mut manifest = Self::load(import.clone()).unwrap();
-			imports.append(&mut manifest.list_all_imports());
-			imports.push(import);
-		}
-		imports
-	} */
+	pub fn load_all(path: &Path, output: OutputFormat) -> Result<Self> {
+		use std::mem::take;
 
-	pub fn load_all(path: &Path) -> Result<Self> {
 		// get all imports, then merge them all
 		let mut manifest = Self::load(path)?;
-		// keep bootloader
-		let bootloader = std::mem::take(&mut manifest.bootloader);
+		// do not override:
+		let bootloader = take(&mut manifest.bootloader);
+		let iso = take(&mut manifest.iso);
+		let disk = take(&mut manifest.disk);
 
-		// get dir of path
+		let mut dnf = take(&mut manifest.dnf);
+		// everything but the package lists
+		manifest.dnf.packages = take(&mut manifest.dnf.packages);
+		manifest.dnf.arch_packages = take(&mut manifest.dnf.arch_packages);
 
-		let mut path_can = PathBuf::from(path);
-		path_can.pop();
-
-		for import in manifest.import.clone() {
-			let imported_manifest = Self::load_all(&import)?;
-			manifest = merge(&manifest, &imported_manifest)?;
-		}
+		manifest = manifest.import.iter().try_fold(manifest.clone(), |acc, import| {
+			Result::<_>::Ok(merge_struct::merge(&acc, &Self::load_all(import, output)?)?)
+		})?;
 
 		manifest.bootloader = bootloader;
+		match output {
+			OutputFormat::Iso => manifest.iso = iso,
+			OutputFormat::Device => todo!("DeviceBuilder not implemented?"),
+			OutputFormat::DiskImage => manifest.disk = disk,
+		}
+		(dnf.packages, dnf.arch_packages) = (manifest.dnf.packages, manifest.dnf.arch_packages);
+		manifest.dnf = dnf;
+
 		Ok(manifest)
 	}
 }
@@ -385,19 +385,13 @@ impl PartitionLayout {
 		cmd_lib::run_cmd!(parted -s $disk mklabel gpt 2>&1)?;
 
 		// create partitions
+		self.partitions.iter().try_fold((1, 0), |(i, mut last_end), part| {
+			let devname = partition_name(&disk.to_string_lossy(), i);
+			trace!(devname, "Creating partition {i}: {part:#?}");
 
-		let mut last_end = 0;
+			let _span = tracing::trace_span!(devname, "partition").enter();
 
-		for (i, part) in self.partitions.iter().enumerate() {
-			trace!("Creating partition {i}: {part:#?}");
-
-			// get index of partition
-			let index = self.get_index(&part.mountpoint).unwrap();
-			trace!("Index: {index}");
-
-			let devname = partition_name(&disk.to_string_lossy(), index);
-
-			let start_string = if i == 0 {
+			let start_string = if i == 1 {
 				// create partition at start of disk
 				"1MiB".to_string()
 			} else {
@@ -405,57 +399,46 @@ impl PartitionLayout {
 				ByteSize::b(last_end).to_string_as(true).replace(' ', "")
 			};
 
-			let end_string = if let Some(size) = part.size {
+			let end_string = part.size.map_or("100%".to_string(), |size| {
 				// create partition with size
 				last_end += size.as_u64();
 
 				// remove space for partition table
 				ByteSize::b(last_end).to_string_as(true).replace(' ', "")
-			} else {
-				// create partition at end of disk
-				"100%".to_string()
-			};
+			});
 
 			let parted_fs = if part.filesystem == "efi" { "fat32" } else { "ext4" };
 
+			debug!(start = start_string, end = end_string, parted_fs, "Creating partition");
 			trace!("parted -s {disk:?} mkpart primary {parted_fs} {start_string} {end_string}");
-
 			cmd_lib::run_cmd!(parted -s $disk mkpart primary $parted_fs $start_string $end_string 2>&1)?;
 
 			if part.filesystem == "efi" {
-				trace!("parted -s {disk:?} set {index} esp on");
-				cmd_lib::run_cmd!(parted -s $disk set $index esp on 2>&1)?;
+				debug!("Setting esp on for efi partition");
+				trace!("parted -s {disk:?} set {i} esp on");
+				cmd_lib::run_cmd!(parted -s $disk set $i esp on 2>&1)?;
 			}
 
 			if let Some(label) = &part.label {
-				trace!("parted -s {disk:?} name {index} {label}");
-				cmd_lib::run_cmd!(parted -s $disk name $index $label 2>&1)?;
+				debug!(label, "Setting label");
+				trace!("parted -s {disk:?} name {i} {label}");
+				cmd_lib::run_cmd!(parted -s $disk name $i $label 2>&1)?;
 			}
 
 			// time to format the filesystem
-
-			let fsname = {
-				if part.filesystem == "efi" {
-					"fat"
-				} else {
-					&part.filesystem
-				}
-			};
-
+			let fsname = &part.filesystem;
 			// Some stupid hackery checks for the args of mkfs.fat
-			if part.filesystem == "efi" {
+			debug!(fsname, "Formatting partition");
+			if fsname == "efi" {
 				trace!("mkfs.fat -F32 {devname}");
-
 				cmd_lib::run_cmd!(mkfs.fat -F32 $devname 2>&1)?;
 			} else {
 				trace!("mkfs.{fsname} {devname}");
-
 				cmd_lib::run_cmd!(mkfs.$fsname $devname 2>&1)?;
 			}
 
-			// create partition
-			trace!("====================");
-		}
+			Result::<_>::Ok((i + 1, last_end))
+		})?;
 
 		Ok(())
 	}

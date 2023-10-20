@@ -36,19 +36,19 @@ impl SkipPhases {
 	}
 }
 
-impl std::str::FromStr for SkipPhases {
-	type Err = String;
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		Ok(SkipPhases(s.split(',').map(|s| s.to_string()).collect()))
+impl From<&str> for SkipPhases {
+	fn from(value: &str) -> SkipPhases {
+		SkipPhases(value.split(',').map(|s| s.to_string()).collect())
 	}
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
 pub enum OutputFormat {
 	Iso,
 	DiskImage,
 	Device,
 }
+
 impl std::str::FromStr for OutputFormat {
 	type Err = String;
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -61,13 +61,22 @@ impl std::str::FromStr for OutputFormat {
 	}
 }
 
+/// Handles the parsed [`Cli`] config.
+///
+/// # Panics
+/// - Cannot escalate sudo
+///
+/// # Errors
+/// - Failed to load manifests (`Manifest::load_all`)
+/// - Failed to make new [`KatsuBuilder`]
+/// - Failed to build image
 #[tracing::instrument]
 pub fn parse(cli: KatsuCli) -> Result<()> {
 	// load manifest from config file
 
 	sudo::escalate_if_needed().unwrap();
 
-	let manifest = Manifest::load_all(&cli.config.unwrap())?;
+	let manifest = Manifest::load_all(&cli.config.unwrap(), cli.output)?;
 
 	trace!(?manifest, "Loaded manifest");
 
