@@ -29,4 +29,5 @@ disk:
       filesystem: ext4
       mountpoint: /
 dnf:
+  repodir: repodir/
   releasever: 39
