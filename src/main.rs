@@ -15,7 +15,10 @@ fn main() -> color_eyre::Result<()> {
 	}
 
 	color_eyre::install()?;
-	let fmtlyr = fmt::layer().pretty().with_filter(EnvFilter::from_env("KATSU_LOG"));
+	// default to info level logging, override with KATSU_LOG env var
+
+	let filter = EnvFilter::try_from_env("KATSU_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
+	let fmtlyr = fmt::layer().pretty().with_filter(filter);
 	let subscriber = Registry::default().with(tracing_error::ErrorLayer::default()).with(fmtlyr);
 	tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 	tracing::trace!("カツ丼は最高！");

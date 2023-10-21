@@ -97,6 +97,11 @@ impl Manifest {
 
 		// get dir of path relative to cwd
 
+		fn path_not_exists_error(path: &Path) -> color_eyre::eyre::Report {
+			tracing::error!(?path, "Path does not exist");
+			color_eyre::eyre::eyre!("Path does not exist: {path:#?}", path = path)
+		}
+
 		let mut path_can = path.canonicalize()?;
 
 		path_can.pop();
@@ -104,6 +109,9 @@ impl Manifest {
 
 		for import in &mut manifest.import {
 			debug!("Import: {import:#?}");
+			if !path_can.join(&import).exists() {
+				return Err(path_not_exists_error(&path_can.join(&import)));
+			}
 			*import = path_can.join(&import).canonicalize()?;
 			debug!("Canonicalized import: {import:#?}");
 		}
@@ -113,12 +121,18 @@ impl Manifest {
 		for script in &mut manifest.scripts.pre {
 			if let Some(f) = script.file.as_mut() {
 				trace!(?f, "Loading pre scripts");
+				if !path_can.join(&f).exists() {
+					return Err(path_not_exists_error(&path_can.join(&f)));
+				}
 				*f = path_can.join(&f).canonicalize()?;
 			}
 		}
 
 		for script in &mut manifest.scripts.post {
 			if let Some(f) = script.file.as_mut() {
+				if !path_can.join(&f).exists() {
+					return Err(path_not_exists_error(&path_can.join(&f)));
+				}
 				trace!(?f, "Loading post scripts");
 				*f = path_can.join(&f).canonicalize()?;
 			}
@@ -126,7 +140,12 @@ impl Manifest {
 
 		//  canonicalize repodir if it exists, relative to the file that imported it
 		if let Some(repodir) = &mut manifest.dnf.repodir {
-			*repodir = path_can.join(&repodir).canonicalize()?;
+			// check if path even exists
+			let repodir_can = path_can.join(&repodir);
+			if !repodir_can.exists() {
+				return Err(path_not_exists_error(&repodir_can));
+			}
+			*repodir = repodir_can.canonicalize()?;
 		}
 
 		Ok(manifest)
