@@ -160,8 +160,13 @@ impl Manifest {
 			OutputFormat::Device => todo!("DeviceBuilder not implemented?"),
 			OutputFormat::DiskImage => manifest.disk = disk,
 		}
-		(dnf.packages, dnf.arch_packages, dnf.options) =
-			(manifest.dnf.packages, manifest.dnf.arch_packages, manifest.dnf.options);
+		(dnf.packages, dnf.arch_packages, dnf.options, dnf.exclude, dnf.repodir) = (
+			manifest.dnf.packages,
+			manifest.dnf.arch_packages,
+			manifest.dnf.options,
+			manifest.dnf.exclude,
+			manifest.dnf.repodir,
+		);
 		manifest.dnf = dnf;
 
 		Ok(manifest)
