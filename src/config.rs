@@ -139,8 +139,8 @@ impl Manifest {
 
 		let mut dnf = take(&mut manifest.dnf);
 		// everything but the package lists
-		manifest.dnf.packages = take(&mut manifest.dnf.packages);
-		manifest.dnf.arch_packages = take(&mut manifest.dnf.arch_packages);
+		manifest.dnf.packages = take(&mut dnf.packages);
+		manifest.dnf.arch_packages = take(&mut dnf.arch_packages);
 
 		manifest = manifest.import.iter().try_fold(manifest.clone(), |acc, import| {
 			Result::<_>::Ok(merge_struct::merge(&acc, &Self::load_all(import, output)?)?)
