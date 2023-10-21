@@ -389,7 +389,8 @@ impl PartitionLayout {
 			let devname = partition_name(&disk.to_string_lossy(), i);
 			trace!(devname, "Creating partition {i}: {part:#?}");
 
-			let _span = tracing::trace_span!(devname, "partition").enter();
+			let span = tracing::trace_span!("partition", devname);
+			let _enter = span.enter();
 
 			let start_string = if i == 1 {
 				// create partition at start of disk
