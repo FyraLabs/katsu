@@ -8,3 +8,4 @@ distro: Katsu Ultramarine ARM
 
 dnf:
   arch: aarch64
+  releasever: 39

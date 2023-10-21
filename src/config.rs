@@ -141,6 +141,7 @@ impl Manifest {
 		// everything but the package lists
 		manifest.dnf.packages = take(&mut dnf.packages);
 		manifest.dnf.arch_packages = take(&mut dnf.arch_packages);
+		manifest.dnf.options = take(&mut dnf.options);
 
 		manifest = manifest.import.iter().try_fold(manifest.clone(), |acc, import| {
 			Result::<_>::Ok(merge_struct::merge(&acc, &Self::load_all(import, output)?)?)
@@ -152,7 +153,8 @@ impl Manifest {
 			OutputFormat::Device => todo!("DeviceBuilder not implemented?"),
 			OutputFormat::DiskImage => manifest.disk = disk,
 		}
-		(dnf.packages, dnf.arch_packages) = (manifest.dnf.packages, manifest.dnf.arch_packages);
+		(dnf.packages, dnf.arch_packages, dnf.options) =
+			(manifest.dnf.packages, manifest.dnf.arch_packages, manifest.dnf.options);
 		manifest.dnf = dnf;
 
 		Ok(manifest)
