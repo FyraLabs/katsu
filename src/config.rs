@@ -124,6 +124,11 @@ impl Manifest {
 			}
 		}
 
+		//  canonicalize repodir if it exists, relative to the file that imported it
+		if let Some(repodir) = &mut manifest.dnf.repodir {
+			*repodir = path_can.join(&repodir).canonicalize()?;
+		}
+
 		Ok(manifest)
 	}
 
