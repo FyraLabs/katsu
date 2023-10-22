@@ -47,6 +47,7 @@ pub enum OutputFormat {
 	Iso,
 	DiskImage,
 	Device,
+	Folder,
 }
 
 impl std::str::FromStr for OutputFormat {
@@ -56,6 +57,8 @@ impl std::str::FromStr for OutputFormat {
 			"iso" => Ok(OutputFormat::Iso),
 			"disk-image" => Ok(OutputFormat::DiskImage),
 			"device" => Ok(OutputFormat::Device),
+			"folder" => Ok(OutputFormat::Folder),
+			"fs" => Ok(OutputFormat::Folder),
 			_ => Err(format!("{s} is not a valid output format")),
 		}
 	}

@@ -178,6 +178,7 @@ impl Manifest {
 			OutputFormat::Iso => manifest.iso = iso,
 			OutputFormat::Device => todo!("DeviceBuilder not implemented?"),
 			OutputFormat::DiskImage => manifest.disk = disk,
+			OutputFormat::Folder => manifest.out_file = None,
 		}
 		(dnf.packages, dnf.arch_packages, dnf.options, dnf.exclude, dnf.repodir) = (
 			manifest.dnf.packages,

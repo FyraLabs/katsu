@@ -5,7 +5,7 @@ use crate::{
 	util::{just_write, loopdev_with_file},
 };
 use cmd_lib::{run_cmd, run_fun};
-use color_eyre::{Result, eyre::bail};
+use color_eyre::{eyre::bail, Result};
 use serde_derive::{Deserialize, Serialize};
 use std::{
 	collections::{BTreeMap, HashMap},
@@ -473,6 +473,33 @@ impl ImageBuilder for DeviceInstaller {
 	}
 }
 
+/// Installs as a raw chroot
+pub struct FsBuilder {
+	pub bootloader: Bootloader,
+	pub root_builder: Box<dyn RootBuilder>,
+}
+
+impl ImageBuilder for FsBuilder {
+	fn build(
+		&self, _chroot: &Path, _image: &Path, manifest: &Manifest, _skip_phases: &SkipPhases,
+	) -> Result<()> {
+		let out = manifest.out_file.as_ref().map_or("katsu-work/chroot", |s| s);
+		let out = Path::new(out);
+		// check if image exists, and is a folder
+		if out.exists() && !out.is_dir() {
+			bail!("Image path is not a directory");
+		}
+
+		// if image doesnt exist create it
+		if !out.exists() {
+			fs::create_dir_all(out)?;
+		}
+
+		self.root_builder.build(out, manifest)?;
+		Ok(())
+	}
+}
+
 pub struct IsoBuilder {
 	pub bootloader: Bootloader,
 	pub root_builder: Box<dyn RootBuilder>,
@@ -671,6 +698,10 @@ impl KatsuBuilder {
 				bootloader,
 				root_builder,
 				image: PathBuf::from("./katsu-work/image/katsu.img"),
+			}) as Box<dyn ImageBuilder>,
+			OutputFormat::Folder => Box::new(FsBuilder {
+				bootloader,
+				root_builder,
 			}) as Box<dyn ImageBuilder>,
 			_ => todo!(),
 		};
