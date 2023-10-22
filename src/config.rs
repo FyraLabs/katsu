@@ -175,9 +175,9 @@ impl Manifest {
 
 		manifest.bootloader = bootloader;
 		match output {
-			OutputFormat::Iso => manifest.iso = iso,
+			OutputFormat::Iso => manifest.iso = iso.or(manifest.iso),
 			OutputFormat::Device => todo!("DeviceBuilder not implemented?"),
-			OutputFormat::DiskImage => manifest.disk = disk,
+			OutputFormat::DiskImage => manifest.disk = disk.or(manifest.disk),
 			OutputFormat::Folder => manifest.out_file = None,
 		}
 		(dnf.packages, dnf.arch_packages, dnf.options, dnf.exclude, dnf.repodir) = (
