@@ -5,7 +5,7 @@ use crate::{
 	util::{just_write, loopdev_with_file},
 };
 use cmd_lib::{run_cmd, run_fun};
-use color_eyre::Result;
+use color_eyre::{Result, eyre::bail};
 use serde_derive::{Deserialize, Serialize};
 use std::{
 	collections::{BTreeMap, HashMap},
@@ -511,12 +511,36 @@ impl IsoBuilder {
 	}
 
 	pub fn squashfs(&self, chroot: &Path, image: &Path) -> Result<()> {
+		// Extra configurable options, for now we use envars
+		// todo: document these
+
+		let squashfs_comp = std::env::var("KATSU_SQUASHFS_COMP").unwrap_or("zstd".to_string());
+
+		info!("Determining squashfs options");
+
+		let squashfs_comp_args = match squashfs_comp.as_str() {
+			"gzip" => "-comp gzip -Xcompression-level 9",
+			"lzo" => "-comp lzo",
+			"lz4" => "-comp lz4 -Xhc",
+			"xz" => "-comp xz -Xbcj x86",
+			"zstd" => "-comp zstd- -Xcompression-level 19",
+			"lzma" => "-comp lzma",
+			_ => bail!("Unknown squashfs compression: {squashfs_comp}"),
+		};
+
+		let sqfs_extra_args = std::env::var("KATSU_SQUASHFS_EXTRA_ARGS").unwrap_or("".to_string());
+
 		info!("Squashing file system (mksquashfs)");
 		cmd_lib::run_cmd!(
-			mksquashfs $chroot $image -comp xz -Xbcj x86 -b 1048576 -noappend -e /dev/ -e /proc/ -e /sys/
-			-p "/dev 755 0 0"
-			-p "/proc 755 0 0"
-			-p "/sys 755 0 0"
+			mksquashfs $chroot $image $squashfs_comp_args -b 1048576 -noappend
+			-one-file-system
+			${sqfs_extra_args}
+			// -e /dev/
+			// -e /proc/
+			// -e /sys/
+			// -p "/dev 755 0 0"
+			// -p "/proc 755 0 0"
+			// -p "/sys 755 0 0"
 		)?;
 		Ok(())
 	}
