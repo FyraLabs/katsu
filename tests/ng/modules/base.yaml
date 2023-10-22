@@ -8,15 +8,6 @@ users:
       - wheel
 
 scripts:
-  pre:
-    - id: pre-test
-      name: Preinstall test
-      inline: |
-        echo "Hello from pre.sh"
-    - id: pre-test2
-      name: Preinstall test 2
-      file: scripts/pre-test2.sh
-
   post:
     - id: post-test
       name: Postinstall test
