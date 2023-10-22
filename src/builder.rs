@@ -563,14 +563,13 @@ impl IsoBuilder {
 		info!("Squashing file system (mksquashfs)");
 		cmd_lib::run_cmd!(
 			mksquashfs $chroot $image $[sqfs_comp_args] -b 1048576 -noappend
-			-one-file-system
+			-e /dev/
+			-e /proc/
+			-e /sys/
+			-p "/dev 755 0 0"
+			-p "/proc 755 0 0"
+			-p "/sys 755 0 0"
 			$[sqfs_extra_args]
-			// -e /dev/
-			// -e /proc/
-			// -e /sys/
-			// -p "/dev 755 0 0"
-			// -p "/proc 755 0 0"
-			// -p "/sys 755 0 0"
 		)?;
 		Ok(())
 	}
