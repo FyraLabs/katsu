@@ -541,27 +541,30 @@ impl IsoBuilder {
 		// Extra configurable options, for now we use envars
 		// todo: document these
 
-		let squashfs_comp = std::env::var("KATSU_SQUASHFS_COMP").unwrap_or("zstd".to_string());
+		let sqfs_comp = std::env::var("KATSU_SQUASHFS_COMP").unwrap_or("zstd".to_string());
 
 		info!("Determining squashfs options");
 
-		let squashfs_comp_args = match squashfs_comp.as_str() {
+		let sqfs_comp_args = match sqfs_comp.as_str() {
 			"gzip" => "-comp gzip -Xcompression-level 9",
 			"lzo" => "-comp lzo",
 			"lz4" => "-comp lz4 -Xhc",
 			"xz" => "-comp xz -Xbcj x86",
 			"zstd" => "-comp zstd- -Xcompression-level 19",
 			"lzma" => "-comp lzma",
-			_ => bail!("Unknown squashfs compression: {squashfs_comp}"),
-		};
+			_ => bail!("Unknown squashfs compression: {sqfs_comp}"),
+		}
+		.split(' ')
+		.collect::<Vec<_>>();
 
-		let sqfs_extra_args = std::env::var("KATSU_SQUASHFS_EXTRA_ARGS").unwrap_or("".to_string());
+		let binding = std::env::var("KATSU_SQUASHFS_EXTRA_ARGS").unwrap_or("".to_string());
+		let sqfs_extra_args = binding.split(' ').collect::<Vec<_>>();
 
 		info!("Squashing file system (mksquashfs)");
 		cmd_lib::run_cmd!(
-			mksquashfs $chroot $image $squashfs_comp_args -b 1048576 -noappend
+			mksquashfs $chroot $image $[sqfs_comp_args] -b 1048576 -noappend
 			-one-file-system
-			${sqfs_extra_args}
+			$[sqfs_extra_args]
 			// -e /dev/
 			// -e /proc/
 			// -e /sys/
@@ -699,10 +702,9 @@ impl KatsuBuilder {
 				root_builder,
 				image: PathBuf::from("./katsu-work/image/katsu.img"),
 			}) as Box<dyn ImageBuilder>,
-			OutputFormat::Folder => Box::new(FsBuilder {
-				bootloader,
-				root_builder,
-			}) as Box<dyn ImageBuilder>,
+			OutputFormat::Folder => {
+				Box::new(FsBuilder { bootloader, root_builder }) as Box<dyn ImageBuilder>
+			},
 			_ => todo!(),
 		};
 
