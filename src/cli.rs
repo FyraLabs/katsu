@@ -25,6 +25,14 @@ pub struct KatsuCli {
 	output: OutputFormat,
 	#[arg(short, long,env = "KATSU_SKIP_PHASES", value_parser = value_parser!(SkipPhases), default_value = "")]
 	skip_phases: SkipPhases,
+
+	#[arg(long)]
+	/// Override architecture to build for
+	arch: Option<String>,
+
+	#[arg(long, short = 'O')]
+	/// Override output file location
+	output_file: Option<PathBuf>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -79,7 +87,17 @@ pub fn parse(cli: KatsuCli) -> Result<()> {
 
 	sudo::escalate_if_needed().unwrap();
 
-	let manifest = Manifest::load_all(&cli.config.unwrap(), cli.output)?;
+	let mut manifest = Manifest::load_all(&cli.config.unwrap(), cli.output)?;
+
+	// check for overrides
+
+	if let Some(arch) = cli.arch {
+		manifest.dnf.arch = Some(arch);
+	}
+
+	if let Some(output_file) = cli.output_file {
+		manifest.out_file = Some(output_file.into_os_string().into_string().unwrap());
+	}
 
 	trace!(?manifest, "Loaded manifest");
 
