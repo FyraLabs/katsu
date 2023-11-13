@@ -503,6 +503,7 @@ fn test_partlay() {
 		size: Some(ByteSize::mib(100)),
 		filesystem: "efi".to_string(),
 		mountpoint: "/boot/efi".to_string(),
+		subvolumes: vec![],
 	});
 
 	partlay.add_partition(Partition {
@@ -510,6 +511,7 @@ fn test_partlay() {
 		size: Some(ByteSize::gib(100)),
 		filesystem: "ext4".to_string(),
 		mountpoint: "/boot".to_string(),
+		subvolumes: vec![],
 	});
 
 	partlay.add_partition(Partition {
@@ -517,6 +519,7 @@ fn test_partlay() {
 		size: Some(ByteSize::gib(100)),
 		filesystem: "ext4".to_string(),
 		mountpoint: "/".to_string(),
+		subvolumes: vec![],
 	});
 
 	for (i, part) in partlay.partitions.iter().enumerate() {
@@ -552,6 +555,7 @@ fn test_partlay() {
 				size: Some(ByteSize::gib(100)),
 				filesystem: "ext4".to_string(),
 				mountpoint: "/".to_string(),
+				subvolumes: vec![],
 			},
 		),
 		(
@@ -561,6 +565,7 @@ fn test_partlay() {
 				size: Some(ByteSize::gib(100)),
 				filesystem: "ext4".to_string(),
 				mountpoint: "/boot".to_string(),
+				subvolumes: vec![],
 			},
 		),
 		(
@@ -570,6 +575,7 @@ fn test_partlay() {
 				size: Some(ByteSize::mib(100)),
 				filesystem: "efi".to_string(),
 				mountpoint: "/boot/efi".to_string(),
+				subvolumes: vec![],
 			},
 		),
 	];
@@ -588,6 +594,18 @@ pub struct Partition {
 	/// Filesystem of the partition
 	pub filesystem: String,
 	/// The mountpoint of the partition
+	// todo: make this optional so we can have partitions that aren't mounted
+	// and also btrfs subvolumes
+	pub mountpoint: String,
+
+	/// Will only be used if the filesystem is btrfs
+	#[serde(default)]
+	pub subvolumes: Vec<BtrfsSubvolume>,
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct BtrfsSubvolume {
+	pub name: String,
 	pub mountpoint: String,
 }
 
