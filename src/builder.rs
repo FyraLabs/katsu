@@ -507,6 +507,7 @@ pub struct IsoBuilder {
 
 const DR_MODS: &str = "livenet dmsquash-live dmsquash-live-ntfs convertfs pollcdrom qemu qemu-net";
 const DR_OMIT: &str = "plymouth multipath";
+const DR_ARGS: &str = "--xz --no-early-microcode";
 
 impl IsoBuilder {
 	fn dracut(&self, root: &Path) -> Result<()> {
@@ -531,8 +532,25 @@ impl IsoBuilder {
 			}) => "Can't find initramfs in /boot."
 		);
 
+		// set dracut options
+		// this is kind of a hack, but uhh it works maybe
+		// todo: make this properly configurable without envvars
+
+		let dr_mods = std::env::var("KATSU_DRACUT_MODS").unwrap_or(DR_MODS.to_string());
+		let dr_omit = std::env::var("KATSU_DRACUT_OMIT").unwrap_or(DR_OMIT.to_string());
+
+		let dr_extra_args = std::env::var("KATSU_DRACUT_EXTRA_ARGS").unwrap_or("".to_string());
+		let dr_basic_args = std::env::var("KATSU_DRACUT_ARGS").unwrap_or(DR_ARGS.to_string());
+
+
+		// combine them all into one string
+
+		let dr_args = format!(
+			" --nomdadmconf --nolvmconf {dr_basic_args} -vfN -a {dr_mods} -o {dr_omit} {dr_extra_args}"
+		);
+
 		crate::chroot_run_cmd!(root,
-			unshare -R $root dracut --xz -vfNa $DR_MODS -o $DR_OMIT --no-early-microcode /boot/initramfs-$kver.img $kver 2>&1;
+			unshare -R $root env - DRACUT_SYSTEMD=0 dracut $dr_args /boot/initramfs-$kver.img $kver 2>&1;
 		)?;
 		Ok(())
 	}
