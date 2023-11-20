@@ -60,6 +60,7 @@ macro_rules! chroot_run {
 macro_rules! chroot_run_cmd {
 	($chroot:expr, $($cmd:tt)*) => {{
 		$crate::util::run_with_chroot(&PathBuf::from($chroot), || {
+			tracing::debug!("Running command: {}", stringify!($($cmd)*) );
 			cmd_lib::run_cmd!($($cmd)*)?;
 			Ok(())
 		})
