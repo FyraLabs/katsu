@@ -540,17 +540,28 @@ impl IsoBuilder {
 		let dr_omit = std::env::var("KATSU_DRACUT_OMIT").unwrap_or(DR_OMIT.to_string());
 
 		let dr_extra_args = std::env::var("KATSU_DRACUT_EXTRA_ARGS").unwrap_or("".to_string());
-		let dr_basic_args = std::env::var("KATSU_DRACUT_ARGS").unwrap_or(DR_ARGS.to_string());
-
+		let binding = std::env::var("KATSU_DRACUT_ARGS").unwrap_or(DR_ARGS.to_string());
+		let dr_basic_args = binding.split(' ').collect::<Vec<_>>();
 
 		// combine them all into one string
 
-		let dr_args = format!(
-			" --nomdadmconf --nolvmconf {dr_basic_args} -vfN -a {dr_mods} -o {dr_omit} {dr_extra_args}"
-		);
+		let dr_args2 = vec![
+			"--nomdadmconf",
+			"--nolvmconf",
+			"-vfN",
+			"-a",
+			&dr_mods,
+			"-o",
+			&dr_omit,
+			&dr_extra_args,
+		];
+		let mut dr_args = vec![];
+
+		dr_args.extend(dr_basic_args);
+		dr_args.extend(dr_args2);
 
 		crate::chroot_run_cmd!(root,
-			unshare -R $root env - DRACUT_SYSTEMD=0 dracut $dr_args /boot/initramfs-$kver.img $kver 2>&1;
+			unshare -R $root env - DRACUT_SYSTEMD=0 dracut $[dr_args] /boot/initramfs-$kver.img --kver $kver 2>&1;
 		)?;
 		Ok(())
 	}
