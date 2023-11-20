@@ -14,13 +14,13 @@ insmod ext2
 insmod chain
 set timeout=60
 
-search --no-floppy --set=root --label {{volid}}
+search --no-floppy --set=root --label '{{volid}}'
 menuentry '{{ distro }}' --class gnu-linux --class gnu --class os {
-	linux /boot/{{ vmlinuz }} root=live:LABEL={{ volid }} rd.live.image enforcing=0 {{ cmd }}
+	linux /boot/{{ vmlinuz }} root=live:CDLABEL={{ volid }} rd.live.image enforcing=0 {{ cmd }}
 	initrd /boot/{{ initramfs }}
 }
 
 menuentry '{{ distro }} (Check Image)' --class gnu-linux --class gnu --class os {
-	linux /boot/{{ vmlinuz }} root=live:LABEL={{ volid }} rd.live.image rd.live.check enforcing=0 {{ cmd }}
+	linux /boot/{{ vmlinuz }} root=live:CDLABEL={{ volid }} rd.live.image rd.live.check enforcing=0 {{ cmd }}
 	initrd /boot/{{ initramfs }}
 }
