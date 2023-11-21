@@ -506,7 +506,7 @@ pub struct IsoBuilder {
 }
 
 const DR_MODS: &str = "livenet dmsquash-live dmsquash-live-ntfs convertfs pollcdrom qemu qemu-net";
-const DR_OMIT: &str = "plymouth multipath";
+const DR_OMIT: &str = "";
 const DR_ARGS: &str = "--xz --no-early-microcode";
 
 impl IsoBuilder {
@@ -545,23 +545,22 @@ impl IsoBuilder {
 
 		// combine them all into one string
 
-		let dr_args2 = vec![
-			"--nomdadmconf",
-			"--nolvmconf",
-			"-vfN",
-			"-a",
-			&dr_mods,
-			"-o",
-			&dr_omit,
-			&dr_extra_args,
-		];
+		let dr_args2 =
+			vec!["--nomdadmconf", "--nolvmconf", "-vfN", "-a", &dr_mods, "-o", &dr_extra_args];
 		let mut dr_args = vec![];
 
 		dr_args.extend(dr_basic_args);
+
 		dr_args.extend(dr_args2);
+		if !dr_omit.is_empty() {
+			dr_args.push("--omit");
+			dr_args.push(&dr_omit);
+		}
 
 		crate::chroot_run_cmd!(root,
-			unshare -R $root env - DRACUT_SYSTEMD=0 dracut $[dr_args] /boot/initramfs-$kver.img --kver $kver 2>&1;
+			unshare -R $root env - DRACUT_SYSTEMD=0 dracut $[dr_args]
+			--cmdline
+			/boot/initramfs-$kver.img --kver $kver 2>&1;
 		)?;
 		Ok(())
 	}
