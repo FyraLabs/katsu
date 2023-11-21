@@ -546,7 +546,7 @@ impl IsoBuilder {
 		// combine them all into one string
 
 		let dr_args2 =
-			vec!["--nomdadmconf", "--nolvmconf", "-vfN", "-a", &dr_mods, "-o", &dr_extra_args];
+			vec!["--nomdadmconf", "--nolvmconf", "-vfN", "-a", &dr_mods, &dr_extra_args];
 		let mut dr_args = vec![];
 
 		dr_args.extend(dr_basic_args);
