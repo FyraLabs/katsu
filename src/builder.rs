@@ -559,7 +559,6 @@ impl IsoBuilder {
 
 		crate::chroot_run_cmd!(root,
 			unshare -R $root env - DRACUT_SYSTEMD=0 dracut $[dr_args]
-			--cmdline
 			/boot/initramfs-$kver.img --kver $kver 2>&1;
 		)?;
 		Ok(())
