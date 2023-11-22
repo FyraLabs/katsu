@@ -226,15 +226,15 @@ impl Bootloader {
 		let host_arch = cmd_lib::run_fun!(uname -m;)?;
 
 		let arch = match &**manifest.dnf.arch.as_ref().unwrap_or(&host_arch) {
-			"x86_64" => "i386-pc",
-			"aarch64" => "aa64-pc",
+			"x86_64" => "i386-pc-eltorito",
+			"aarch64" => "arm64-efi",
 			_ => unimplemented!(),
 		};
 
 		debug!("Generating Grub images");
 		cmd_lib::run_cmd!(
 			// todo: uefi support
-			grub2-mkimage -O $arch-eltorito -d $chroot/usr/lib/grub/$arch -o $imgd/boot/eltorito.img -p /boot/grub iso9660 biosdisk 2>&1;
+			grub2-mkimage -O $arch -d $chroot/usr/lib/grub/$arch -o $imgd/boot/eltorito.img -p /boot/grub iso9660 biosdisk 2>&1;
 			// make it 2.88 MB
 			// fallocate -l 1228800 $imgd/boot/eltorito.img;
 			// ^ Commented out because it just wiped the entire file - @korewaChino
