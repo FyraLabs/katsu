@@ -179,6 +179,38 @@ impl Bootloader {
 
 		crate::tpl!("grub.cfg.tera" => { GRUB_PREPEND_COMMENT, volid, distro, vmlinuz, initramfs, cmd } => imgd.join("boot/grub/grub.cfg"));
 
+		let arch_short = if let Some(a) = &manifest.dnf.arch {
+			match &**a {
+				"x86_64" => "x64",
+				"aarch64" => "aa64",
+				_ => unimplemented!(),
+			}
+		} else {
+			// check host arch
+			match run_fun!(uname -m;)?.as_str() {
+				"x86_64" => "x64",
+				"aarch64" => "aa64",
+				_ => unimplemented!(),
+			}
+		};
+
+		let arch_short_upper = arch_short.to_uppercase();
+
+		let arch_32 = if let Some(a) = &manifest.dnf.arch {
+			match &**a {
+				"x86_64" => "ia32",
+				"aarch64" => "arm",
+				_ => unimplemented!(),
+			}
+		} else {
+			// check host arch
+			match run_fun!(uname -m;)?.as_str() {
+				"x86_64" => "ia32",
+				"aarch64" => "arm",
+				_ => unimplemented!(),
+			}
+		}.to_uppercase();
+
 		// Funny script to install GRUB
 		let _ = std::fs::create_dir_all(imgd.join("EFI/BOOT/fonts"));
 		cmd_lib::run_cmd!(
@@ -186,8 +218,8 @@ impl Bootloader {
 			cp -av $imgd/boot/grub/grub.cfg $imgd/EFI/BOOT/BOOT.conf 2>&1;
 			cp -av $imgd/boot/grub/grub.cfg $imgd/EFI/BOOT/grub.cfg 2>&1;
 			cp -av $imgd/boot/grub/fonts/unicode.pf2 $imgd/EFI/BOOT/fonts;
-			cp -av $imgd/EFI/BOOT/shimx64.efi $imgd/EFI/BOOT/BOOTX64.efi;
-			cp -av $imgd/EFI/BOOT/shim.efi $imgd/EFI/BOOT/BOOTIA32.efi;
+			cp -av $imgd/EFI/BOOT/shim${arch_short}.efi $imgd/EFI/BOOT/BOOT${arch_short_upper}.efi;
+			cp -av $imgd/EFI/BOOT/shim.efi $imgd/EFI/BOOT/BOOT${arch_32}.efi;
 		)?;
 
 		// and then we need to generate eltorito.img
