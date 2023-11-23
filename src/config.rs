@@ -165,6 +165,7 @@ impl Manifest {
 		// everything but the package lists
 		manifest.dnf.packages = take(&mut dnf.packages);
 		manifest.dnf.arch_packages = take(&mut dnf.arch_packages);
+		manifest.dnf.arch_exclude = take(&mut dnf.arch_exclude);
 		manifest.dnf.options = take(&mut dnf.options);
 		manifest.dnf.exclude = take(&mut dnf.exclude);
 		manifest.dnf.repodir = take(&mut dnf.repodir);
@@ -180,9 +181,17 @@ impl Manifest {
 			OutputFormat::DiskImage => manifest.disk = disk.or(manifest.disk),
 			OutputFormat::Folder => manifest.out_file = None,
 		}
-		(dnf.packages, dnf.arch_packages, dnf.options, dnf.exclude, dnf.repodir) = (
+		(
+			dnf.packages,
+			dnf.arch_packages,
+			dnf.arch_exclude,
+			dnf.options,
+			dnf.exclude,
+			dnf.repodir,
+		) = (
 			manifest.dnf.packages,
 			manifest.dnf.arch_packages,
+			manifest.dnf.arch_exclude,
 			manifest.dnf.options,
 			manifest.dnf.exclude,
 			manifest.dnf.repodir,
