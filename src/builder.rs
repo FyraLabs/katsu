@@ -209,7 +209,8 @@ impl Bootloader {
 				"aarch64" => "arm",
 				_ => unimplemented!(),
 			}
-		}.to_uppercase();
+		}
+		.to_uppercase();
 
 		// Funny script to install GRUB
 		let _ = std::fs::create_dir_all(imgd.join("EFI/BOOT/fonts"));
@@ -237,12 +238,16 @@ impl Bootloader {
 			_ => unimplemented!(),
 		};
 
-
+		let arch_modules = match &**manifest.dnf.arch.as_ref().unwrap_or(&host_arch) {
+			"x86_64" => vec!["biosdisk"],
+			"aarch64" => vec!["efi_gop"],
+			_ => unimplemented!(),
+		};
 
 		debug!("Generating Grub images");
 		cmd_lib::run_cmd!(
 			// todo: uefi support
-			grub2-mkimage -O $arch_out -d $chroot/usr/lib/grub/$arch -o $imgd/boot/eltorito.img -p /boot/grub iso9660 biosdisk 2>&1;
+			grub2-mkimage -O $arch_out -d $chroot/usr/lib/grub/$arch -o $imgd/boot/eltorito.img -p /boot/grub iso9660 $[arch_modules] 2>&1;
 			// make it 2.88 MB
 			// fallocate -l 1228800 $imgd/boot/eltorito.img;
 			// ^ Commented out because it just wiped the entire file - @korewaChino
@@ -585,8 +590,7 @@ impl IsoBuilder {
 
 		// combine them all into one string
 
-		let dr_args2 =
-			vec!["--nomdadmconf", "--nolvmconf", "-vfN", "-a", &dr_mods, &dr_extra_args];
+		let dr_args2 = vec!["--nomdadmconf", "--nolvmconf", "-vfN", "-a", &dr_mods, &dr_extra_args];
 		let mut dr_args = vec![];
 
 		dr_args.extend(dr_basic_args);
@@ -668,8 +672,18 @@ impl IsoBuilder {
 				// 1. blank partition with 145,408 bytes
 				// 2. EFI partition (fat12)
 				// 3. data
+
+				let host_arch = cmd_lib::run_fun!(uname -m;)?;
+				let arch_args: Vec<&str> = match &**manifest.dnf.arch.as_ref().unwrap_or(&host_arch)
+				{
+					// Hybrid mode is only supported on x86_64
+					"x86_64" => vec!["--grub2-mbr", grub2_mbr_hybrid.to_str().unwrap()],
+					"aarch64" => vec![],
+					_ => unimplemented!(),
+				};
+
 				cmd_lib::run_cmd!(xorrisofs -R -V $volid
-					--grub2-mbr $grub2_mbr_hybrid
+					$[arch_args]
 					-partition_offset 16
 					-appended_part_as_gpt
 					-append_partition 2 C12A7328-F81F-11D2-BA4B-00A0C93EC93B $efiboot
