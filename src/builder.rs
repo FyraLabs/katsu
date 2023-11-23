@@ -302,6 +302,8 @@ pub struct DnfRootBuilder {
 	#[serde(default)]
 	pub arch_packages: BTreeMap<String, Vec<String>>,
 	#[serde(default)]
+	pub arch_exclude: BTreeMap<String, Vec<String>>,
+	#[serde(default)]
 	pub repodir: Option<PathBuf>,
 }
 
@@ -319,7 +321,7 @@ impl RootBuilder for DnfRootBuilder {
 
 		let mut packages = self.packages.clone();
 		let mut options = self.options.clone();
-		let exclude = &self.exclude;
+		let mut exclude = self.exclude.clone();
 		let releasever = &self.releasever;
 
 		if let Some(a) = &self.arch {
@@ -344,6 +346,11 @@ impl RootBuilder for DnfRootBuilder {
 		if let Some(pkg) = self.arch_packages.get(arch_string) {
 			packages.append(&mut pkg.clone());
 		}
+
+		if let Some(pkg) = self.arch_exclude.get(arch_string) {
+			exclude.append(&mut pkg.clone());
+		}
+
 		options.append(&mut exclude.iter().map(|p| format!("--exclude={p}")).collect());
 
 		info!("Initializing system with dnf");
