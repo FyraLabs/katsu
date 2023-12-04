@@ -356,15 +356,8 @@ impl RootBuilder for DnfRootBuilder {
 		if let Some(pkg) = self.arch_exclude.get(arch_string) {
 			exclude.append(&mut pkg.clone());
 		}
-		let dnf;
-		match self.dnf5 {
-			true => {
-				dnf = "dnf5";
-			},
-			false => {
-				dnf = "dnf";
-			},
-		}
+
+		let dnf = &self.exec;
 
 		options.append(&mut exclude.iter().map(|p| format!("--exclude={p}")).collect());
 
