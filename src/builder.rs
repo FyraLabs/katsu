@@ -122,16 +122,6 @@ impl Bootloader {
 		let binding = run_fun!(b2sum $limine_cfg)?;
 		let liminecfg_b2h = binding.split_whitespace().next().unwrap();
 
-		// shim
-		let _ = std::fs::create_dir_all(root.join("EFI/BOOT/BOOTX64.EFI"));
-		let _ = std::fs::copy(
-			chroot.join("boot/efi/EFI/BOOT/BOOTX64.EFI"),
-			root.join("EFI/BOOT/BOOTX64.EFI"),
-		);
-		let _ = std::fs::copy(
-			chroot.join("boot/efi/EFI/BOOT/BOOTIA32.EFI"),
-			root.join("EFI/BOOT/BOOTIA32.EFI"),
-		);
 		// enroll limine secure boot
 		tracing::info_span!("Enrolling Limine Secure Boot").in_scope(|| -> Result<()> {
 			Ok(run_cmd!(
@@ -140,9 +130,8 @@ impl Bootloader {
 			)?)
 		})?;
 
-		self.mkefiboot(chroot, manifest)
+		Ok(())
 	}
-
 	/// A clone of mkefiboot from lorax
 	/// Currently only works for PC, no mac support
 	fn mkefiboot(&self, chroot: &Path, _: &Manifest) -> Result<()> {
@@ -298,14 +287,8 @@ pub trait RootBuilder {
 	fn build(&self, chroot: &Path, manifest: &Manifest) -> Result<()>;
 }
 
-fn _default_dnf() -> String {
-	String::from("dnf")
-}
-
 #[derive(Deserialize, Debug, Clone, Serialize, Default)]
 pub struct DnfRootBuilder {
-	#[serde(default = "_default_dnf")]
-	pub exec: String,
 	#[serde(default)]
 	/// Use DNF5 instead of DNF4 (default)
 	///
@@ -744,15 +727,8 @@ impl IsoBuilder {
 					$tree -o $image 2>&1)?;
 			},
 			_ => {
-				debug!("xorriso -as mkisofs -b {bios_bin} -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot {uefi_bin} -efi-boot-part --efi-boot-image --protective-msdos-label {root} -volid KATSU-LIVEOS -o {image}", root = tree.display(), image = image.display());
-				cmd_lib::run_cmd!(xorriso -as mkisofs -R
-					--efi-boot boot/efiboot.img
-					// --efi-boot $uefi_bin
-					-append_partition 2 C12A7328-F81F-11D2-BA4B-00A0C93EC93B $efiboot
-					-b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table
-					-efi-boot-part --efi-boot-image --protective-msdos-label
-					$tree -volid $volid -o $image 2>&1
-				)?;
+				debug!("xorriso -as mkisofs --efi-boot {uefi_bin} -b {bios_bin} -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot {uefi_bin} -efi-boot-part --efi-boot-image --protective-msdos-label {root} -volid KATSU-LIVEOS -o {image}", root = tree.display(), image = image.display());
+				cmd_lib::run_cmd!(xorriso -as mkisofs -R --efi-boot $uefi_bin -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $uefi_bin -efi-boot-part --efi-boot-image --protective-msdos-label $tree -volid $volid -o $image 2>&1)?;
 			},
 		}
 
