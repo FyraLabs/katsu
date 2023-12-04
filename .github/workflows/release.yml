@@ -80,7 +80,7 @@ jobs:
                   file: target/release/katsu
                   asset_name: katsu-${{ matrix.arch }}
                   tag: ${{ github.ref }}
-                  release_name: ${{ github.ref }}
+                  # release_name: ${{ github.ref }}
                   overwrite: true
 
 
