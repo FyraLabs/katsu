@@ -2,7 +2,7 @@ use crate::{builder::Bootloader, chroot_run_cmd, cli::OutputFormat};
 use bytesize::ByteSize;
 use color_eyre::Result;
 use serde::Deserialize;
-use serde_derive::Serialize;
+use serde_derive::{Deserialize, Serialize};
 use std::{
 	collections::BTreeMap,
 	fs,

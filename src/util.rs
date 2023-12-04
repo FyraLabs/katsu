@@ -332,7 +332,7 @@ pub fn run_with_chroot<T>(root: &Path, f: impl FnOnce() -> Result<T>) -> Result<
 /// Create an empty sparse file with given size
 pub fn create_sparse(path: &Path, pos: u64) -> Result<std::fs::File> {
 	use std::io::{Seek, Write};
-	debug!(?path, "Creating sparse file");
+	debug!(?path, pos, "Creating sparse file");
 	let mut f = std::fs::File::create(path)?;
 	f.seek(std::io::SeekFrom::Start(pos))?;
 	f.write_all(&[0])?;

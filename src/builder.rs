@@ -287,13 +287,14 @@ pub trait RootBuilder {
 	fn build(&self, chroot: &Path, manifest: &Manifest) -> Result<()>;
 }
 
+fn _default_dnf() -> String {
+	String::from("dnf")
+}
+
 #[derive(Deserialize, Debug, Clone, Serialize, Default)]
 pub struct DnfRootBuilder {
-	#[serde(default)]
-	/// Use DNF5 instead of DNF4 (default)
-	///
-	/// DNF5 is faster, but is not as stable as DNF4
-	pub dnf5: bool,
+	#[serde(default = "_default_dnf")]
+	pub exec: String,
 	#[serde(default)]
 	pub packages: Vec<String>,
 	#[serde(default)]
@@ -355,7 +356,8 @@ impl RootBuilder for DnfRootBuilder {
 		if let Some(pkg) = self.arch_exclude.get(arch_string) {
 			exclude.append(&mut pkg.clone());
 		}
-		let dnf = if self.dnf5 { "dnf5" } else { "dnf" };
+
+		let dnf = &self.exec;
 
 		options.append(&mut exclude.iter().map(|p| format!("--exclude={p}")).collect());
 
