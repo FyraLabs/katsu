@@ -31,4 +31,3 @@ disk:
 dnf:
   dnf5: true
   releasever: 39
-  exec: dnf5
