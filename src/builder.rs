@@ -290,6 +290,11 @@ pub trait RootBuilder {
 #[derive(Deserialize, Debug, Clone, Serialize, Default)]
 pub struct DnfRootBuilder {
 	#[serde(default)]
+	/// Use DNF5 instead of DNF4 (default)
+	///
+	/// DNF5 is faster, but is not as stable as DNF4
+	pub dnf5: bool,
+	#[serde(default)]
 	pub packages: Vec<String>,
 	#[serde(default)]
 	pub options: Vec<String>,
@@ -350,13 +355,22 @@ impl RootBuilder for DnfRootBuilder {
 		if let Some(pkg) = self.arch_exclude.get(arch_string) {
 			exclude.append(&mut pkg.clone());
 		}
+		let dnf;
+		match self.dnf5 {
+			true => {
+				dnf = "dnf5";
+			},
+			false => {
+				dnf = "dnf";
+			},
+		}
 
 		options.append(&mut exclude.iter().map(|p| format!("--exclude={p}")).collect());
 
 		info!("Initializing system with dnf");
 		crate::chroot_run_cmd!(&chroot,
-			dnf install -y --releasever=$releasever --installroot=$chroot $[packages] $[options] 2>&1;
-			dnf clean all --installroot=$chroot;
+			$dnf install -y --releasever=$releasever --installroot=$chroot $[packages] $[options] 2>&1;
+			$dnf clean all --installroot=$chroot;
 		)?;
 
 		info!("Setting up users");
