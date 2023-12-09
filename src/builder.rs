@@ -383,8 +383,8 @@ impl RootBuilder for DnfRootBuilder {
 	}
 }
 
-#[tracing::instrument(skip(chroot, in_chroot))]
-pub fn run_script(script: Script, chroot: &Path, in_chroot: bool) -> Result<()> {
+#[tracing::instrument(skip(chroot, is_post))]
+pub fn run_script(script: Script, chroot: &Path, is_post: bool) -> Result<()> {
 	let id = script.id.as_ref().map_or("<NULL>", |s| s);
 	bail_let!(Some(mut data) = script.load() => "Cannot load script `{id}`");
 	let name = script.name.as_ref().map_or("<Untitled>", |s| s);
@@ -396,22 +396,16 @@ pub fn run_script(script: Script, chroot: &Path, in_chroot: bool) -> Result<()> 
 		warn!("Script does not have shebang, #!/bin/sh will be added. It is recommended to add a shebang to your script.");
 		data.insert_str(0, "#!/bin/sh\n");
 	}
-	// write data to chroot
-	let fpath = if in_chroot {
-		chroot.join("tmp").join(&name)
-	} else {
-		PathBuf::from(format!("katsu-work/{name}"))
-	};
-	just_write(fpath, data)?;
 
-	// now add execute bit
-	if in_chroot {
+	if script.chroot.unwrap_or(is_post) {
+		just_write(chroot.join("tmp").join(&name), data)?;
 		crate::chroot_run_cmd!(chroot,
 			chmod +x $chroot/tmp/$name;
 			unshare -R $chroot /tmp/$name 2>&1;
 			rm -f $chroot/tmp/$name;
 		)?;
 	} else {
+		just_write(PathBuf::from(format!("katsu-work/{name}")), data)?;
 		// export envar
 		std::env::set_var("CHROOT", chroot);
 		cmd_lib::run_cmd!(
@@ -425,15 +419,15 @@ pub fn run_script(script: Script, chroot: &Path, in_chroot: bool) -> Result<()> 
 	Ok(())
 }
 
-pub fn run_all_scripts(scrs: &[Script], chroot: &Path, in_chroot: bool) -> Result<()> {
-	let scrs =
-		scrs.iter().map(|s| (s.id.clone().unwrap_or("<?>".into()), (s.clone(), false))).collect();
-	run_scripts(scrs, chroot, in_chroot)
+pub fn run_all_scripts(scrs: &[Script], chroot: &Path, is_post: bool) -> Result<()> {
+	// name => (Script, is_executed)
+	let scrs = scrs.iter().map(|s| (s.id.as_ref().map_or("<?>", |s| s), (s.clone(), false)));
+	run_scripts(scrs.collect(), chroot, is_post)
 }
 
 #[tracing::instrument]
 pub fn run_scripts(
-	mut scripts: HashMap<String, (Script, bool)>, chroot: &Path, in_chroot: bool,
+	mut scripts: HashMap<&str, (Script, bool)>, chroot: &Path, is_post: bool,
 ) -> Result<()> {
 	trace!("Running scripts");
 	for idx in scripts.clone().keys() {
@@ -448,23 +442,25 @@ pub fn run_scripts(
 		// Find needs
 		let id = scr.id.clone().unwrap_or("<NULL>".into());
 		let mut needs = HashMap::new();
-		for need in scr.needs.clone() {
-			bail_let!(Some((s, done)) = scripts.get_mut(&need) => "Script `{need}` required by `{id}` not found");
+		let scr_needs_vec = &scr.needs.clone();
+		for need in scr_needs_vec {
+			// when funny rust doesn't know how to convert &String to &str
+			bail_let!(Some((s, done)) = scripts.get_mut(need.as_str()) => "Script `{need}` required by `{id}` not found");
 
 			if *done {
 				trace!("Script `{need}` (required by `{idx}`) is done, skipping");
 				continue;
 			}
-			needs.insert(need, (std::mem::take(s), false));
+			needs.insert(need.as_str(), (std::mem::take(s), false));
 			*done = true;
 		}
 
 		// Run needs
-		run_scripts(needs, chroot, in_chroot)?;
+		run_scripts(needs, chroot, is_post)?;
 
 		// Run the actual script
 		let Some((scr, done)) = scripts.get_mut(idx) else { unreachable!() };
-		run_script(std::mem::take(scr), chroot, in_chroot)?;
+		run_script(std::mem::take(scr), chroot, is_post)?;
 		*done = true;
 	}
 	Ok(())
