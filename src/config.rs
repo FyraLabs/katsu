@@ -217,6 +217,7 @@ pub struct Script {
 	pub name: Option<String>,
 	pub file: Option<PathBuf>,
 	pub inline: Option<String>,
+	pub chroot: Option<bool>,
 	#[serde(default)]
 	pub needs: Vec<String>,
 }
