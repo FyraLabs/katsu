@@ -1,6 +1,6 @@
 {{ LIMINE_PREPEND_COMMENT }}
 
-TIMEOUT=5
+TIMEOUT=60
 
 
 :{{ distro }}
@@ -8,3 +8,15 @@ TIMEOUT=5
 	KERNEL_PATH=boot:///boot/{{ vmlinuz }}
 	MODULE_PATH=boot:///boot/{{ initramfs }}
 	CMDLINE=root=live:LABEL={{ volid }} rd.live.image enforcing=0 {{ cmd }}
+
+:{{ distro }} (Check Image)
+	PROTOCOL=linux
+	KERNEL_PATH=boot:///boot/{{ vmlinuz }}
+	MODULE_PATH=boot:///boot/{{ initramfs }}
+	CMDLINE=root=live:LABEL={{ volid }} rd.live.image rd.live.check enforcing=0 {{ cmd }}
+
+:{{ distro }} (nomodeset)
+	PROTOCOL=linux
+	KERNEL_PATH=boot:///boot/{{ vmlinuz }}
+	MODULE_PATH=boot:///boot/{{ initramfs }}
+	CMDLINE=root=live:LABEL={{ volid }} rd.live.image enforcing=0 nomodeset {{ cmd }}
