@@ -470,6 +470,9 @@ impl PartitionLayout {
 				cmd_lib::run_cmd!(parted -s $disk name $i $label 2>&1)?;
 			}
 
+			trace!("Refreshing partition tables");
+			let _ = cmd_lib::run_cmd!(partprobe); // comes with parted supposedly
+
 			// time to format the filesystem
 			let fsname = &part.filesystem;
 			// Some stupid hackery checks for the args of mkfs.fat
