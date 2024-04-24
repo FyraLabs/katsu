@@ -311,6 +311,10 @@ pub struct DnfRootBuilder {
 	pub arch_exclude: BTreeMap<String, Vec<String>>,
 	#[serde(default)]
 	pub repodir: Option<PathBuf>,
+
+	/// Extra packages to download in the disc image idk
+	#[serde(default)]
+	pub extra_packages: Vec<String>,
 }
 
 impl RootBuilder for DnfRootBuilder {
@@ -373,6 +377,24 @@ impl RootBuilder for DnfRootBuilder {
 			warn!("No users specified, no users will be created!");
 		} else {
 			manifest.users.iter().try_for_each(|user| user.add_to_chroot(&chroot))?;
+		}
+
+		// get the workspace folder
+
+		let out = manifest.out_file.as_ref().map_or("katsu-work/repo", |s| s);
+		let out = Path::new(out);
+
+		if !self.extra_packages.is_empty() {
+			// workaround for being unable to access fields in run_cmd!
+			let extra_packages = self.extra_packages.clone();
+			info!("Downloading extra packages to workspace");
+			// todo: copy the repo to the resulting image
+			// run command in host namespace
+			cmd_lib::run_cmd!(
+				mkdir -p $out;
+				$dnf download -y --destdir=$out $[extra_packages] 2>&1;
+				createrepo_c $out;
+			)?;
 		}
 
 		// now, let's run some funny post-install scripts
