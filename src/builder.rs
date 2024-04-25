@@ -479,6 +479,7 @@ pub struct DiskImageBuilder {
 }
 
 impl ImageBuilder for DiskImageBuilder {
+	#[tracing::instrument(skip(self))]
 	fn build(
 		&self, chroot: &Path, image: &Path, manifest: &Manifest, _: &SkipPhases,
 	) -> Result<()> {

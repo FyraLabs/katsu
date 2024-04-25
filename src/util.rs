@@ -348,6 +348,7 @@ impl Drop for LoopDevHdl {
 	}
 }
 
+#[tracing::instrument]
 pub fn loopdev_with_file(path: &Path) -> Result<(std::path::PathBuf, LoopDevHdl)> {
 	let lc = loopdev::LoopControl::open()?;
 	let loopdev = lc.next_free()?;

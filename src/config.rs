@@ -92,6 +92,7 @@ impl Manifest {
 		}
 	}
 	/// Loads a single manifest from a file
+	#[tracing::instrument]
 	pub fn load(path: &Path) -> Result<Self> {
 		let mut manifest: Self = serde_yaml::from_str(&std::fs::read_to_string(path)?)?;
 
@@ -151,6 +152,7 @@ impl Manifest {
 		Ok(manifest)
 	}
 
+	#[tracing::instrument]
 	pub fn load_all(path: &Path, output: OutputFormat) -> Result<Self> {
 		use std::mem::take;
 
