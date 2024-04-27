@@ -655,14 +655,6 @@ impl IsoBuilder {
 			$[sqfs_extra_args]
 		)?;
 
-		// Reduce storage overhead by removing the original chroot
-		// However, we'll keep an env flag to keep the chroot for debugging purposes
-
-		if env_flag!("KATSU_KEEP_CHROOT").is_none() {
-			info!("Removing chroot");
-			fs::remove_dir_all(chroot)?;
-		}
-
 		Ok(())
 	}
 	#[allow(dead_code)]
@@ -766,6 +758,15 @@ impl ImageBuilder for IsoBuilder {
 		phase!("rootimg": self.squashfs(chroot, &image_dir.join("squashfs.img")));
 
 		phase!("copy-live": self.bootloader.copy_liveos(manifest, chroot));
+
+
+		// Reduce storage overhead by removing the original chroot
+		// However, we'll keep an env flag to keep the chroot for debugging purposes
+
+		if env_flag!("KATSU_KEEP_CHROOT").is_none() {
+			info!("Removing chroot");
+			fs::remove_dir_all(chroot)?;
+		}
 
 		phase!("iso": self.xorriso(chroot, &image, manifest));
 
