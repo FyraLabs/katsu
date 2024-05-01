@@ -761,7 +761,6 @@ impl ImageBuilder for IsoBuilder {
 
 		phase!("copy-live": self.bootloader.copy_liveos(manifest, chroot));
 
-
 		// Reduce storage overhead by removing the original chroot
 		// However, we'll keep an env flag to keep the chroot for debugging purposes
 
