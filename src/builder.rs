@@ -311,6 +311,8 @@ pub struct DnfRootBuilder {
 	pub arch_exclude: BTreeMap<String, Vec<String>>,
 	#[serde(default)]
 	pub repodir: Option<PathBuf>,
+	#[serde(default)]
+	pub global_options: Vec<String>,
 }
 
 impl RootBuilder for DnfRootBuilder {

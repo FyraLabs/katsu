@@ -181,21 +181,15 @@ impl Manifest {
 			OutputFormat::DiskImage => manifest.disk = disk.or(manifest.disk),
 			OutputFormat::Folder => manifest.out_file = None,
 		}
-		(
-			dnf.packages,
-			dnf.arch_packages,
-			dnf.arch_exclude,
-			dnf.options,
-			dnf.exclude,
-			dnf.repodir,
-		) = (
+		(dnf.packages, dnf.arch_packages, dnf.arch_exclude, dnf.exclude, dnf.repodir) = (
 			manifest.dnf.packages,
 			manifest.dnf.arch_packages,
 			manifest.dnf.arch_exclude,
-			manifest.dnf.options,
 			manifest.dnf.exclude,
 			manifest.dnf.repodir,
 		);
+		dnf.options = merge_struct::merge(&manifest.dnf.options, &manifest.dnf.global_options)?;
+
 		manifest.dnf = dnf;
 
 		Ok(manifest)
