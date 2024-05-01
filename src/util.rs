@@ -18,6 +18,17 @@ macro_rules! run {
 	}};
 }
 
+/// Macro for string feature flags.
+/// Should return the value of the environment variable if defined, else None.
+///
+// todo: probably do some magic to let this be a cli flag
+#[macro_export]
+macro_rules! env_flag {
+	($envar:literal) => {
+		std::env::var($envar).ok()
+	};
+}
+
 /// Macro that wraps around cmd_lib::run_cmd!, but runs it in a chroot
 ///
 /// First argument is the chroot path, the following arguments are the command and arguments

@@ -2,6 +2,7 @@ use crate::{
 	bail_let,
 	cli::{OutputFormat, SkipPhases},
 	config::{Manifest, Script},
+	env_flag,
 	util::{just_write, loopdev_with_file},
 };
 use cmd_lib::{run_cmd, run_fun};
@@ -594,11 +595,11 @@ impl IsoBuilder {
 		// this is kind of a hack, but uhh it works maybe
 		// todo: make this properly configurable without envvars
 
-		let dr_mods = std::env::var("KATSU_DRACUT_MODS").unwrap_or(DR_MODS.to_string());
-		let dr_omit = std::env::var("KATSU_DRACUT_OMIT").unwrap_or(DR_OMIT.to_string());
+		let dr_mods = env_flag!("KATSU_DRACUT_MODS").unwrap_or(DR_MODS.to_string());
+		let dr_omit = env_flag!("KATSU_DRACUT_OMIT").unwrap_or(DR_OMIT.to_string());
 
-		let dr_extra_args = std::env::var("KATSU_DRACUT_EXTRA_ARGS").unwrap_or("".to_string());
-		let binding = std::env::var("KATSU_DRACUT_ARGS").unwrap_or(DR_ARGS.to_string());
+		let dr_extra_args = env_flag!("KATSU_DRACUT_ARGS").unwrap_or("".to_string());
+		let binding = env_flag!("KATSU_DRACUT_ARGS").unwrap_or(DR_ARGS.to_string());
 		let dr_basic_args = binding.split(' ').collect::<Vec<_>>();
 
 		// combine them all into one string
@@ -625,7 +626,7 @@ impl IsoBuilder {
 		// Extra configurable options, for now we use envars
 		// todo: document these
 
-		let sqfs_comp = std::env::var("KATSU_SQUASHFS_COMP").unwrap_or("zstd".to_string());
+		let sqfs_comp = env_flag!("KATSU_SQUASHFS_ARGS").unwrap_or("zstd".to_string());
 
 		info!("Determining squashfs options");
 
@@ -641,7 +642,7 @@ impl IsoBuilder {
 		.split(' ')
 		.collect::<Vec<_>>();
 
-		let binding = std::env::var("KATSU_SQUASHFS_EXTRA_ARGS").unwrap_or("".to_string());
+		let binding = env_flag!("KATSU_SQUASHFS_ARGS").unwrap_or("".to_string());
 		let sqfs_extra_args = binding.split(' ').collect::<Vec<_>>();
 
 		info!("Squashing file system (mksquashfs)");
@@ -655,6 +656,7 @@ impl IsoBuilder {
 			-p "/sys 755 0 0"
 			$[sqfs_extra_args]
 		)?;
+
 		Ok(())
 	}
 	#[allow(dead_code)]
@@ -758,6 +760,15 @@ impl ImageBuilder for IsoBuilder {
 		phase!("rootimg": self.squashfs(chroot, &image_dir.join("squashfs.img")));
 
 		phase!("copy-live": self.bootloader.copy_liveos(manifest, chroot));
+
+
+		// Reduce storage overhead by removing the original chroot
+		// However, we'll keep an env flag to keep the chroot for debugging purposes
+
+		if env_flag!("KATSU_KEEP_CHROOT").is_none() {
+			info!("Removing chroot");
+			fs::remove_dir_all(chroot)?;
+		}
 
 		phase!("iso": self.xorriso(chroot, &image, manifest));
 
