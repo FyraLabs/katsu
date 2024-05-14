@@ -10,7 +10,7 @@ kernel_cmdline: "quiet rhgb"
 bootloader: limine
 
 dnf:
-  releasever: 39
+  releasever: 40
   options:
     - --setopt=keepcache=True
     - --nogpgcheck

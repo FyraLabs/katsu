@@ -1,4 +1,3 @@
-
 import:
   - katsu.yaml
 # Example manifest for a Katsu build
@@ -25,4 +24,4 @@ disk:
 
 dnf:
   arch: aarch64
-  releasever: 39
+  releasever: 40
