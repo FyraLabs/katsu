@@ -41,7 +41,7 @@ jobs:
   image-arm:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/terrapkg/builder:f38
+      image: ghcr.io/terrapkg/builder:f40
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -138,7 +138,6 @@ jobs:
           name: image-x86_64
           path: tests/ng/katsu-work/image/*.raw.xz
 
-
   iso-x86_64:
     runs-on: ubuntu-latest
     container:
@@ -188,7 +187,6 @@ jobs:
         with:
           name: iso-x86_64
           path: tests/ng/katsu-work/image/*.iso.xz
-
 
   iso-limine-x86_64:
     runs-on: ubuntu-latest
@@ -240,8 +238,6 @@ jobs:
           name: iso-limine-x86_64
           path: tests/ng/katsu-work/image/*.iso.xz
 
-
-
   fs-test-x86_64:
     runs-on: ubuntu-latest
     container:
@@ -291,4 +287,3 @@ jobs:
         with:
           name: iso-limine-x86_64
           path: tests/ng/katsu-work/chroot.tar.xz
-

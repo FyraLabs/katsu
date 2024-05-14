@@ -38,50 +38,45 @@ env:
     isomd5sum
 
 jobs:
-    build:
-        strategy:
-          matrix:
-            arch: [x86_64, aarch64]
+  build:
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
 
-        # run job on ubuntu-latest unless aarch64 then arm64
-        runs-on: ${{ matrix.arch == 'aarch64' && 'arm64' || 'ubuntu-latest' }}
+    # run job on ubuntu-latest unless aarch64 then arm64
+    runs-on: ${{ matrix.arch == 'aarch64' && 'arm64' || 'ubuntu-latest' }}
 
-        container:
-            image: ghcr.io/terrapkg/builder:f38
+    container:
+      image: ghcr.io/terrapkg/builder:f40
 
-        steps:
-            - uses: actions/checkout@v4
+    steps:
+      - uses: actions/checkout@v4
 
-            - name: Install dependencies
-              run: |
-                dnf install -y $DNF_PKGS
+      - name: Install dependencies
+        run: |
+          dnf install -y $DNF_PKGS
 
-            - uses: actions-rs/toolchain@v1
-              with:
-                profile: minimal
-                toolchain: stable
-                override: true
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
 
-            - name: Build
-              run:
-                cargo build --release
-            
-            - name: Upload artifacts
-              uses: actions/upload-artifact@v2
-              with:
-                name: ${{ matrix.arch }}
-                path: target/release/terra
+      - name: Build
+        run: cargo build --release
 
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ matrix.arch }}
+          path: target/release/terra
 
-            - name: Add binary to release
-              uses: svenstaro/upload-release-action@v2
-              with:
-                  repo_token: ${{ secrets.GITHUB_TOKEN }}
-                  file: target/release/katsu
-                  asset_name: katsu-${{ matrix.arch }}
-                  tag: ${{ github.ref }}
-                  # release_name: ${{ github.ref }}
-                  overwrite: true
-
-
-
+      - name: Add binary to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: target/release/katsu
+          asset_name: katsu-${{ matrix.arch }}
+          tag: ${{ github.ref }}
+          # release_name: ${{ github.ref }}
+          overwrite: true
