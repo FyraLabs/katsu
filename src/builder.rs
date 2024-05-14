@@ -289,7 +289,7 @@ pub trait RootBuilder {
 }
 
 fn _default_dnf() -> String {
-	String::from("dnf")
+	String::from("dnf5")
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize, Default)]
