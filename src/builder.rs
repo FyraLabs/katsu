@@ -482,7 +482,7 @@ impl ImageBuilder for DiskImageBuilder {
 		let (ldp, hdl) = loopdev_with_file(sparse_path)?;
 
 		// Partition disk
-		disk.apply(&ldp)?;
+		disk.apply(&ldp, manifest.dnf.arch.as_deref().unwrap_or(std::env::consts::ARCH))?;
 
 		// Mount partitions to chroot
 		disk.mount_to_chroot(&ldp, chroot)?;

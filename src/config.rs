@@ -411,7 +411,7 @@ impl PartitionLayout {
 		Ok(crate::tpl!("fstab.tera" => { PREPEND, entries }))
 	}
 
-	pub fn apply(&self, disk: &PathBuf) -> Result<()> {
+	pub fn apply(&self, disk: &PathBuf, target_arch: &str) -> Result<()> {
 		// This is a destructive operation, so we need to make sure we don't accidentally wipe the wrong disk
 
 		info!("Applying partition layout to disk: {disk:#?}");
@@ -446,15 +446,17 @@ impl PartitionLayout {
 				ByteSize::b(last_end).to_string_as(true).replace(' ', "")
 			});
 
-			let parted_part_type = part.partition_type.uuid();
-
 			// TODO: primary/extended/logical is a MBR concept, since we're using GPT, we should be using this field to set the label
 			// not going to change this for now though, but will revisit
-			debug!(start = start_string, end = end_string, parted_part_type, "Creating partition");
-			trace!(
-				"parted -s {disk:?} mkpart primary {parted_part_type} {start_string} {end_string}"
-			);
-			cmd_lib::run_cmd!(parted -s $disk mkpart primary $parted_part_type $start_string $end_string 2>&1)?;
+			debug!(start = start_string, end = end_string, "Creating partition");
+			trace!("parted -s {disk:?} mkpart primary fat32 {start_string} {end_string}");
+			cmd_lib::run_cmd!(parted -s $disk mkpart primary fat32 $start_string $end_string 2>&1)?;
+
+			let part_type_uuid = part.partition_type.uuid(target_arch);
+
+			debug!("Setting partition type");
+			trace!("parted -s {disk:?} type {i} {part_type_uuid}");
+			cmd_lib::run_cmd!(parted -s $disk type $i $part_type_uuid 2>&1)?;
 
 			if part.filesystem == "efi" {
 				debug!("Setting esp on for efi partition");
@@ -612,7 +614,7 @@ fn test_partlay() {
 #[serde(rename_all = "kebab-case")]
 pub enum PartitionType {
 	// TODO: we need a global arch option in Katsu
-	/// Root partition for the current local architecture (of the system that's running Katsu)
+	/// Root partition for the target architecture of the build if set, otherwise defaults to the local architecture
 	Root,
 	/// Root partition for ARM64
 	RootArm64,
@@ -628,18 +630,18 @@ pub enum PartitionType {
 	LinuxGeneric,
 	/// An arbitrary GPT partition type GUID
 	#[serde(untagged)]
-	GUID(String),
+	Guid(String),
 }
 
 impl PartitionType {
 	/// Get the GPT parition type GUID
-	fn uuid(&self) -> String {
+	fn uuid(&self, target_arch: &str) -> String {
 		// https://uapi-group.org/specifications/specs/discoverable_partitions_specification/#partition-names
 		match self {
 			PartitionType::Root => {
-				return match std::env::consts::ARCH {
-					"x86_64" => PartitionType::RootX86_64.uuid(),
-					"aarch64" => PartitionType::RootArm64.uuid(),
+				return match target_arch {
+					"x86_64" => PartitionType::RootX86_64.uuid(target_arch),
+					"aarch64" => PartitionType::RootArm64.uuid(target_arch),
 					_ => unimplemented!(),
 				}
 			},
@@ -649,7 +651,7 @@ impl PartitionType {
 			PartitionType::Xbootldr => "bc13c2ff-59e6-4262-a352-b275fd6f7172",
 			PartitionType::Swap => "0657fd6d-a4ab-43c4-84e5-0933c84b4f4f",
 			PartitionType::LinuxGeneric => "0fc63daf-8483-4772-8e79-3d69d8477de4",
-			PartitionType::GUID(guid) => guid,
+			PartitionType::Guid(guid) => guid,
 		}
 		.to_string()
 	}
