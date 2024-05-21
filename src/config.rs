@@ -651,7 +651,7 @@ impl PartitionType {
 			PartitionType::Xbootldr => "bc13c2ff-59e6-4262-a352-b275fd6f7172",
 			PartitionType::Swap => "0657fd6d-a4ab-43c4-84e5-0933c84b4f4f",
 			PartitionType::LinuxGeneric => "0fc63daf-8483-4772-8e79-3d69d8477de4",
-			PartitionType::Guid(guid) => guid.to_string().as_str(),
+			PartitionType::Guid(guid) => return guid.to_string(),
 		}
 		.to_string()
 	}
