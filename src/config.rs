@@ -628,9 +628,9 @@ pub enum PartitionType {
 	Swap,
 	/// A generic partition that carries a Linux filesystem
 	LinuxGeneric,
-	/// An arbitrary GPT partition type GUID
+	/// An arbitrary GPT partition type GUID/UUIDv4
 	#[serde(untagged)]
-	Guid(String),
+	Guid(uuid::Uuid),
 }
 
 impl PartitionType {
