@@ -15,16 +15,19 @@ disk:
   size: 8GiB
   partitions:
     - label: EFI
+      type: esp
       size: 512MiB
       filesystem: efi
       mountpoint: /boot/efi
 
     - label: boot
+      type: xbootldr
       size: 1GiB
       filesystem: ext4
       mountpoint: /boot
 
     - label: root
+      type: root
       # size: 2.5MiB
       filesystem: ext4
       mountpoint: /
