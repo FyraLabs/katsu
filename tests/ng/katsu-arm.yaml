@@ -20,7 +20,7 @@ disk:
       mountpoint: /boot
 
     - label: root
-      type: a96c866c-d36f-43d1-90c9-f7918c11cb54
+      type: root-arm64
       # size: 2.5MiB
       filesystem: ext4
       mountpoint: /
