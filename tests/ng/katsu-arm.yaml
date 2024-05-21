@@ -1,4 +1,3 @@
-
 import:
   - katsu.yaml
 # Example manifest for a Katsu build
@@ -9,16 +8,19 @@ disk:
   size: 8GiB
   partitions:
     - label: EFI
+      type: esp
       size: 512MiB
       filesystem: efi
       mountpoint: /boot/efi
 
     - label: boot
+      type: xbootldr
       size: 1GiB
       filesystem: ext4
       mountpoint: /boot
 
     - label: root
+      type: root-aarch64
       # size: 2.5MiB
       filesystem: ext4
       mountpoint: /
