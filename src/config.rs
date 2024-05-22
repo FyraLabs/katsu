@@ -463,8 +463,8 @@ impl PartitionLayout {
 
 				for flag in flags {
 					let position = flag.flag_position();
-					trace!("parted -s {disk:?} toggle {i} {position}");
-					cmd_lib::run_cmd!(parted -s $disk toggle $i $position 2>&1)?;
+					trace!("sgdisk -A {i}:set:{position} {disk:?}");
+					cmd_lib::run_cmd!(sgdisk -A $i:set:$position $disk 2>&1)?;
 				}
 			}
 
