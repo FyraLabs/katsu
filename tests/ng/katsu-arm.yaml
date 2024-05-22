@@ -21,6 +21,8 @@ disk:
 
     - label: root
       type: root-arm64
+      flags:
+        - grow-fs
       # size: 2.5MiB
       filesystem: ext4
       mountpoint: /

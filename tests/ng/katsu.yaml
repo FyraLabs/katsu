@@ -28,6 +28,8 @@ disk:
 
     - label: root
       type: root
+      flags:
+        - grow-fs
       # size: 2.5MiB
       filesystem: ext4
       mountpoint: /
