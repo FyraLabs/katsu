@@ -644,6 +644,7 @@ dependencies = [
  "color-eyre",
  "dotenvy",
  "glob",
+ "indexmap",
  "loopdev-fyra",
  "merge-struct",
  "nix",

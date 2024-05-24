@@ -7,9 +7,10 @@ use crate::{
 };
 use cmd_lib::{run_cmd, run_fun};
 use color_eyre::{eyre::bail, Result};
+use indexmap::IndexMap;
 use serde_derive::{Deserialize, Serialize};
 use std::{
-	collections::{BTreeMap, HashMap},
+	collections::BTreeMap,
 	fs,
 	path::{Path, PathBuf},
 };
@@ -406,13 +407,15 @@ pub fn run_script(script: Script, chroot: &Path, is_post: bool) -> Result<()> {
 
 pub fn run_all_scripts(scrs: &[Script], chroot: &Path, is_post: bool) -> Result<()> {
 	// name => (Script, is_executed)
+	let mut scrs = scrs.to_owned();
+	scrs.sort_by_cached_key(|s| s.priority);
 	let scrs = scrs.iter().map(|s| (s.id.as_ref().map_or("<?>", |s| s), (s.clone(), false)));
 	run_scripts(scrs.collect(), chroot, is_post)
 }
 
 #[tracing::instrument]
 pub fn run_scripts(
-	mut scripts: HashMap<&str, (Script, bool)>, chroot: &Path, is_post: bool,
+	mut scripts: IndexMap<&str, (Script, bool)>, chroot: &Path, is_post: bool,
 ) -> Result<()> {
 	trace!("Running scripts");
 	for idx in scripts.clone().keys() {
@@ -426,7 +429,7 @@ pub fn run_scripts(
 
 		// Find needs
 		let id = scr.id.clone().unwrap_or("<NULL>".into());
-		let mut needs = HashMap::new();
+		let mut needs = IndexMap::new();
 		let scr_needs_vec = &scr.needs.clone();
 		for need in scr_needs_vec {
 			// when funny rust doesn't know how to convert &String to &str

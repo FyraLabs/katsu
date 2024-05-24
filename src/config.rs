@@ -204,6 +204,10 @@ pub struct ScriptsManifest {
 	pub post: Vec<Script>,
 }
 
+fn script_default_priority() -> i32 {
+	50
+}
+
 #[derive(Deserialize, Debug, Clone, Serialize, PartialEq, Eq, Default)]
 // load script from file, or inline if there's one specified
 pub struct Script {
@@ -214,6 +218,9 @@ pub struct Script {
 	pub chroot: Option<bool>,
 	#[serde(default)]
 	pub needs: Vec<String>,
+	/// Default 50, the higher, the later the script executes
+	#[serde(default = "script_default_priority")]
+	pub priority: i32,
 }
 
 impl Script {
