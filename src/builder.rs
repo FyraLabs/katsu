@@ -7,9 +7,10 @@ use crate::{
 };
 use cmd_lib::{run_cmd, run_fun};
 use color_eyre::{eyre::bail, Result};
+use indexmap::IndexMap;
 use serde_derive::{Deserialize, Serialize};
 use std::{
-	collections::{BTreeMap, HashMap},
+	collections::BTreeMap,
 	fs,
 	path::{Path, PathBuf},
 };
@@ -180,36 +181,18 @@ impl Bootloader {
 
 		crate::tpl!("grub.cfg.tera" => { GRUB_PREPEND_COMMENT, volid, distro, vmlinuz, initramfs, cmd } => imgd.join("boot/grub/grub.cfg"));
 
-		let arch_short = if let Some(a) = &manifest.dnf.arch {
-			match &**a {
-				"x86_64" => "x64",
-				"aarch64" => "aa64",
-				_ => unimplemented!(),
-			}
-		} else {
-			// check host arch
-			match run_fun!(uname -m;)?.as_str() {
-				"x86_64" => "x64",
-				"aarch64" => "aa64",
-				_ => unimplemented!(),
-			}
+		let arch_short = match manifest.dnf.arch.as_deref().unwrap_or(std::env::consts::ARCH) {
+			"x86_64" => "x64",
+			"aarch64" => "aa64",
+			_ => unimplemented!(),
 		};
 
 		let arch_short_upper = arch_short.to_uppercase();
 
-		let arch_32 = if let Some(a) = &manifest.dnf.arch {
-			match &**a {
-				"x86_64" => "ia32",
-				"aarch64" => "arm",
-				_ => unimplemented!(),
-			}
-		} else {
-			// check host arch
-			match run_fun!(uname -m;)?.as_str() {
-				"x86_64" => "ia32",
-				"aarch64" => "arm",
-				_ => unimplemented!(),
-			}
+		let arch_32 = match manifest.dnf.arch.as_deref().unwrap_or(std::env::consts::ARCH) {
+			"x86_64" => "ia32",
+			"aarch64" => "arm",
+			_ => unimplemented!(),
 		}
 		.to_uppercase();
 
@@ -225,21 +208,21 @@ impl Bootloader {
 		)?;
 
 		// and then we need to generate eltorito.img
-		let host_arch = cmd_lib::run_fun!(uname -m;)?;
+		let host_arch = std::env::consts::ARCH;
 
-		let arch = match &**manifest.dnf.arch.as_ref().unwrap_or(&host_arch) {
+		let arch = match manifest.dnf.arch.as_deref().unwrap_or(host_arch) {
 			"x86_64" => "i386-pc",
 			"aarch64" => "arm64-efi",
 			_ => unimplemented!(),
 		};
 
-		let arch_out = match &**manifest.dnf.arch.as_ref().unwrap_or(&host_arch) {
+		let arch_out = match manifest.dnf.arch.as_deref().unwrap_or(host_arch) {
 			"x86_64" => "i386-pc-eltorito",
 			"aarch64" => "arm64-efi",
 			_ => unimplemented!(),
 		};
 
-		let arch_modules = match &**manifest.dnf.arch.as_ref().unwrap_or(&host_arch) {
+		let arch_modules = match manifest.dnf.arch.as_deref().unwrap_or(host_arch) {
 			"x86_64" => vec!["biosdisk"],
 			"aarch64" => vec!["efi_gop"],
 			_ => unimplemented!(),
@@ -348,9 +331,9 @@ impl RootBuilder for DnfRootBuilder {
 		let chroot = chroot.canonicalize()?;
 
 		// Get host architecture using uname
-		let host_arch = cmd_lib::run_fun!(uname -m;)?;
+		let host_arch = std::env::consts::ARCH;
 
-		let arch_string = self.arch.as_ref().unwrap_or(&host_arch);
+		let arch_string = self.arch.as_deref().unwrap_or(host_arch);
 
 		if let Some(pkg) = self.arch_packages.get(arch_string) {
 			packages.append(&mut pkg.clone());
@@ -424,13 +407,15 @@ pub fn run_script(script: Script, chroot: &Path, is_post: bool) -> Result<()> {
 
 pub fn run_all_scripts(scrs: &[Script], chroot: &Path, is_post: bool) -> Result<()> {
 	// name => (Script, is_executed)
+	let mut scrs = scrs.to_owned();
+	scrs.sort_by_cached_key(|s| s.priority);
 	let scrs = scrs.iter().map(|s| (s.id.as_ref().map_or("<?>", |s| s), (s.clone(), false)));
 	run_scripts(scrs.collect(), chroot, is_post)
 }
 
 #[tracing::instrument]
 pub fn run_scripts(
-	mut scripts: HashMap<&str, (Script, bool)>, chroot: &Path, is_post: bool,
+	mut scripts: IndexMap<&str, (Script, bool)>, chroot: &Path, is_post: bool,
 ) -> Result<()> {
 	trace!("Running scripts");
 	for idx in scripts.clone().keys() {
@@ -444,7 +429,7 @@ pub fn run_scripts(
 
 		// Find needs
 		let id = scr.id.clone().unwrap_or("<NULL>".into());
-		let mut needs = HashMap::new();
+		let mut needs = IndexMap::new();
 		let scr_needs_vec = &scr.needs.clone();
 		for need in scr_needs_vec {
 			// when funny rust doesn't know how to convert &String to &str
@@ -500,7 +485,7 @@ impl ImageBuilder for DiskImageBuilder {
 		let (ldp, hdl) = loopdev_with_file(sparse_path)?;
 
 		// Partition disk
-		disk.apply(&ldp)?;
+		disk.apply(&ldp, manifest.dnf.arch.as_deref().unwrap_or(std::env::consts::ARCH))?;
 
 		// Mount partitions to chroot
 		disk.mount_to_chroot(&ldp, chroot)?;
@@ -688,8 +673,7 @@ impl IsoBuilder {
 				// 2. EFI partition (fat12)
 				// 3. data
 
-				let host_arch = cmd_lib::run_fun!(uname -m;)?;
-				let arch_args: Vec<&str> = match &**manifest.dnf.arch.as_ref().unwrap_or(&host_arch)
+				let arch_args = match manifest.dnf.arch.as_deref().unwrap_or(std::env::consts::ARCH)
 				{
 					// Hybrid mode is only supported on x86_64
 					"x86_64" => vec!["--grub2-mbr", grub2_mbr_hybrid.to_str().unwrap()],

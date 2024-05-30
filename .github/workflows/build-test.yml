@@ -12,6 +12,7 @@ env:
     dosfstools
     grub2
     parted
+    gdisk
     util-linux-core
     systemd-container
     grub2-efi
