@@ -354,7 +354,7 @@ impl RootBuilder for DnfRootBuilder {
 		);
 
 		if let Err(e) = res {
-			error!("{} failed with error: {e:?}", self.exec);
+			tracing::error!("{} failed with error: {e:?}", self.exec);
 			info!("Katsu will continue the build process.");
 		}
 
