@@ -365,10 +365,15 @@ impl RootBuilder for DnfRootBuilder {
 		options.append(&mut exclude.iter().map(|p| format!("--exclude={p}")).collect());
 
 		info!("Initializing system with dnf");
-		crate::chroot_run_cmd!(&chroot,
+		let res = crate::chroot_run_cmd!(&chroot,
 			$dnf install -y --releasever=$releasever --installroot=$chroot $[packages] $[options] 2>&1;
 			$dnf clean all --installroot=$chroot;
-		)?;
+		);
+
+		if let Err(e) = res {
+			error!("{} failed with error: {e:?}", self.exec);
+			info!("Katsu will continue the build process.");
+		}
 
 		info!("Setting up users");
 
