@@ -1,4 +1,3 @@
-mod boot;
 mod builder;
 mod cli;
 mod config;

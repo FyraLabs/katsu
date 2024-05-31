@@ -204,6 +204,10 @@ pub struct ScriptsManifest {
 	pub post: Vec<Script>,
 }
 
+fn script_default_priority() -> i32 {
+	50
+}
+
 #[derive(Deserialize, Debug, Clone, Serialize, PartialEq, Eq, Default)]
 // load script from file, or inline if there's one specified
 pub struct Script {
@@ -214,6 +218,9 @@ pub struct Script {
 	pub chroot: Option<bool>,
 	#[serde(default)]
 	pub needs: Vec<String>,
+	/// Default 50, the higher, the later the script executes
+	#[serde(default = "script_default_priority")]
+	pub priority: i32,
 }
 
 impl Script {
@@ -411,7 +418,7 @@ impl PartitionLayout {
 		Ok(crate::tpl!("fstab.tera" => { PREPEND, entries }))
 	}
 
-	pub fn apply(&self, disk: &PathBuf) -> Result<()> {
+	pub fn apply(&self, disk: &PathBuf, target_arch: &str) -> Result<()> {
 		// This is a destructive operation, so we need to make sure we don't accidentally wipe the wrong disk
 
 		info!("Applying partition layout to disk: {disk:#?}");
@@ -446,11 +453,27 @@ impl PartitionLayout {
 				ByteSize::b(last_end).to_string_as(true).replace(' ', "")
 			});
 
-			let parted_fs = if part.filesystem == "efi" { "fat32" } else { "ext4" };
+			// TODO: primary/extended/logical is a MBR concept, since we're using GPT, we should be using this field to set the label
+			// not going to change this for now though, but will revisit
+			debug!(start = start_string, end = end_string, "Creating partition");
+			trace!("parted -s {disk:?} mkpart primary fat32 {start_string} {end_string}");
+			cmd_lib::run_cmd!(parted -s $disk mkpart primary fat32 $start_string $end_string 2>&1)?;
 
-			debug!(start = start_string, end = end_string, parted_fs, "Creating partition");
-			trace!("parted -s {disk:?} mkpart primary {parted_fs} {start_string} {end_string}");
-			cmd_lib::run_cmd!(parted -s $disk mkpart primary $parted_fs $start_string $end_string 2>&1)?;
+			let part_type_uuid = part.partition_type.uuid(target_arch);
+
+			debug!("Setting partition type");
+			trace!("parted -s {disk:?} type {i} {part_type_uuid}");
+			cmd_lib::run_cmd!(parted -s $disk type $i $part_type_uuid 2>&1)?;
+
+			if let Some(flags) = &part.flags {
+				debug!("Setting partition attribute flags");
+
+				for flag in flags {
+					let position = flag.flag_position();
+					trace!("sgdisk -A {i}:set:{position} {disk:?}");
+					cmd_lib::run_cmd!(sgdisk -A $i:set:$position $disk 2>&1)?;
+				}
+			}
 
 			if part.filesystem == "efi" {
 				debug!("Setting esp on for efi partition");
@@ -507,6 +530,8 @@ fn test_partlay() {
 
 	partlay.add_partition(Partition {
 		label: Some("EFI".to_string()),
+		partition_type: PartitionType::Esp,
+		flags: None,
 		size: Some(ByteSize::mib(100)),
 		filesystem: "efi".to_string(),
 		mountpoint: "/boot/efi".to_string(),
@@ -515,6 +540,8 @@ fn test_partlay() {
 
 	partlay.add_partition(Partition {
 		label: Some("boot".to_string()),
+		partition_type: PartitionType::Xbootldr,
+		flags: None,
 		size: Some(ByteSize::gib(100)),
 		filesystem: "ext4".to_string(),
 		mountpoint: "/boot".to_string(),
@@ -523,6 +550,8 @@ fn test_partlay() {
 
 	partlay.add_partition(Partition {
 		label: Some("ROOT".to_string()),
+		partition_type: PartitionType::Root,
+		flags: None,
 		size: Some(ByteSize::gib(100)),
 		filesystem: "ext4".to_string(),
 		mountpoint: "/".to_string(),
@@ -559,6 +588,8 @@ fn test_partlay() {
 			3,
 			Partition {
 				label: Some("ROOT".to_string()),
+				partition_type: PartitionType::Root,
+				flags: None,
 				size: Some(ByteSize::gib(100)),
 				filesystem: "ext4".to_string(),
 				mountpoint: "/".to_string(),
@@ -569,6 +600,8 @@ fn test_partlay() {
 			2,
 			Partition {
 				label: Some("boot".to_string()),
+				partition_type: PartitionType::Xbootldr,
+				flags: None,
 				size: Some(ByteSize::gib(100)),
 				filesystem: "ext4".to_string(),
 				mountpoint: "/boot".to_string(),
@@ -579,6 +612,8 @@ fn test_partlay() {
 			1,
 			Partition {
 				label: Some("EFI".to_string()),
+				partition_type: PartitionType::Esp,
+				flags: None,
 				size: Some(ByteSize::mib(100)),
 				filesystem: "efi".to_string(),
 				mountpoint: "/boot/efi".to_string(),
@@ -593,10 +628,97 @@ fn test_partlay() {
 	// check if parts would be applied correctly
 }
 
+// TODO: add more partitions from https://uapi-group.org/specifications/specs/discoverable_partitions_specification/#partition-names ?
+
+/// Represents GPT partition types which can be used, a subset of https://uapi-group.org/specifications/specs/discoverable_partitions_specification.
+/// If the partition type you need isn't in the enum, please file an issue and use the GUID variant.
+/// This is not the filesystem which is formatted on the partition.
+#[derive(Deserialize, Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PartitionType {
+	// TODO: we need a global arch option in Katsu
+	/// Root partition for the target architecture of the build if set, otherwise defaults to the local architecture
+	Root,
+	/// Root partition for ARM64
+	RootArm64,
+	/// Root partition for x86_64
+	RootX86_64,
+	/// Efi system partition
+	Esp,
+	/// Extended boot loader, defined by the Boot Loader Specification
+	Xbootldr,
+	/// Swap partition
+	Swap,
+	/// A generic partition that carries a Linux filesystem
+	LinuxGeneric,
+	/// An arbitrary GPT partition type GUID/UUIDv4
+	#[serde(untagged)]
+	Guid(uuid::Uuid),
+}
+
+impl PartitionType {
+	/// Get the GPT partition type GUID
+	fn uuid(&self, target_arch: &str) -> String {
+		// https://uapi-group.org/specifications/specs/discoverable_partitions_specification/#partition-names
+		match self {
+			PartitionType::Root => {
+				return match target_arch {
+					"x86_64" => PartitionType::RootX86_64.uuid(target_arch),
+					"aarch64" => PartitionType::RootArm64.uuid(target_arch),
+					_ => unimplemented!(),
+				}
+			},
+			PartitionType::RootArm64 => "b921b045-1df0-41c3-af44-4c6f280d3fae",
+			PartitionType::RootX86_64 => "4f68bce3-e8cd-4db1-96e7-fbcaf984b709",
+			PartitionType::Esp => "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+			PartitionType::Xbootldr => "bc13c2ff-59e6-4262-a352-b275fd6f7172",
+			PartitionType::Swap => "0657fd6d-a4ab-43c4-84e5-0933c84b4f4f",
+			PartitionType::LinuxGeneric => "0fc63daf-8483-4772-8e79-3d69d8477de4",
+			PartitionType::Guid(guid) => return guid.to_string(),
+		}
+		.to_string()
+	}
+}
+
+/// Represents GPT partition attrbite flags which can be used, from https://uapi-group.org/specifications/specs/discoverable_partitions_specification/#partition-attribute-flags.
+#[derive(Deserialize, Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PartitionFlag {
+	/// Disable auto discovery for the partition, preventing automatic mounting
+	NoAuto,
+	/// Mark partition for mounting as read-only
+	ReadOnly,
+	/// Enable automatically growing the underlying file system when mounted
+	GrowFs,
+	/// An arbitrary GPT attribute flag position, 0 - 63
+	#[serde(untagged)]
+	FlagPosition(u8),
+}
+
+impl PartitionFlag {
+	/// Get the position offset for this flag
+	fn flag_position(&self) -> u8 {
+		// https://uapi-group.org/specifications/specs/discoverable_partitions_specification/#partition-attribute-flags
+		match &self {
+			PartitionFlag::NoAuto => 63,
+			PartitionFlag::ReadOnly => 60,
+			PartitionFlag::GrowFs => 59,
+			PartitionFlag::FlagPosition(position @ 0..=63) => *position,
+			_ => unimplemented!(),
+		}
+	}
+}
+
 #[derive(Deserialize, Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Partition {
 	pub label: Option<String>,
-	// If not specified, the partition will be created at the end of the disk (100%)
+	/// Partition type
+	#[serde(rename = "type")]
+	pub partition_type: PartitionType,
+	/// GPT partition attribute flags to add
+	// todo: maybe represent this as a bitflag number, parted consumes the positions so I'm doing this for now
+	pub flags: Option<Vec<PartitionFlag>>,
+	/// If not specified, the partition will be created at the end of the disk (100%)
 	pub size: Option<ByteSize>,
 	/// Filesystem of the partition
 	pub filesystem: String,
