@@ -30,6 +30,7 @@ dnf:
     - --setopt=cachedir=/var/cache/dnf
     - --nogpgcheck
     - --setopt=keepcache=True
+    - --setopt=tsflags=
   exclude:
     - fedora-release*
     - generic-release*
