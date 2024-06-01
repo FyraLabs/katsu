@@ -31,7 +31,7 @@ packages:
   - polkit
 
 sys:
-  releasever: 38
+  releasever: 40
   rootpw: ultramarine
 
 script:
