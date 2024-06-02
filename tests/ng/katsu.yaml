@@ -34,5 +34,5 @@ disk:
       filesystem: ext4
       mountpoint: /
 dnf:
-  exec: dnf5
+  dnf5: true
   releasever: 39

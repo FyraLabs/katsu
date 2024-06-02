@@ -7,6 +7,6 @@ dnf:
   options:
     - --nogpgcheck
   repodir: modules/repodir/
-  releasever: 40
+  releasever: 39
   packages:
     - busybox

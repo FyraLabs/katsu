@@ -47,13 +47,14 @@ packages:
   - shim-aa64
   - shim-unsigned-aarch64
 
+
 disk:
   bootloader: true
   root_format: ext4
   disk_size: 8G
 
 sys:
-  releasever: 40
+  releasever: 38
   rootpw: ultramarine
 
 script:
