@@ -1,5 +1,5 @@
 use color_eyre::Result;
-use std::path::Path;
+use std::{fs::File, path::Path};
 use tracing::{debug, error};
 
 #[macro_export]
@@ -341,11 +341,12 @@ pub fn run_with_chroot<T>(root: &Path, f: impl FnOnce() -> Result<T>) -> Result<
 }
 
 /// Create an empty sparse file with given size
-pub fn create_sparse(path: &Path, pos: u64) -> Result<std::fs::File> {
-	use std::io::{Seek, Write};
-	debug!(?path, pos, "Creating sparse file");
-	let mut f = std::fs::File::create(path)?;
-	f.seek(std::io::SeekFrom::Start(pos))?;
+pub fn create_sparse(path: &Path, size: u64) -> Result<File> {
+	use std::io::{Seek, SeekFrom, Write};
+	debug!(?path, size, "Creating sparse file");
+	let mut f = File::create(path)?;
+	// We seek to size - 1, since we write a null byte at the end
+	f.seek(SeekFrom::Start(size - 1))?;
 	f.write_all(&[0])?;
 	Ok(f)
 }
@@ -374,6 +375,6 @@ pub fn just_write(path: impl AsRef<Path>, content: impl AsRef<str>) -> Result<()
 	tracing::trace!(?path, content, "Writing content to file");
 	crate::bail_let!(Some(parent) = path.parent() => "Invalid file path");
 	let _ = std::fs::create_dir_all(parent);
-	std::fs::File::create(path)?.write_all(content.as_bytes())?;
+	File::create(path)?.write_all(content.as_bytes())?;
 	Ok(())
 }
