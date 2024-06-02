@@ -48,7 +48,7 @@ jobs:
     runs-on: ${{ matrix.arch == 'aarch64' && 'arm64' || 'ubuntu-latest' }}
 
     container:
-      image: ghcr.io/terrapkg/builder:f40
+      image: ghcr.io/terrapkg/builder:f38
 
     steps:
       - uses: actions/checkout@v4

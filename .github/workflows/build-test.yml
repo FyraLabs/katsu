@@ -42,7 +42,7 @@ jobs:
   image-arm:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/terrapkg/builder:f40
+      image: ghcr.io/terrapkg/builder:f38
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
