@@ -68,7 +68,7 @@ impl Manifest {
 		self.iso.as_ref().map_or(DEFAULT_VOLID, |iso| &iso.volume_id)
 	}
 	/// Load manifest from file
-	pub fn load(engine: &mut ensan::Engine, path: &Path) -> color_eyre::Result<Self> {
-		Ok(hcl::de::from_body(engine.parse(std::fs::read_to_string(path)?)?)?)
+	pub fn load(path: &Path) -> color_eyre::Result<Self> {
+		Ok(hcl::de::from_body(ensan::parse(std::fs::read_to_string(path)?)?)?)
 	}
 }
