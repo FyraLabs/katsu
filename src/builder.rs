@@ -1,6 +1,7 @@
 use crate::{
+	OutputFormat,
+	SkipPhases,
 	bail_let,
-	cli::{OutputFormat, SkipPhases},
 	config::{Manifest, Script},
 	env_flag,
 	util::{just_write, loopdev_with_file},

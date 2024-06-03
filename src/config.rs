@@ -1,8 +1,7 @@
-use crate::{builder::Bootloader, chroot_run_cmd, cli::OutputFormat};
+use crate::{builder::Bootloader, chroot_run_cmd, OutputFormat};
 use bytesize::ByteSize;
 use color_eyre::Result;
-use serde::Deserialize;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::{
 	collections::BTreeMap,
 	fs,
