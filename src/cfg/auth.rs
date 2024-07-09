@@ -30,7 +30,7 @@ pub struct Auth {
 	pub gid: Option<u32>,
 
 	/// SSH keys for the user
-	/// This will be written to ~/.ssh/authorized_keys
+	/// This will be written to ~/.`ssh/authorized_keys`
 	#[serde(default)]
 	pub ssh_keys: Vec<String>,
 }

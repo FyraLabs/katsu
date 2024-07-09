@@ -43,6 +43,7 @@ impl Bootloader {
 		}
 		Ok(())
 	}
+	#[must_use]
 	pub fn get_bins(&self) -> (&'static str, &'static str) {
 		match *self {
 			Self::Grub => ("boot/efi/EFI/fedora/shim.efi", "boot/eltorito.img"),
@@ -158,6 +159,8 @@ impl Bootloader {
 		Ok(())
 	}
 
+	
+	// todo: rewrite this whole thing, move ISO into a dedicated wrapper struct
 	fn cp_grub(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
 		let imgd = chroot.parent().unwrap().join(ISO_TREE);
 		let cmd = &manifest.kernel_cmdline.as_ref().map_or("", |s| s);

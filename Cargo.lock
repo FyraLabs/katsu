@@ -850,6 +850,8 @@ dependencies = [
  "glob",
  "hcl-rs",
  "indexmap",
+ "itertools 0.13.0",
+ "lazy_format",
  "loopdev-fyra",
  "merge-struct",
  "nix",
@@ -857,6 +859,7 @@ dependencies = [
  "serde_derive",
  "serde_yaml",
  "sudo",
+ "tempfile",
  "tera",
  "tiffin",
  "tracing",
@@ -874,6 +877,12 @@ dependencies = [
  "serde",
  "static_assertions",
 ]
+
+[[package]]
+name = "lazy_format"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e479e99b287d578ed5f6cd4c92cdf48db219088adb9c5b14f7c155b71dfba792"
 
 [[package]]
 name = "lazy_static"

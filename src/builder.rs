@@ -9,7 +9,6 @@ use crate::{
 	util::{just_write, loopdev_with_file},
 	OutputFormat, SkipPhases,
 };
-use cmd_lib::{run_cmd, run_fun};
 use color_eyre::{eyre::bail, Result};
 use indexmap::IndexMap;
 use serde_derive::{Deserialize, Serialize};
@@ -349,7 +348,7 @@ impl IsoBuilder {
 		let dr_mods = env_flag!("KATSU_DRACUT_MODS").unwrap_or(DR_MODS.to_string());
 		let dr_omit = env_flag!("KATSU_DRACUT_OMIT").unwrap_or(DR_OMIT.to_string());
 
-		let dr_extra_args = env_flag!("KATSU_DRACUT_ARGS").unwrap_or("".to_string());
+		let dr_extra_args = env_flag!("KATSU_DRACUT_ARGS").unwrap_or_default();
 		let binding = env_flag!("KATSU_DRACUT_ARGS").unwrap_or(DR_ARGS.to_string());
 		let dr_basic_args = binding.split(' ').collect::<Vec<_>>();
 
@@ -393,7 +392,7 @@ impl IsoBuilder {
 		.split(' ')
 		.collect::<Vec<_>>();
 
-		let binding = env_flag!("KATSU_SQUASHFS_ARGS").unwrap_or_else(|| "".to_string());
+		let binding = env_flag!("KATSU_SQUASHFS_ARGS").unwrap_or_default();
 		let sqfs_extra_args = binding.split(' ').collect::<Vec<_>>();
 
 		info!("Squashing file system (mksquashfs)");
@@ -445,6 +444,7 @@ impl IsoBuilder {
 				_ => unimplemented!(),
 			};
 
+			// todo: move to partition::Xorriso and Iso9660Table
 			cmd_lib::run_cmd!(xorrisofs -R -V $volid
 					$[arch_args]
 					-partition_offset 16

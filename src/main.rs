@@ -34,14 +34,15 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter, Registry};
 pub struct SkipPhases(std::collections::HashSet<String>);
 
 impl SkipPhases {
+	#[must_use]
 	pub fn contains(&self, phase: &str) -> bool {
 		self.0.contains(phase)
 	}
 }
 
 impl From<&str> for SkipPhases {
-	fn from(value: &str) -> SkipPhases {
-		SkipPhases(value.split(',').map(ToOwned::to_owned).collect())
+	fn from(value: &str) -> Self {
+		Self(value.split(',').map(ToOwned::to_owned).collect())
 	}
 }
 
@@ -57,11 +58,11 @@ impl std::str::FromStr for OutputFormat {
 	type Err = String;
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match s {
-			"iso" => Ok(OutputFormat::Iso),
-			"disk-image" => Ok(OutputFormat::DiskImage),
-			"device" => Ok(OutputFormat::Device),
-			"folder" => Ok(OutputFormat::Folder),
-			"fs" => Ok(OutputFormat::Folder),
+			"iso" => Ok(Self::Iso),
+			"disk-image" => Ok(Self::DiskImage),
+			"device" => Ok(Self::Device),
+			"folder" => Ok(Self::Folder),
+			"fs" => Ok(Self::Folder),
 			_ => Err(format!("{s} is not a valid output format")),
 		}
 	}

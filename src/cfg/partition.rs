@@ -7,6 +7,8 @@ use std::{
 };
 use tracing::{debug, info, trace};
 
+use crate::cmd;
+
 /// Represents GPT partition attrbite flags which can be used, from https://uapi-group.org/specifications/specs/discoverable_partitions_specification/#partition-attribute-flags.
 #[derive(Deserialize, Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -26,10 +28,10 @@ impl PartitionFlag {
 	fn flag_position(&self) -> u8 {
 		// https://uapi-group.org/specifications/specs/discoverable_partitions_specification/#partition-attribute-flags
 		match &self {
-			PartitionFlag::NoAuto => 63,
-			PartitionFlag::ReadOnly => 60,
-			PartitionFlag::GrowFs => 59,
-			PartitionFlag::FlagPosition(position @ 0..=63) => *position,
+			Self::NoAuto => 63,
+			Self::ReadOnly => 60,
+			Self::GrowFs => 59,
+			Self::FlagPosition(position @ 0..=63) => *position,
 			_ => unimplemented!(),
 		}
 	}
@@ -46,7 +48,7 @@ pub enum PartitionType {
 	Root,
 	/// Root partition for ARM64
 	RootArm64,
-	/// Root partition for x86_64
+	/// Root partition for `x86_64`
 	RootX86_64,
 	/// Efi system partition
 	Esp,
@@ -66,20 +68,20 @@ impl PartitionType {
 	fn uuid(&self, target_arch: &str) -> String {
 		// https://uapi-group.org/specifications/specs/discoverable_partitions_specification/#partition-names
 		match self {
-			PartitionType::Root => {
+			Self::Root => {
 				return match target_arch {
-					"x86_64" => PartitionType::RootX86_64.uuid(target_arch),
-					"aarch64" => PartitionType::RootArm64.uuid(target_arch),
+					"x86_64" => Self::RootX86_64.uuid(target_arch),
+					"aarch64" => Self::RootArm64.uuid(target_arch),
 					_ => unimplemented!(),
 				}
 			},
-			PartitionType::RootArm64 => "b921b045-1df0-41c3-af44-4c6f280d3fae",
-			PartitionType::RootX86_64 => "4f68bce3-e8cd-4db1-96e7-fbcaf984b709",
-			PartitionType::Esp => "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
-			PartitionType::Xbootldr => "bc13c2ff-59e6-4262-a352-b275fd6f7172",
-			PartitionType::Swap => "0657fd6d-a4ab-43c4-84e5-0933c84b4f4f",
-			PartitionType::LinuxGeneric => "0fc63daf-8483-4772-8e79-3d69d8477de4",
-			PartitionType::Guid(guid) => return guid.to_string(),
+			Self::RootArm64 => "b921b045-1df0-41c3-af44-4c6f280d3fae",
+			Self::RootX86_64 => "4f68bce3-e8cd-4db1-96e7-fbcaf984b709",
+			Self::Esp => "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+			Self::Xbootldr => "bc13c2ff-59e6-4262-a352-b275fd6f7172",
+			Self::Swap => "0657fd6d-a4ab-43c4-84e5-0933c84b4f4f",
+			Self::LinuxGeneric => "0fc63daf-8483-4772-8e79-3d69d8477de4",
+			Self::Guid(guid) => return guid.to_string(),
 		}
 		.to_string()
 	}
@@ -133,10 +135,10 @@ impl PartitionLayout {
 			let mp = PathBuf::from(&part.mountpoint).to_string_lossy().to_string();
 			let mountpoint_chroot = part.mountpoint.trim_start_matches('/');
 			let mountpoint_chroot = chroot.join(mountpoint_chroot);
-			let devname = cmd_lib::run_fun!(findmnt -n -o SOURCE $mountpoint_chroot)?;
+			let devname = cmd!(stdout "findmnt" "-n" "-o" "SOURCE" mountpoint_chroot);
 
 			// We will generate by UUID
-			let uuid = cmd_lib::run_fun!(blkid -s UUID -o value $devname)?;
+			let uuid = cmd!(stdout "blkid" "-s" "UUID" "-o" "value" { devname.trim_end() });
 
 			// clean the mountpoint so we don't have the slash at the start
 			// let mp_cleaned = part.mountpoint.trim_start_matches('/');
@@ -203,6 +205,7 @@ impl PartitionLayout {
 		self.partitions.iter().position(|p| p.mountpoint == mountpoint).map(|i| i + 1)
 	}
 
+	#[deprecated(note = "Switch to systemd-repart")]
 	pub fn apply(&self, disk: &PathBuf, target_arch: &str) -> Result<()> {
 		// This is a destructive operation, so we need to make sure we don't accidentally wipe the wrong disk
 
@@ -210,9 +213,8 @@ impl PartitionLayout {
 
 		// format disk with GPT
 
-		trace!("Formatting disk with GPT");
-		trace!("parted -s {disk:?} mklabel gpt");
-		cmd_lib::run_cmd!(parted -s $disk mklabel gpt 2>&1)?;
+		debug!("Formatting disk with GPT");
+		cmd!(?"parted" "-s" {{ disk.display() }} "mklabel" "gpt")?;
 
 		// create partitions
 		self.partitions.iter().try_fold((1, 0), |(i, mut last_end), part| {
@@ -241,39 +243,34 @@ impl PartitionLayout {
 			// TODO: primary/extended/logical is a MBR concept, since we're using GPT, we should be using this field to set the label
 			// not going to change this for now though, but will revisit
 			debug!(start = start_string, end = end_string, "Creating partition");
-			trace!("parted -s {disk:?} mkpart primary fat32 {start_string} {end_string}");
-			cmd_lib::run_cmd!(parted -s $disk mkpart primary fat32 $start_string $end_string 2>&1)?;
+			cmd!(? "parted" "-s" {{ disk.display() }} "mkpart" "primary" "fat32" start_string end_string)?;
 
 			let part_type_uuid = part.partition_type.uuid(target_arch);
 
 			debug!("Setting partition type");
 			trace!("parted -s {disk:?} type {i} {part_type_uuid}");
-			cmd_lib::run_cmd!(parted -s $disk type $i $part_type_uuid 2>&1)?;
 
 			if let Some(flags) = &part.flags {
 				debug!("Setting partition attribute flags");
 
 				for flag in flags {
 					let position = flag.flag_position();
-					trace!("sgdisk -A {i}:set:{position} {disk:?}");
-					cmd_lib::run_cmd!(sgdisk -A $i:set:$position $disk 2>&1)?;
+					cmd!(? "sgdisk" "-A" ["{i}:set:{position}"] {{ disk.display() }})?;
 				}
 			}
 
 			if part.filesystem == "efi" {
 				debug!("Setting esp on for efi partition");
-				trace!("parted -s {disk:?} set {i} esp on");
-				cmd_lib::run_cmd!(parted -s $disk set $i esp on 2>&1)?;
+				cmd!(? "parted" "-s" {{ disk.display() }} "set" ["{i}"] "esp" "on")?;
 			}
 
 			if let Some(label) = &part.label {
 				debug!(label, "Setting label");
-				trace!("parted -s {disk:?} name {i} {label}");
-				cmd_lib::run_cmd!(parted -s $disk name $i $label 2>&1)?;
+				cmd!(? "parted" "-s" {{ disk.display() }} "name" ["{i}"] label)?;
 			}
 
 			trace!("Refreshing partition tables");
-			let _ = cmd_lib::run_cmd!(partprobe); // comes with parted supposedly
+			let _ = cmd!(? "partprobe"); // comes with parted supposedly
 
 			// time to format the filesystem
 			let fsname = &part.filesystem;
@@ -293,6 +290,8 @@ impl PartitionLayout {
 		Ok(())
 	}
 
+	// todo: move to tiffin::Container
+	#[deprecated(note = "use tiffin::Container instead")]
 	pub fn mount_to_chroot(&self, disk: &Path, chroot: &Path) -> Result<()> {
 		// mount partitions to chroot
 
@@ -339,6 +338,7 @@ struct TplFstabEntry<'a> {
 
 /// Utility function for determining partition /dev names
 /// For cases where it's a mmcblk, or nvme, or loop device etc
+#[must_use]
 pub fn partition_name(disk: &str, partition: usize) -> String {
 	format!(
 		"{disk}{}{partition}",
@@ -353,4 +353,26 @@ pub fn partition_name(disk: &str, partition: usize) -> String {
 			""
 		}
 	)
+}
+/// An ISO9660 partition for an ISO9660 image
+#[derive(Clone, Debug)]
+pub struct Iso9660Partition {
+    pub partno: usize,
+    /// UUID for partition type
+    pub guid: PartitionType,
+}
+
+/// A partition table for an ISO9660 image
+#[derive(Clone, Debug)]
+pub struct Iso9660Table {}
+
+/// A wrapper around xorriso
+#[derive(Debug, Clone)]
+pub struct Xorriso {
+    /// Implant MD5 checksums?
+    /// default: true
+    pub md5: bool,
+    /// Boot catalog
+    pub boot_catalog: Option<PathBuf>,
+    
 }

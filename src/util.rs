@@ -3,19 +3,42 @@ use std::{fs::File, path::Path};
 use tracing::{debug, error};
 
 #[macro_export]
-macro_rules! run {
-	($n:expr $(, $arr:expr)* $(,)?) => {{
-		run!($n; [$($arr,)*])
-	}};
-	($n:expr; $arr:expr) => {{
-		$crate::util::exec($n, &$arr.to_vec(), true)
-	}};
-	(~$n:expr $(, $arr:expr)* $(,)?) => {{
-		run!(~$n; [$($arr,)*])
-	}};
-	(~$n:expr; $arr:expr) => {{
-		$crate::util::exec($n, &$arr.to_vec(), false)
-	}};
+macro_rules! cmd {
+    (@ [$expr:literal $($arg:expr),*]) => { format!($expr, $($arg),*) };
+    (@ {{$expr:expr}}) => { format!("{}", $expr) };
+    (@ $expr:expr) => { &$expr };
+    (@ $expr:literal) => { $expr };
+    ($cmd:literal $($t:tt)*) => {
+        #[allow(unused_braces)]
+        std::process::Command::new($cmd)
+            $(.arg(cmd!(@ $t)))*
+    };
+    (stdout $cmd:literal $($t:tt)+) => {{
+        #[allow(unused_braces)]
+        let cmd = cmd!($cmd $($t)+).output()?;
+        String::from_utf8_lossy(&cmd.stdout).to_string()
+    }};
+    (?$cmd:literal $($t:tt)*) => {{
+        use itertools::Itertools;
+        #[allow(unused_braces)]
+        let cmd_str = [Box::new($cmd) as Box<dyn std::fmt::Display>, $(Box::new(cmd!(@ $t))),*].iter().join(" ");
+        tracing::trace!("Running command: `{cmd_str}`");
+        #[allow(unused_braces)]
+        let status = cmd!($cmd $($t)*).status()?;
+        if status.success() {
+            Ok(())
+        } else if let Some(rc) = status.code() {
+            use color_eyre::Help;
+            #[allow(unused_braces)]
+			Err(color_eyre::Report::msg("Command exited")
+				.warning(lazy_format::lazy_format!("Status code: {rc}"))
+				.with_note(|| format!("Command: `{cmd_str}`"))
+				.note("Status: {status}"))
+		} else {
+            use color_eyre::Help;
+		    Err(color_eyre::Report::msg("Script terminated unexpectedly").note(lazy_format::lazy_format!("Status: {status}")))
+		}
+    }};
 }
 
 /// Macro for string feature flags.
@@ -29,7 +52,7 @@ macro_rules! env_flag {
 	};
 }
 
-/// Macro that wraps around cmd_lib::run_cmd!, but runs it in a chroot
+/// Macro that wraps around `cmd_lib::run_cmd`!, but runs it in a chroot
 ///
 /// First argument is the chroot path, the following arguments are the command and arguments
 ///
@@ -61,7 +84,7 @@ macro_rules! chroot_run {
 	}};
 }
 
-/// Wraps around cmd_lib::run_cmd!, but mounts the chroot
+/// Wraps around `cmd_lib::run_cmd`!, but mounts the chroot
 /// Example:
 ///
 /// ```rs
