@@ -89,13 +89,7 @@ impl Script {
 		let tmpfile_name = format!("katsu-script-{}", self.get_id());
 		if self.chroot {
 			tracing::trace!("chrooting to {:?}", container.root);
-			// you have seen this in readymade already the funny
-			// upcast the color_eyre::Report
-			let res = container.run(|| Ok(Self::_write_and_execute(&tmpfile_name, &script, None)?));
-			// SAFETY: downcast the dyn Error back to a Report
-			if let Err(e) = res {
-				return Err(*unsafe { Box::from_raw(Box::into_raw(e).cast::<Report>()) });
-			}
+			container.run(|| Self::_write_and_execute(&tmpfile_name, &script, None))?;
 		} else {
 			Self::_write_and_execute(&tmpfile_name, &script, Some(&container.root))?;
 		}
@@ -104,7 +98,9 @@ impl Script {
 
 	/// Write the script to a temporary file and execute it.
 	#[tracing::instrument]
-	fn _write_and_execute(tmpfile_name: &str, script: &str, chroot: Option<&Path>) -> Result<()> {
+	fn _write_and_execute(
+		tmpfile_name: &str, script: &str, chroot: Option<&Path>,
+	) -> Result<(), ScriptError> {
 		let mut tmpfile = tmpfile_script(tmpfile_name)?;
 		{
 			let f = tmpfile.as_file_mut();
@@ -121,8 +117,17 @@ impl Script {
 		if let Some(rc) = status.code() {
 			return Err(Report::msg("Script exited")
 				.warning(lzf!("Status code: {rc}"))
-				.note("Status: {status}"));
+				.note("Status: {status}")
+				.into());
 		}
-		Err(Report::msg("Script terminated unexpectedly").note(lzf!("Status: {status}")))
+		Err(Report::msg("Script terminated unexpectedly").note(lzf!("Status: {status}")).into())
 	}
+}
+
+#[derive(thiserror::Error, Debug)]
+enum ScriptError {
+	#[error("IO Error: {0}")]
+	Io(#[from] std::io::Error),
+	#[error("Error while running script: {0}")]
+	Eyre(#[from] color_eyre::Report),
 }

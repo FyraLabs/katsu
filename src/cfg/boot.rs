@@ -1,8 +1,9 @@
 use color_eyre::Result;
 use std::path::Path;
+use sys_mount::Unmount;
 use tracing::{debug, info, trace, warn};
 
-use crate::bail_let;
+use crate::{bail_let, cmd};
 
 use super::manifest::Manifest;
 
@@ -38,8 +39,8 @@ impl Bootloader {
 	pub fn install(&self, image: &Path) -> Result<()> {
 		match *self {
 			Self::Grub => info!("GRUB is not required to be installed to image, skipping"),
-			Self::Limine => cmd_lib::run_cmd!(limine bios-install $image 2>&1)?,
-			Self::SystemdBoot => cmd_lib::run_cmd!(bootctl --image=$image install 2>&1)?,
+			Self::Limine => cmd!(? "limine" "bios-install" {{ image.display() }})?,
+			Self::SystemdBoot => cmd!(? "bootctl" ["--image={}" image.display()] "install")?,
 		}
 		Ok(())
 	}
@@ -114,15 +115,14 @@ impl Bootloader {
 		let limine_cfg = root.join("boot/limine.cfg");
 		crate::tpl!("../../templates/limine.cfg.tera" => { LIMINE_PREPEND_COMMENT, distro, vmlinuz, initramfs, cmd, volid } => &limine_cfg);
 
-		let binding = cmd_lib::run_fun!(b2sum $limine_cfg)?;
+		let binding = cmd!(stdout "b2sum" {{ limine_cfg.display() }});
 		let liminecfg_b2h = binding.split_whitespace().next().unwrap();
 
 		// enroll limine secure boot
 		tracing::info_span!("Enrolling Limine Secure Boot").in_scope(|| -> Result<()> {
-			Ok(cmd_lib::run_cmd!(
-				limine enroll-config $root/boot/limine-uefi-cd.bin $liminecfg_b2h 2>&1;
-				limine enroll-config $root/boot/limine-bios.sys $liminecfg_b2h 2>&1;
-			)?)
+			cmd!(? "limine" "enroll-config" ["{root:?}/boot/limine-uefi-cd.bin"] liminecfg_b2h)?;
+			cmd!(? "limine" "enroll-config" ["{root:?}/boot/limine-bios.sys"] liminecfg_b2h)?;
+			Ok(())
 		})?;
 
 		Ok(())
@@ -141,25 +141,20 @@ impl Bootloader {
 		// let's mount the disk as a loop device
 		let (ldp, hdl) = crate::util::loopdev_with_file(sparse_path)?;
 
-		cmd_lib::run_cmd!(
-			// Format disk with mkfs.fat
-			mkfs.msdos $ldp -v -n EFI 2>&1;
-
-			// Mount disk to /tmp/katsu.efiboot
-			mkdir -p /tmp/katsu.efiboot;
-			mount $ldp /tmp/katsu.efiboot;
-
-			mkdir -p /tmp/katsu.efiboot/EFI/BOOT;
-			cp -avr $tree/EFI/BOOT/. /tmp/katsu.efiboot/EFI/BOOT 2>&1;
-
-			umount /tmp/katsu.efiboot;
-		)?;
+		// Format disk with mkfs.fat
+		cmd!(? "mkfs.msdos" {{ ldp.display() }} "-v" "-n" "EFI")?;
+		// Mount disk to /tmp/katsu.efiboot
+		std::fs::create_dir("/tmp/katsu.efiboot")?;
+		let efimnt = sys_mount::Mount::new(&ldp, "/tmp/katsu.efiboot")?;
+		std::fs::create_dir("/tmp/katsu.efiboot/EFI")?;
+		std::fs::create_dir("/tmp/katsu.efiboot/EFI/BOOT")?;
+		cmd!(? "cp" "-avr" ["{tree:?}/EFI/BOOT/."] "/tmp/katsu.efiboot/EFI/BOOT")?;
+		efimnt.unmount(sys_mount::UnmountFlags::empty())?;
 
 		drop(hdl);
 		Ok(())
 	}
 
-	
 	// todo: rewrite this whole thing, move ISO into a dedicated wrapper struct
 	fn cp_grub(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
 		let imgd = chroot.parent().unwrap().join(ISO_TREE);
@@ -169,7 +164,7 @@ impl Bootloader {
 		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &imgd)?;
 
 		let _ = std::fs::remove_dir_all(imgd.join("boot"));
-		cmd_lib::run_cmd!(cp -r $chroot/boot $imgd/)?;
+		cmd!(? "cp" "-r" ["{chroot:?}/boot"] {{ imgd.display() }})?;
 		std::fs::rename(imgd.join("boot/grub2"), imgd.join("boot/grub"))?;
 
 		let distro = &manifest.distro.as_ref().map_or("Linux", |s| s);
@@ -193,14 +188,12 @@ impl Bootloader {
 
 		// Funny script to install GRUB
 		let _ = std::fs::create_dir_all(imgd.join("EFI/BOOT/fonts"));
-		cmd_lib::run_cmd!(
-			cp -av $imgd/boot/efi/EFI/fedora/. $imgd/EFI/BOOT;
-			cp -av $imgd/boot/grub/grub.cfg $imgd/EFI/BOOT/BOOT.conf 2>&1;
-			cp -av $imgd/boot/grub/grub.cfg $imgd/EFI/BOOT/grub.cfg 2>&1;
-			cp -av $imgd/boot/grub/fonts/unicode.pf2 $imgd/EFI/BOOT/fonts;
-			cp -av $imgd/EFI/BOOT/shim${arch_short}.efi $imgd/EFI/BOOT/BOOT${arch_short_upper}.efi;
-			cp -av $imgd/EFI/BOOT/shim.efi $imgd/EFI/BOOT/BOOT${arch_32}.efi;
-		)?;
+		cmd!(? "cp" "-av" ["{imgd:?}/boot/efi/EFI/fedora/."] ["{imgd:?}/EFI/BOOT"])?;
+		cmd!(? "cp" "-av" ["{imgd:?}/boot/grub/grub.cfg"] ["{imgd:?}/EFI/BOOT/BOOT.conf 2>&1"])?;
+		cmd!(? "cp" "-av" ["{imgd:?}/boot/grub/grub.cfg"] ["{imgd:?}/EFI/BOOT/grub.cfg 2>&1"])?;
+		cmd!(? "cp" "-av" ["{imgd:?}/boot/grub/fonts/unicode.pf2"] ["{imgd:?}/EFI/BOOT/fonts"])?;
+		cmd!(? "cp" "-av" ["{imgd:?}/EFI/BOOT/shim${arch_short}.efi"] ["{imgd:?}/EFI/BOOT/BOOT${arch_short_upper}.efi"])?;
+		cmd!(? "cp" "-av" ["{imgd:?}/EFI/BOOT/shim.efi"] ["{imgd:?}/EFI/BOOT/BOOT${arch_32}.efi"])?;
 
 		// and then we need to generate eltorito.img
 		let host_arch = std::env::consts::ARCH;
@@ -218,31 +211,27 @@ impl Bootloader {
 		};
 
 		let arch_modules = match manifest.dnf.arch.as_deref().unwrap_or(host_arch) {
-			"x86_64" => vec!["biosdisk"],
-			"aarch64" => vec!["efi_gop"],
+			"x86_64" => "biosdisk",
+			"aarch64" => "efi_gop",
 			_ => unimplemented!(),
 		};
 
 		debug!("Generating Grub images");
-		cmd_lib::run_cmd!(
-			// todo: uefi support
-			grub2-mkimage -O $arch_out -d $chroot/usr/lib/grub/$arch -o $imgd/boot/eltorito.img -p /boot/grub iso9660 $[arch_modules] 2>&1;
-			// make it 2.88 MB
-			// fallocate -l 1228800 $imgd/boot/eltorito.img;
-			// ^ Commented out because it just wiped the entire file - @korewaChino
-			// grub2-mkimage -O $arch_64-efi -d $chroot/usr/lib/grub/$arch_64-efi -o $imgd/boot/efiboot.img -p /boot/grub iso9660 efi_gop efi_uga 2>&1;
-			grub2-mkrescue -o $imgd/../efiboot.img;
-		)?;
+		// todo: uefi support
+		cmd!(? "grub2-mkimage" "-O" arch_out "-d" ["{chroot:?}/usr/lib/grub/{arch}"] "-o" ["{imgd:?}/boot/eltorito.img"] "-p" "/boot/grub" "iso9660" arch_modules)?;
+		// make it 2.88 MB
+		// fallocate -l 1228800 $imgd/boot/eltorito.img;
+		// ^ Commented out because it just wiped the entire file - @korewaChino
+		// grub2-mkimage -O $arch_64-efi -d $chroot/usr/lib/grub/$arch_64-efi -o $imgd/boot/efiboot.img -p /boot/grub iso9660 efi_gop efi_uga 2>&1;
+		cmd!(? "grub2-mkrescue" "-o" ["{imgd:?}/../efiboot.img"])?;
 
 		debug!("Copying EFI files from Grub rescue image");
 		let (ldp, hdl) = crate::util::loopdev_with_file(&imgd.join("../efiboot.img"))?;
 
-		cmd_lib::run_cmd!(
-			mkdir -p /tmp/katsu-efiboot;
-			mount $ldp /tmp/katsu-efiboot;
-			cp -r /tmp/katsu-efiboot/boot/grub $imgd/boot/;
-			umount /tmp/katsu-efiboot;
-		)?;
+		std::fs::create_dir("/tmp/katsu-efiboot")?;
+		let mnt = sys_mount::Mount::new(ldp, "/tmp/katsu-efiboot")?;
+		cmd!(? "cp" "-r" "/tmp/katsu-efiboot/boot/grub" ["{imgd:?}/boot/"])?;
+		mnt.unmount(sys_mount::UnmountFlags::empty())?;
 
 		drop(hdl);
 

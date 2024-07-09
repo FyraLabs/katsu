@@ -133,43 +133,6 @@ impl RootBuilder for DnfRootBuilder {
 	}
 }
 
-#[tracing::instrument(skip(chroot, is_post))]
-#[deprecated(note = "Use Script::execute with pointer to tiffin container")]
-pub fn run_script(script: Script, chroot: &Path, is_post: bool) -> Result<()> {
-	let id = script.id.as_ref().map_or("<NULL>", |s| s);
-	bail_let!(Some(mut data) = script.load() => "Cannot load script `{id}`");
-	let name = script.name.as_ref().map_or("<Untitled>", |s| s);
-	info!(id, name, "Running script");
-
-	let name = format!("script-{}", script.id.as_ref().map_or("untitled", |s| s));
-	// check if data has shebang
-	if !data.starts_with("#!") {
-		warn!("Script does not have shebang, #!/bin/sh will be added. It is recommended to add a shebang to your script.");
-		data.insert_str(0, "#!/bin/sh\n");
-	}
-
-	if script.chroot {
-		just_write(chroot.join("tmp").join(&name), data)?;
-		crate::chroot_run_cmd!(chroot,
-			chmod +x $chroot/tmp/$name;
-			unshare -R $chroot /tmp/$name 2>&1;
-			rm -f $chroot/tmp/$name;
-		)?;
-	} else {
-		just_write(PathBuf::from(format!("katsu-work/{name}")), data)?;
-		// export envar
-		std::env::set_var("CHROOT", chroot);
-		cmd_lib::run_cmd!(
-			chmod +x katsu-work/$name;
-			/usr/bin/env CHROOT=$chroot katsu-work/$name 2>&1;
-			rm -f katsu-work/$name;
-		)?;
-	}
-
-	info!(id, name, "Finished script");
-	Ok(())
-}
-
 pub fn run_all_scripts(scrs: &[Script], chroot: &Path, is_post: bool) -> Result<()> {
 	// name => (Script, is_executed)
 	let mut scrs = scrs.to_owned();
@@ -213,7 +176,7 @@ pub fn run_scripts(
 
 		// Run the actual script
 		let Some((scr, done)) = scripts.get_mut(idx) else { unreachable!() };
-		run_script(std::mem::take(scr), chroot, is_post)?;
+		scr.execute(&mut tiffin::Container::new(chroot.to_path_buf()))?;
 		*done = true;
 	}
 	Ok(())

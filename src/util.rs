@@ -8,17 +8,22 @@ macro_rules! cmd {
     (@ {{$expr:expr}}) => { format!("{}", $expr) };
     (@ $expr:expr) => { &$expr };
     (@ $expr:literal) => { $expr };
-    ($cmd:literal $($t:tt)*) => {
-        #[allow(unused_braces)]
-        std::process::Command::new($cmd)
-            $(.arg(cmd!(@ $t)))*
-    };
     (stdout $cmd:literal $($t:tt)+) => {{
         #[allow(unused_braces)]
         let cmd = cmd!($cmd $($t)+).output()?;
         String::from_utf8_lossy(&cmd.stdout).to_string()
     }};
-    (?$cmd:literal $($t:tt)*) => {{
+    ($cmd:literal $($t:tt)*) => {
+        #[allow(unused_braces)]
+        std::process::Command::new($cmd)
+            $(.arg(cmd!(@ $t)))*
+    };
+    ($cmd:block $($t:tt)*) => {
+        #[allow(unused_braces)]
+        std::process::Command::new(cmd!(@ $cmd))
+            $(.arg(cmd!(@ $t)))*
+    };
+    (?$cmd:tt $($t:tt)*) => {{
         use itertools::Itertools;
         #[allow(unused_braces)]
         let cmd_str = [Box::new($cmd) as Box<dyn std::fmt::Display>, $(Box::new(cmd!(@ $t))),*].iter().join(" ");

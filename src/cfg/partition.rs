@@ -277,11 +277,9 @@ impl PartitionLayout {
 			// Some stupid hackery checks for the args of mkfs.fat
 			debug!(fsname, "Formatting partition");
 			if fsname == "efi" {
-				trace!("mkfs.fat -F32 {devname}");
-				cmd_lib::run_cmd!(mkfs.fat -F32 $devname 2>&1)?;
+				cmd!(? "mkfs.fat" "-F32" devname)?;
 			} else {
-				trace!("mkfs.{fsname} {devname}");
-				cmd_lib::run_cmd!(mkfs.$fsname $devname 2>&1)?;
+				cmd!(? {format!("mkfs.{fsname}")} devname)?;
 			}
 
 			Result::<_>::Ok((i + 1, last_end))
@@ -357,9 +355,9 @@ pub fn partition_name(disk: &str, partition: usize) -> String {
 /// An ISO9660 partition for an ISO9660 image
 #[derive(Clone, Debug)]
 pub struct Iso9660Partition {
-    pub partno: usize,
-    /// UUID for partition type
-    pub guid: PartitionType,
+	pub partno: usize,
+	/// UUID for partition type
+	pub guid: PartitionType,
 }
 
 /// A partition table for an ISO9660 image
@@ -369,10 +367,9 @@ pub struct Iso9660Table {}
 /// A wrapper around xorriso
 #[derive(Debug, Clone)]
 pub struct Xorriso {
-    /// Implant MD5 checksums?
-    /// default: true
-    pub md5: bool,
-    /// Boot catalog
-    pub boot_catalog: Option<PathBuf>,
-    
+	/// Implant MD5 checksums?
+	/// default: true
+	pub md5: bool,
+	/// Boot catalog
+	pub boot_catalog: Option<PathBuf>,
 }
