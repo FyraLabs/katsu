@@ -4,7 +4,6 @@ const fn _default_true() -> bool {
 	true
 }
 
-
 /// Image default users configuration
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct Auth {

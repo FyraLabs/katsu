@@ -17,14 +17,14 @@
 #![allow(clippy::implicit_return)]
 #![allow(clippy::blanket_clippy_restriction_lints)]
 #![allow(clippy::pattern_type_mismatch)]
+#![allow(clippy::equatable_if_let)]
 
 mod builder;
 pub mod cfg;
-mod config;
 mod util;
 
 use clap::{value_parser, Parser};
-use color_eyre::{Result, Section};
+use color_eyre::{Report, Result, Section};
 use serde_derive::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::trace;
@@ -107,18 +107,17 @@ fn main() -> color_eyre::Result<()> {
 
 	let cli = KatsuCli::parse();
 
-	let mut manifest = match cli.config.extension().and_then(|s| s.to_str()) {
-		Some("yml" | "yaml") => return Err(color_eyre::eyre::eyre!("Katsu {} does not accept yaml/yml files.", env!("CARGO_PKG_VERSION")).note("Katsu v0.7 supports yaml/yml files. You should downgrade Katsu.").suggestion("You can also port your old Katsu configs into the new HCL format. Please see documentations for more details.")),
-		Some("hcl") => todo!(),
-		Some(ext) => {
-			tracing::warn!(cfg=?cli.config, ?ext, "Unknown file extension for config file; trying to parse as HCL");
-			cfg::manifest::Manifest::load(&cli.config)?
-		},
-		None => {
-			tracing::warn!(cfg=?cli.config, "Config file does not have any file extensions; trying to parse as HCL");
-			cfg::manifest::Manifest::load(&cli.config)?
-		},
+	match cli.config.extension().and_then(|s| s.to_str()) {
+		Some("yml" | "yaml") => return Err(
+			Report::msg(const_format::formatcp!("Katsu {} does not accept yaml/yml files anymore.", env!("CARGO_PKG_VERSION")))
+				.note("Katsu v0.7 supports yaml/yml files. You should downgrade Katsu.")
+				.suggestion("You can also port your old Katsu configs into the new HCL format. Please see documentations for more details.")
+		),
+		Some("hcl") => tracing::info!(cfg=?cli.config, "Loading HCL config file"),
+		Some(ext) => tracing::warn!(cfg=?cli.config, ?ext, "Unknown file extension for config file; trying to parse as HCL"),
+		None => tracing::warn!(cfg=?cli.config, "Config file does not have any file extensions; trying to parse as HCL"),
 	};
+	let mut manifest = cfg::manifest::Manifest::load(&cli.config)?;
 
 	// check for overrides
 

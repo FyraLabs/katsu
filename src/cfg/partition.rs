@@ -1,4 +1,11 @@
+use bytesize::ByteSize;
+use color_eyre::Result;
 use serde::{Deserialize, Serialize};
+use std::{
+	collections::BTreeMap,
+	path::{Path, PathBuf},
+};
+use tracing::{debug, info, trace};
 
 /// Represents GPT partition attrbite flags which can be used, from https://uapi-group.org/specifications/specs/discoverable_partitions_specification/#partition-attribute-flags.
 #[derive(Deserialize, Debug, Clone, Serialize, PartialEq, Eq)]
@@ -13,6 +20,19 @@ pub enum PartitionFlag {
 	/// An arbitrary GPT attribute flag position, 0 - 63
 	#[serde(untagged)]
 	FlagPosition(u8),
+}
+impl PartitionFlag {
+	/// Get the position offset for this flag
+	fn flag_position(&self) -> u8 {
+		// https://uapi-group.org/specifications/specs/discoverable_partitions_specification/#partition-attribute-flags
+		match &self {
+			PartitionFlag::NoAuto => 63,
+			PartitionFlag::ReadOnly => 60,
+			PartitionFlag::GrowFs => 59,
+			PartitionFlag::FlagPosition(position @ 0..=63) => *position,
+			_ => unimplemented!(),
+		}
+	}
 }
 
 /// Represents GPT partition types which can be used, a subset of https://uapi-group.org/specifications/specs/discoverable_partitions_specification.
@@ -98,4 +118,239 @@ pub struct Partition {
 pub struct PartitionLayout {
 	pub size: Option<bytesize::ByteSize>,
 	pub partitions: Vec<Partition>,
+}
+impl PartitionLayout {
+	/// Generate fstab entries for the partitions
+	pub fn fstab(&self, chroot: &Path) -> Result<String> {
+		// sort partitions by mountpoint
+		let ordered = self.sort_partitions();
+
+		crate::prepend_comment!(PREPEND: "/etc/fstab", "static file system information.", katsu::config::PartitionLayout::fstab);
+
+		let mut entries = vec![];
+
+		ordered.iter().try_for_each(|(_, part)| -> Result<()> {
+			let mp = PathBuf::from(&part.mountpoint).to_string_lossy().to_string();
+			let mountpoint_chroot = part.mountpoint.trim_start_matches('/');
+			let mountpoint_chroot = chroot.join(mountpoint_chroot);
+			let devname = cmd_lib::run_fun!(findmnt -n -o SOURCE $mountpoint_chroot)?;
+
+			// We will generate by UUID
+			let uuid = cmd_lib::run_fun!(blkid -s UUID -o value $devname)?;
+
+			// clean the mountpoint so we don't have the slash at the start
+			// let mp_cleaned = part.mountpoint.trim_start_matches('/');
+
+			let fsname = if part.filesystem == "efi" { "vfat" } else { &part.filesystem };
+			let fsck = if part.filesystem == "efi" { 0 } else { 2 };
+
+			entries.push(TplFstabEntry { uuid, mp, fsname, fsck });
+			Ok(())
+		})?;
+
+		tracing::trace!(?entries, "fstab entries generated");
+
+		Ok(crate::tpl!("../../templates/fstab.tera" => { PREPEND, entries }))
+	}
+	pub fn sort_partitions(&self) -> Vec<(usize, Partition)> {
+		// We should sort partitions by mountpoint, so that we can mount them in order
+		// In this case, from the least nested to the most nested, so count the number of slashes
+
+		// sort by least nested to most nested
+
+		// However, also keep the original order of the partitions from the manifest
+
+		// the key is the original index of the partition so we can get the right devname from its index
+
+		let mut ordered = BTreeMap::new();
+
+		for part in &self.partitions {
+			let index = self.get_index(&part.mountpoint).unwrap();
+			ordered.insert(index, part.clone());
+
+			tracing::trace!(?index, ?part, "Index and partition");
+		}
+
+		// now sort by mountpoint, least nested to most nested by counting the number of slashes
+		// but make an exception if it's just /, then it's 0
+
+		// if it has the same number of slashes, sort by alphabetical order
+
+		let mut ordered = ordered.into_iter().collect::<Vec<_>>();
+
+		ordered.sort_unstable_by(|(_, a), (_, b)| {
+			// trim trailing slashes
+			let am = a.mountpoint.trim_end_matches('/').matches('/').count();
+			let bm = b.mountpoint.trim_end_matches('/').matches('/').count();
+			if a.mountpoint == "/" {
+				// / should always come first
+				std::cmp::Ordering::Less
+			} else if b.mountpoint == "/" {
+				// / should always come first
+				std::cmp::Ordering::Greater
+			} else if am == bm {
+				// alphabetical order
+				a.mountpoint.cmp(&b.mountpoint)
+			} else {
+				am.cmp(&bm)
+			}
+		});
+		ordered
+	}
+
+	fn get_index(&self, mountpoint: &str) -> Option<usize> {
+		// index should be +1 of the actual partition number (sda1 is index 0)
+		self.partitions.iter().position(|p| p.mountpoint == mountpoint).map(|i| i + 1)
+	}
+
+	pub fn apply(&self, disk: &PathBuf, target_arch: &str) -> Result<()> {
+		// This is a destructive operation, so we need to make sure we don't accidentally wipe the wrong disk
+
+		info!("Applying partition layout to disk: {disk:#?}");
+
+		// format disk with GPT
+
+		trace!("Formatting disk with GPT");
+		trace!("parted -s {disk:?} mklabel gpt");
+		cmd_lib::run_cmd!(parted -s $disk mklabel gpt 2>&1)?;
+
+		// create partitions
+		self.partitions.iter().try_fold((1, 0), |(i, mut last_end), part| {
+			let devname = partition_name(&disk.to_string_lossy(), i);
+			trace!(devname, "Creating partition {i}: {part:#?}");
+
+			let span = tracing::trace_span!("partition", devname);
+			let _enter = span.enter();
+
+			let start_string = if i == 1 {
+				// create partition at start of disk
+				"1MiB".to_string()
+			} else {
+				// create partition after last partition
+				ByteSize::b(last_end).to_string_as(true).replace(' ', "")
+			};
+
+			let end_string = part.size.map_or("100%".to_string(), |size| {
+				// create partition with size
+				last_end += size.as_u64();
+
+				// remove space for partition table
+				ByteSize::b(last_end).to_string_as(true).replace(' ', "")
+			});
+
+			// TODO: primary/extended/logical is a MBR concept, since we're using GPT, we should be using this field to set the label
+			// not going to change this for now though, but will revisit
+			debug!(start = start_string, end = end_string, "Creating partition");
+			trace!("parted -s {disk:?} mkpart primary fat32 {start_string} {end_string}");
+			cmd_lib::run_cmd!(parted -s $disk mkpart primary fat32 $start_string $end_string 2>&1)?;
+
+			let part_type_uuid = part.partition_type.uuid(target_arch);
+
+			debug!("Setting partition type");
+			trace!("parted -s {disk:?} type {i} {part_type_uuid}");
+			cmd_lib::run_cmd!(parted -s $disk type $i $part_type_uuid 2>&1)?;
+
+			if let Some(flags) = &part.flags {
+				debug!("Setting partition attribute flags");
+
+				for flag in flags {
+					let position = flag.flag_position();
+					trace!("sgdisk -A {i}:set:{position} {disk:?}");
+					cmd_lib::run_cmd!(sgdisk -A $i:set:$position $disk 2>&1)?;
+				}
+			}
+
+			if part.filesystem == "efi" {
+				debug!("Setting esp on for efi partition");
+				trace!("parted -s {disk:?} set {i} esp on");
+				cmd_lib::run_cmd!(parted -s $disk set $i esp on 2>&1)?;
+			}
+
+			if let Some(label) = &part.label {
+				debug!(label, "Setting label");
+				trace!("parted -s {disk:?} name {i} {label}");
+				cmd_lib::run_cmd!(parted -s $disk name $i $label 2>&1)?;
+			}
+
+			trace!("Refreshing partition tables");
+			let _ = cmd_lib::run_cmd!(partprobe); // comes with parted supposedly
+
+			// time to format the filesystem
+			let fsname = &part.filesystem;
+			// Some stupid hackery checks for the args of mkfs.fat
+			debug!(fsname, "Formatting partition");
+			if fsname == "efi" {
+				trace!("mkfs.fat -F32 {devname}");
+				cmd_lib::run_cmd!(mkfs.fat -F32 $devname 2>&1)?;
+			} else {
+				trace!("mkfs.{fsname} {devname}");
+				cmd_lib::run_cmd!(mkfs.$fsname $devname 2>&1)?;
+			}
+
+			Result::<_>::Ok((i + 1, last_end))
+		})?;
+
+		Ok(())
+	}
+
+	pub fn mount_to_chroot(&self, disk: &Path, chroot: &Path) -> Result<()> {
+		// mount partitions to chroot
+
+		// sort partitions by mountpoint
+		let ordered: Vec<_> = self.sort_partitions();
+
+		// Ok, so for some reason the partitions are swapped?
+		for (index, part) in &ordered {
+			let devname = partition_name(&disk.to_string_lossy(), *index);
+
+			// clean the mountpoint so we don't have the slash at the start
+			let mp_cleaned = part.mountpoint.trim_start_matches('/');
+			let mountpoint = chroot.join(mp_cleaned);
+
+			std::fs::create_dir_all(&mountpoint)?;
+
+			trace!("mount {devname} {mountpoint:?}");
+
+			cmd_lib::run_cmd!(mount $devname $mountpoint 2>&1)?;
+		}
+
+		Ok(())
+	}
+
+	pub fn unmount_from_chroot(&self, chroot: &Path) -> Result<()> {
+		// unmount partitions from chroot
+		// sort partitions by mountpoint
+		for mp in self.sort_partitions().into_iter().rev().map(|(_, p)| p.mountpoint) {
+			let mp = chroot.join(mp.trim_start_matches('/'));
+			trace!("umount {mp:?}");
+			cmd_lib::run_cmd!(umount $mp 2>&1)?;
+		}
+		Ok(())
+	}
+}
+
+#[derive(Serialize, Debug)]
+struct TplFstabEntry<'a> {
+	uuid: String,
+	mp: String,
+	fsname: &'a str,
+	fsck: u8,
+}
+
+/// Utility function for determining partition /dev names
+/// For cases where it's a mmcblk, or nvme, or loop device etc
+pub fn partition_name(disk: &str, partition: usize) -> String {
+	format!(
+		"{disk}{}{partition}",
+		if disk.starts_with("/dev/mmcblk")
+			|| disk.starts_with("/dev/nvme")
+			|| disk.starts_with("/dev/loop")
+		{
+			// mmcblk0p1 / nvme0n1p1 / loop0p1
+			"p"
+		} else {
+			// sda1
+			""
+		}
+	)
 }

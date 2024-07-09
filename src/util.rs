@@ -132,7 +132,7 @@ macro_rules! tpl {
 		$(
 			ctx.insert(stringify!($name), &$crate::tpl!(@match $name$(: $var)?));
 		)*
-		let out = tera.render_str(include_str!(concat!("../templates/", $tmpl)), &ctx)?;
+		let out = tera.render_str(include_str!($tmpl), &ctx)?;
 		tracing::trace!(out, path = $tmpl, "tpl!() Template output");
 		$(
 			tracing::debug!(tmpl=?$tmpl, outfile=?$out, "Writing template output to file");
