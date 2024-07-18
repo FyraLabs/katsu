@@ -118,12 +118,12 @@ impl RootBuilder for DnfRootBuilder {
 		info!("Initializing system with dnf");
 		tiffin::Container::new(chroot.to_owned()).run(||{
 		    let res = cmd!({dnf} "install" "-y" ["--releasever={releasever}"] ["--installroot={chroot:?}"] [[&packages]] [[&options]]).status()?;
-						res.success().then(|| cmd!(? {dnf} "clean" "all" ["--installroot={chroot:?}"])).transpose().and_then(|x| x.ok_or_eyre({
-									eyre!("Unknown error while running dracut")
-										.wrap_err(res)
-										.note(format!("packages: {packages:?}"))
-										.note(format!("options: {options:?}"))
-								}))
+			res.success().then(|| cmd!(? {dnf} "clean" "all" ["--installroot={chroot:?}"])).transpose().and_then(|x| x.ok_or_else(|| {
+				eyre!("Unknown error while running dracut")
+					.wrap_err(res)
+					.note(format!("packages: {packages:?}"))
+					.note(format!("options: {options:?}"))
+			}))
 		})??;
 
 		info!("Setting up users");
@@ -397,8 +397,7 @@ impl IsoBuilder {
 	}
 	#[allow(dead_code)]
 	pub fn erofs(&self, chroot: &Path, image: &Path) -> Result<()> {
-		cmd_lib::run_cmd!(mkfs.erofs -d $chroot -o $image)?;
-		Ok(())
+		cmd!(? "mkfs.erofs" "-d" {{chroot.display()}} "-o" {{image.display()}})
 	}
 	// TODO: add mac support
 	pub fn xorriso(&self, chroot: &Path, image: &Path, manifest: &Manifest) -> Result<()> {
@@ -431,36 +430,44 @@ impl IsoBuilder {
 			};
 
 			// todo: move to partition::Xorriso and Iso9660Table
-			cmd_lib::run_cmd!(xorrisofs -R -V $volid
-					$[arch_args]
-					-partition_offset 16
-					-appended_part_as_gpt
-					-append_partition 2 C12A7328-F81F-11D2-BA4B-00A0C93EC93B $efiboot
-					-iso_mbr_part_type EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
-					-c boot.cat
-					--boot-catalog-hide
-					-b $bios_bin
-					-no-emul-boot
-					-boot-load-size 4
-					-boot-info-table
-					--grub2-boot-info
-					-eltorito-alt-boot
-					-e --interval:appended_partition_2:all::
-					-no-emul-boot
-					-vvvvv
-					// implant MD5 checksums
-					--md5
-					// -isohybrid-gpt-basdat
-					// -b grub2_mbr=$grub2_mbr_hybrid
-					$tree -o $image 2>&1)?;
+			let res = cmd!("xorrisofs" "-R" "-V" volid
+				[[&arch_args]]
+				"-partition_offset" "16"
+				"-appended_part_as_gpt"
+				"-append_partition" "2" "C12A7328-F81F-11D2-BA4B-00A0C93EC93B" {{efiboot.display()}}
+				"-iso_mbr_part_type" "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
+				"-c" "boot.cat"
+				"--boot-catalog-hide"
+				"-b" bios_bin
+				"-no-emul-boot"
+				"-boot-load-size" "4"
+				"-boot-info-table"
+				"--grub2-boot-info"
+				"-eltorito-alt-boot"
+				"-e" "--interval:appended_partition_2:all::"
+				"-no-emul-boot"
+				"-vvvvv"
+				// implant MD5 checksums
+				"--md5"
+				// -isohybrid-gpt-basdat
+				// -b grub2_mbr=$grub2_mbr_hybrid
+				{{tree.display()}} "-o" {{image.display()}}
+			)
+			.status()?;
+			res.success().then_some(()).ok_or_else(|| {
+				eyre!("Unknown error while running mksquashfs")
+					.wrap_err(res)
+					.note(format!("arch_args: {arch_args:?}"))
+					.note(format!("efiboot: {efiboot:?}"))
+					.note(format!("biosbin: {bios_bin}"))
+			})?;
 		} else {
-			debug!("xorriso -as mkisofs --efi-boot {uefi_bin} -b {bios_bin} -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot {uefi_bin} -efi-boot-part --efi-boot-image --protective-msdos-label {root} -volid KATSU-LIVEOS -o {image}", root = tree.display(), image = image.display());
-			cmd_lib::run_cmd!(xorriso -as mkisofs -R --efi-boot $uefi_bin -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $uefi_bin -efi-boot-part --efi-boot-image --protective-msdos-label $tree -volid $volid -o $image 2>&1)?;
+			cmd!(?"xorriso" "-as" "mkisofs" "-R" "--efi-boot" uefi_bin "-b" bios_bin "-no-emul-boot" "-boot-load-size" "4" "-boot-info-table" "--efi-boot" uefi_bin "-efi-boot-part" "--efi-boot-image" "--protective-msdos-label" {{tree.display()}} "-volid" volid "-o" {{image.display()}})?;
 		}
 
 		// implant MD5 checksums
 		info!("Implanting MD5 checksums into ISO");
-		cmd_lib::run_cmd!(implantisomd5 --force --supported-iso $image)?;
+		cmd!(? "implantisomd5" "--force" "--supported-iso" {{image.display()}})?;
 		Ok(())
 	}
 }
