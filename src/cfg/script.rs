@@ -25,8 +25,8 @@ const fn script_default_priority() -> i32 {
 pub struct Script {
 	pub id: Option<String>,
 	pub name: Option<String>,
-	pub file: Option<std::path::PathBuf>,
-	pub inline: Option<String>,
+	// pub file: Option<std::path::PathBuf>,
+	pub source: Option<String>,
 	pub chroot: bool,
 	#[serde(default)]
 	pub needs: Vec<String>,
@@ -37,15 +37,7 @@ pub struct Script {
 
 impl Default for Script {
 	fn default() -> Self {
-		Self {
-			id: None,
-			name: None,
-			file: None,
-			inline: None,
-			chroot: true,
-			needs: Vec::new(),
-			priority: 50,
-		}
+		Self { id: None, name: None, source: None, chroot: true, needs: Vec::new(), priority: 50 }
 	}
 }
 
@@ -56,15 +48,16 @@ fn tmpfile_script(name: &str) -> std::io::Result<tempfile::NamedTempFile> {
 impl Script {
 	#[must_use]
 	pub fn load(&self) -> Option<String> {
-		if self.inline.is_some() {
-			self.inline.clone()
-		} else if let Some(f) = &self.file {
-			std::fs::read_to_string(f.canonicalize().unwrap_or_default()).ok()
-		} else {
-			self.file
-				.as_ref()
-				.and_then(|f| std::fs::read_to_string(f.canonicalize().unwrap_or_default()).ok())
-		}
+		self.source.clone()
+		// if self.inline.is_some() {
+		// 	self.inline.clone()
+		// } else if let Some(f) = &self.file {
+		// 	std::fs::read_to_string(f.canonicalize().unwrap_or_default()).ok()
+		// } else {
+		// 	self.file
+		// 		.as_ref()
+		// 		.and_then(|f| std::fs::read_to_string(f.canonicalize().unwrap_or_default()).ok())
+		// }
 	}
 
 	fn shebang_if_needed(&self) -> Option<String> {
@@ -74,8 +67,7 @@ impl Script {
 	fn get_id(&self) -> String {
 		self.id.clone().unwrap_or_else(|| {
 			let mut hasher = std::hash::DefaultHasher::new();
-			self.file.hash(&mut hasher);
-			self.inline.hash(&mut hasher);
+			self.source.hash(&mut hasher);
 			hasher.finish().to_string()
 		})
 	}

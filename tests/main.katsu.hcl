@@ -279,7 +279,7 @@ output "iso" "xfce" {
         }
     }
     copy {
-        source = outputs.squashfs.xfce.output_file // evaluated from fs.katsu.hcl
+        source = output.squashfs.xfce.output_file // evaluated from fs.katsu.hcl
         destination = "content:/LiveOS/xfce.iso" // somehow evaluate from context of current scope from partition_layout?
     }
 }

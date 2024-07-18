@@ -4,29 +4,40 @@ use tracing::{debug, error};
 
 #[macro_export]
 macro_rules! cmd {
-    (@ [$expr:literal $($arg:expr),*]) => { format!($expr, $($arg),*) };
-    (@ {{$expr:expr}}) => { format!("{}", $expr) };
-    (@ $expr:expr) => { &$expr };
-    (@ $expr:literal) => { $expr };
+    (@ $cmd:ident [[$expr:expr]]) => { $cmd.args($expr); };
+    (@ $cmd:ident $tt:tt) => { $cmd.arg(cmd!(# $tt)); };
+    (# [$expr:literal $($arg:expr),*]) => { format!($expr, $($arg),*) };
+    (# {{$expr:expr}}) => { format!("{}", $expr) };
+    (# $expr:expr) => { &$expr };
+    (# $expr:literal) => { $expr };
+
     (stdout $cmd:literal $($t:tt)+) => {{
         #[allow(unused_braces)]
         let cmd = cmd!($cmd $($t)+).output()?;
         String::from_utf8_lossy(&cmd.stdout).to_string()
     }};
-    ($cmd:literal $($t:tt)*) => {
+    ($cmd:literal $($t:tt)*) => {{
         #[allow(unused_braces)]
-        std::process::Command::new($cmd)
-            $(.arg(cmd!(@ $t)))*
-    };
-    ($cmd:block $($t:tt)*) => {
+        let mut cmd = std::process::Command::new($cmd);
+        $(
+            // #[allow(unused_braces)]
+            cmd!(@ cmd $t);
+        )*
+        cmd
+    }};
+    ($cmd:block $($t:tt)*) => {{
         #[allow(unused_braces)]
-        std::process::Command::new(cmd!(@ $cmd))
-            $(.arg(cmd!(@ $t)))*
-    };
+        let mut cmd = std::process::Command::new(cmd!(# $cmd));
+        $(
+            // #[allow(unused_braces)]
+            cmd!(@ cmd $t);
+        )*
+        cmd
+    }};
     (?$cmd:tt $($t:tt)*) => {{
         use itertools::Itertools;
         #[allow(unused_braces)]
-        let cmd_str = [Box::new($cmd) as Box<dyn std::fmt::Display>, $(Box::new(cmd!(@ $t))),*].iter().join(" ");
+        let cmd_str = [Box::new($cmd) as Box<dyn std::fmt::Display>, $(Box::new(cmd!(# $t))),*].iter().join(" ");
         tracing::trace!("Running command: `{cmd_str}`");
         #[allow(unused_braces)]
         let status = cmd!($cmd $($t)*).status()?;
@@ -54,6 +65,9 @@ macro_rules! cmd {
 macro_rules! env_flag {
 	($envar:literal) => {
 		std::env::var($envar).ok()
+	};
+	($envar:ident) => {
+		std::env::var(stringify!($envar)).unwrap_or($envar.to_owned())
 	};
 }
 

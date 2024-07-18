@@ -36,7 +36,37 @@ pub struct Auth {
 }
 
 impl Auth {
-	pub fn add_to_chroot(&self, chroot: &std::path::Path) -> color_eyre::Result<()> {
-		todo!()
+	/// Converts the Auth struct into a shadowdb entry (/etc/shadow).
+	///
+	/// May be useful when one wants to write shadowdb manually
+	/// instead of imperatively writing commands
+	pub fn to_shadow(&self) -> String {
+		let mut shadow = format!(
+			"{}:{}:{}:{}::::::",
+			self.username,
+			self.password.as_deref().unwrap_or(""),
+			self.uid.unwrap_or(0),
+			self.gid.unwrap_or(0),
+		);
+		shadow.truncate(1024);
+		shadow
+	}
+
+	pub fn add_user(&self) -> Result<(), std::io::Error> {
+		let mut cmd = std::process::Command::new("useradd");
+		cmd.arg(&self.username);
+		if let Some(shell) = &self.shell {
+			cmd.arg("-s").arg(shell);
+		}
+		if let Some(uid) = &self.uid {
+			cmd.arg("-u").arg(uid.to_string());
+		}
+		if let Some(gid) = &self.gid {
+			cmd.arg("-g").arg(gid.to_string());
+		}
+		if self.create_home {
+			cmd.arg("-m");
+		}
+		cmd.output().map(|_| ())
 	}
 }

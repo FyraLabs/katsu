@@ -5,12 +5,16 @@ use crate::{
 		manifest::{BuilderType, Manifest},
 		script::Script,
 	},
-	env_flag,
+	cmd, env_flag,
 	util::{just_write, loopdev_with_file},
 	OutputFormat, SkipPhases,
 };
-use color_eyre::{eyre::bail, Result};
+use color_eyre::{
+	eyre::{bail, eyre, OptionExt},
+	Result, Section,
+};
 use indexmap::IndexMap;
+use lazy_format::lazy_format as lzf;
 use serde_derive::{Deserialize, Serialize};
 use std::{
 	collections::BTreeMap,
@@ -112,10 +116,15 @@ impl RootBuilder for DnfRootBuilder {
 		options.append(&mut exclude.iter().map(|p| format!("--exclude={p}")).collect());
 
 		info!("Initializing system with dnf");
-		crate::chroot_run_cmd!(&chroot,
-			$dnf install -y --releasever=$releasever --installroot=$chroot $[packages] $[options] 2>&1;
-			$dnf clean all --installroot=$chroot;
-		)?;
+		tiffin::Container::new(chroot.to_owned()).run(||{
+		    let res = cmd!({dnf} "install" "-y" ["--releasever={releasever}"] ["--installroot={chroot:?}"] [[&packages]] [[&options]]).status()?;
+						res.success().then(|| cmd!(? {dnf} "clean" "all" ["--installroot={chroot:?}"])).transpose().and_then(|x| x.ok_or_eyre({
+									eyre!("Unknown error while running dracut")
+										.wrap_err(res)
+										.note(format!("packages: {packages:?}"))
+										.note(format!("options: {options:?}"))
+								}))
+		})??;
 
 		info!("Setting up users");
 
@@ -277,9 +286,10 @@ pub struct IsoBuilder {
 	pub root_builder: Box<dyn RootBuilder>,
 }
 
-const DR_MODS: &str = "livenet dmsquash-live dmsquash-live-ntfs convertfs pollcdrom qemu qemu-net";
-const DR_OMIT: &str = "";
-const DR_ARGS: &str = "--xz --no-early-microcode";
+const KATSU_DRACUT_MODS: &str =
+	"livenet dmsquash-live dmsquash-live-ntfs convertfs pollcdrom qemu qemu-net";
+const KATSU_DRACUT_OMIT: &str = "";
+const KATSU_DRACUT_ARGS: &str = "--xz --no-early-microcode";
 
 impl IsoBuilder {
 	fn dracut(&self, root: &Path) -> Result<()> {
@@ -308,19 +318,18 @@ impl IsoBuilder {
 		// this is kind of a hack, but uhh it works maybe
 		// todo: make this properly configurable without envvars
 
-		let dr_mods = env_flag!("KATSU_DRACUT_MODS").unwrap_or(DR_MODS.to_string());
-		let dr_omit = env_flag!("KATSU_DRACUT_OMIT").unwrap_or(DR_OMIT.to_string());
+		let dr_mods = env_flag!(KATSU_DRACUT_MODS);
+		let dr_omit = env_flag!(KATSU_DRACUT_OMIT);
 
-		let dr_extra_args = env_flag!("KATSU_DRACUT_ARGS").unwrap_or_default();
-		let binding = env_flag!("KATSU_DRACUT_ARGS").unwrap_or(DR_ARGS.to_string());
-		let dr_basic_args = binding.split(' ').collect::<Vec<_>>();
+		let dr_extra_args = env_flag!(KATSU_DRACUT_ARGS);
+		let dr_basic_args = env_flag!(KATSU_DRACUT_ARGS);
 
 		// combine them all into one string
 
-		let dr_args2 = vec!["--nomdadmconf", "--nolvmconf", "-fN", "-a", &dr_mods, &dr_extra_args];
+		let dr_args2 = vec!["--nomdadmconf", "--nolvmconf", "-fN", "-a", &dr_mods];
 		let mut dr_args = vec![];
 
-		dr_args.extend(dr_basic_args);
+		dr_args.extend(dr_basic_args.split(' '));
 
 		dr_args.extend(dr_args2);
 		if !dr_omit.is_empty() {
@@ -328,13 +337,22 @@ impl IsoBuilder {
 			dr_args.push(&dr_omit);
 		}
 
-		crate::chroot_run_cmd!(root,
-			unshare -R $root env - DRACUT_SYSTEMD=0 dracut $[dr_args]
-			/boot/initramfs-$kver.img --kver $kver 2>&1;
-		)?;
-		Ok(())
+		let initramfs = format!("/boot/initramfs-{kver}.img");
+		dr_args.extend([&initramfs, "--kver", &kver]);
+
+		let res = tiffin::Container::new(root.to_owned()).run(|| {
+			let mut cmd =
+				cmd!("unshare" "-R" {{root.display()}} "env" "-" "DRACUT_SYSTEMD=0" "dracut" [[&dr_args]]);
+			cmd.status()
+		})??;
+		res.success().then_some(()).ok_or_else(|| {
+			eyre!("Unknown error while running dracut")
+				.wrap_err(res)
+				.note(format!("Note: dr_args={dr_args:?}"))
+		})
 	}
 
+	#[tracing::instrument(skip(self))]
 	pub fn squashfs(&self, chroot: &Path, image: &Path) -> Result<()> {
 		// Extra configurable options, for now we use envars
 		// todo: document these
@@ -359,18 +377,23 @@ impl IsoBuilder {
 		let sqfs_extra_args = binding.split(' ').collect::<Vec<_>>();
 
 		info!("Squashing file system (mksquashfs)");
-		cmd_lib::run_cmd!(
-			mksquashfs $chroot $image $[sqfs_comp_args] -b 1048576 -noappend
-			-e /dev/
-			-e /proc/
-			-e /sys/
-			-p "/dev 755 0 0"
-			-p "/proc 755 0 0"
-			-p "/sys 755 0 0"
-			$[sqfs_extra_args]
-		)?;
-
-		Ok(())
+		let res = cmd!(
+			"mksquashfs" {{chroot.display()}} {{image.display()}} [[&sqfs_comp_args]] "-b" "1048576" "-noappend"
+			"-e" "/dev/"
+			"-e" "/proc/"
+			"-e" "/sys/"
+			"-p" "/dev 755 0 0"
+			"-p" "/proc 755 0 0"
+			"-p" "/sys 755 0 0"
+			[[&sqfs_extra_args]]
+		)
+		.status()?;
+		res.success().then_some(()).ok_or_else(|| {
+			eyre!("Unknown error while running mksquashfs")
+				.wrap_err(res)
+				.note(format!("sqfs_comp_args: {sqfs_comp_args:?}"))
+				.note(format!("sqfs_extra_args: {sqfs_extra_args:?}"))
+		})
 	}
 	#[allow(dead_code)]
 	pub fn erofs(&self, chroot: &Path, image: &Path) -> Result<()> {

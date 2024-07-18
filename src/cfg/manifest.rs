@@ -1,6 +1,9 @@
-use std::path::Path;
+use std::{fmt::Debug, path::Path};
 
+use bytesize::ByteSize;
 use serde::{Deserialize, Serialize};
+
+use super::{partition::PartitionType, script::Script};
 
 const DEFAULT_VOLID: &str = "KATSU-LIVEOS";
 
@@ -22,6 +25,11 @@ pub enum BuilderType {
 	Dnf,
 }
 
+pub trait BootstrapOption: Debug {
+	fn bootstrap_system(&self) -> color_eyre::Result<()>;
+}
+
+// todo: rewrite everything
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct Manifest {
 	/// Builder type
@@ -72,4 +80,81 @@ impl Manifest {
 	pub fn load(path: &Path) -> color_eyre::Result<Self> {
 		Ok(hcl::de::from_body(ensan::parse(std::fs::read_to_string(path)?)?)?)
 	}
+
+	/// Evaluate expressions into a JSON object
+	pub fn to_json(&self) -> serde_json::Value {
+		serde_json::to_value(self).unwrap()
+	}
+}
+
+/// Variable types used for validation in `[Var]`
+#[derive(Deserialize, Debug, Clone, Serialize)]
+pub enum VarType {
+	String,
+	Int,
+	Object,
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+pub struct Var {
+	#[serde(rename = "type")]
+	pub var_type: VarType,
+	pub default: Option<hcl::Value>,
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+pub enum BootstrapMethod {
+	Oci,
+	Tar,
+	Dir,
+	Squashfs,
+	Dnf,
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+pub struct PartitionLayout {
+	pub partition: Vec<Partition>,
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+pub struct Partition {
+	pub size: ByteSize,
+	pub mountpoint: String,
+	pub filesystem: String,
+	#[serde(rename = "type")]
+	pub partition_type: PartitionType,
+	pub copy_blocks: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+pub struct CopyFiles {
+	pub source: String,
+	pub destination: String,
+}
+
+/// A Katsu output
+///
+/// Represented by a HCL block `output`
+///
+/// ```hcl
+/// output "type" "id" {}
+/// ```
+// todo: evaluate dep graph for outputs, so we can build them in the correct order
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type")]
+// an output can be a filesystem, a container image, or a disk image.
+// It can also rely on other outputs for bootstrapping.
+pub struct Output {
+	pub id: String,
+	/// Method to bootstrap the output filesystem
+	pub bootstrap_method: BootstrapMethod,
+	/// Copy files from the host to the output tree before packing
+	pub copy: Vec<CopyFiles>,
+	/// Scripts to run before and after the build
+	pub script: Vec<Script>,
+
+	// bootstrapping options
+	// todo: make this some kind of enum? or a vec of generic options?
+	// Box<dyn BootstrapOption> or something...
+	pub bootstrap: Box<dyn BootstrapOption>,
 }
