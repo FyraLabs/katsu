@@ -1,6 +1,6 @@
 use color_eyre::Result;
 use std::{fs::File, path::Path};
-use tracing::{debug, error};
+use tracing::debug;
 
 #[macro_export]
 macro_rules! cmd {
@@ -235,110 +235,6 @@ pub fn exec(cmd: &str, args: &[&str], pipe: bool) -> color_eyre::Result<Vec<u8>>
 	} else {
 		Err(eyre!("Command returned code: {}", out.status.code().unwrap_or_default()))
 	}
-}
-
-const MNTS: &[(&str, &str, Option<&str>, nix::mount::MsFlags); 4] = &[
-	("/proc", "proc", Some("proc"), nix::mount::MsFlags::empty()),
-	("/sys", "sys", Some("sysfs"), nix::mount::MsFlags::empty()),
-	("/dev", "dev", None, nix::mount::MsFlags::MS_BIND),
-	("/dev/pts", "dev/pts", None, nix::mount::MsFlags::MS_BIND),
-];
-
-/// Prepare chroot by mounting /dev, /proc, /sys
-pub fn prepare_chroot(root: &Path) -> Result<()> {
-	debug!("Preparing chroot");
-
-	// cmd_lib::run_cmd! (
-	// 	mkdir -p $root/proc;
-	// 	mount -t proc proc $root/proc;
-	// 	mkdir -p $root/sys;
-	// 	mount -t sysfs sys $root/sys;
-	// 	mkdir -p $root/dev;
-	// 	mount -o bind /dev $root/dev;
-	// 	mkdir -p $root/dev/pts;
-	// 	mount -o bind /dev $root/dev/pts;
-	// 	sh -c "mv $root/etc/resolv.conf $root/etc/resolv.conf.bak || true";
-	// 	cp /etc/resolv.conf $root/etc/resolv.conf;
-	// )?;
-	// rewrite the above with
-
-	for (src, target, fstype, flags) in MNTS {
-		let target = root.join(target);
-		std::fs::create_dir_all(&target)?;
-		debug!("Mounting {src:?} to {target:?}");
-		let mut i = 0;
-		loop {
-			if nix::mount::mount(Some(*src), &target, *fstype, *flags, None::<&str>).is_ok() {
-				break;
-			}
-			i += 1;
-			error!("Failed to mount {target:?}, {i} tries out of 10");
-			// wait 500ms
-			std::thread::sleep(std::time::Duration::from_millis(500));
-			if i > 10 {
-				break;
-			}
-		}
-	}
-
-	std::fs::create_dir_all(root.join("etc"))?;
-	std::fs::copy("/etc/resolv.conf", root.join("etc/resolv.conf"))?;
-
-	Ok(())
-}
-
-/// Unmount /dev, /proc, /sys
-pub fn unmount_chroot(root: &Path) -> Result<()> {
-	debug!("Unmounting chroot");
-	// cmd_lib::run_cmd! (
-	// 	umount $root/dev/pts;
-	// 	umount $root/dev;
-	// 	umount $root/sys;
-	// 	umount $root/proc;
-	// 	sh -c "mv $root/etc/resolv.conf.bak $root/etc/resolv.conf || true";
-	// )?;
-	// loop until all unmounts are successful
-
-	let mounts = vec![root.join("dev/pts"), root.join("dev"), root.join("sys"), root.join("proc")];
-
-	for mount in mounts {
-		let mut i = 0;
-
-		loop {
-			// combine mntflags: MNT_FORCE | MNT_DETACH
-			if nix::mount::umount2(
-				&mount.canonicalize()?,
-				nix::mount::MntFlags::MNT_FORCE.union(nix::mount::MntFlags::MNT_DETACH),
-			)
-			.is_ok()
-			{
-				break;
-			}
-			i += 1;
-			error!("Failed to unmount {mount:?}, {i} tries out of 10");
-			// wait 500ms
-			std::thread::sleep(std::time::Duration::from_millis(500));
-			if i > 10 {
-				break;
-			}
-		}
-	}
-
-	// nix::mount::umount2(&root.join("dev/pts"), nix::mount::MntFlags::MNT_FORCE)?;
-	// let umount = nix::mount::umount2(&root.join("dev"), nix::mount::MntFlags::MNT_FORCE);
-
-	// nix::mount::umount2(&root.join("sys"), nix::mount::MntFlags::MNT_FORCE)?;
-	// nix::mount::umount2(&root.join("proc"), nix::mount::MntFlags::MNT_FORCE)?;
-	Ok(())
-}
-/// Mount chroot devices, then run function
-///
-/// NOTE: This function requires that the function inside returns a result, so we can catch errors and unmount early
-pub fn run_with_chroot<T>(root: &Path, f: impl FnOnce() -> Result<T>) -> Result<T> {
-	prepare_chroot(root)?;
-	let res = f();
-	unmount_chroot(root)?;
-	res
 }
 
 /// Create an empty sparse file with given size

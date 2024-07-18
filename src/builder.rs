@@ -320,7 +320,6 @@ impl IsoBuilder {
 		let dr_mods = env_flag!(KATSU_DRACUT_MODS);
 		let dr_omit = env_flag!(KATSU_DRACUT_OMIT);
 
-		let dr_extra_args = env_flag!(KATSU_DRACUT_ARGS);
 		let dr_basic_args = env_flag!(KATSU_DRACUT_ARGS);
 
 		// combine them all into one string
