@@ -52,7 +52,7 @@ impl Auth {
 		shadow
 	}
 
-	pub fn add_user(&self) -> Result<(), std::io::Error> {
+	pub fn add_user(&self) -> std::io::Result<()> {
 		let mut cmd = std::process::Command::new("useradd");
 		cmd.arg(&self.username);
 		if let Some(shell) = &self.shell {
@@ -68,5 +68,11 @@ impl Auth {
 			cmd.arg("-m");
 		}
 		cmd.output().map(|_| ())
+	}
+
+	#[tracing::instrument]
+	pub fn add_to_chroot(&self, chroot: &std::path::Path) -> std::io::Result<()> {
+		tracing::debug!("Adding user to chroot");
+		tiffin::Container::new(chroot.to_owned()).run(|| self.add_user()).and_then(|r| r)
 	}
 }
