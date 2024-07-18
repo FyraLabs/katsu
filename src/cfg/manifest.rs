@@ -25,9 +25,24 @@ pub enum BuilderType {
 	Dnf,
 }
 
-pub trait BootstrapOption: Debug {
+pub trait BootstrapOption: Debug + dyn_clone::DynClone {
 	fn bootstrap_system(&self) -> color_eyre::Result<()>;
 }
+
+mod bootstrap_option_serde {
+	use super::*;
+
+	pub fn serialize<'se, S>(
+		bootstrap_option: &Box<dyn BootstrapOption>, serializer: S,
+	) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		todo!()
+	}
+}
+
+dyn_clone::clone_trait_object!(BootstrapOption);
 
 // todo: rewrite everything
 #[derive(Deserialize, Debug, Clone, Serialize)]
@@ -156,5 +171,6 @@ pub struct Output {
 	// bootstrapping options
 	// todo: make this some kind of enum? or a vec of generic options?
 	// Box<dyn BootstrapOption> or something...
+	#[serde(with = "bootstrap_option_serde")]
 	pub bootstrap: Box<dyn BootstrapOption>,
 }
