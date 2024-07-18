@@ -306,9 +306,7 @@ impl PartitionLayout {
 
 			std::fs::create_dir_all(&mountpoint)?;
 
-			trace!("mount {devname} {mountpoint:?}");
-
-			cmd_lib::run_cmd!(mount $devname $mountpoint 2>&1)?;
+			cmd!(?"mount" devname {{mountpoint.display()}})?;
 		}
 
 		Ok(())
@@ -319,8 +317,7 @@ impl PartitionLayout {
 		// sort partitions by mountpoint
 		for mp in self.sort_partitions().into_iter().rev().map(|(_, p)| p.mountpoint) {
 			let mp = chroot.join(mp.trim_start_matches('/'));
-			trace!("umount {mp:?}");
-			cmd_lib::run_cmd!(umount $mp 2>&1)?;
+			cmd!(? "umount" {{mp.display()}})?;
 		}
 		Ok(())
 	}

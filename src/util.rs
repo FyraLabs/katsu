@@ -237,47 +237,6 @@ pub fn exec(cmd: &str, args: &[&str], pipe: bool) -> color_eyre::Result<Vec<u8>>
 	}
 }
 
-// ? https://stackoverflow.com/questions/45125516/possible-values-for-uname-m
-#[derive(Default)]
-pub enum Arch {
-	X86,
-	X86_64,
-	ArmV7l,  // armv7l
-	AArch64, // aarch64
-	#[default]
-	Nyani, // にゃんに？？ｗ
-}
-
-impl Arch {
-	pub fn get() -> color_eyre::Result<Self> {
-		Ok(Self::from(&*cmd_lib::run_fun!(uname -m;)?))
-	}
-}
-
-impl From<&str> for Arch {
-	fn from(value: &str) -> Self {
-		match value {
-			"i386" => Self::X86,
-			"x86_64" => Self::X86_64,
-			"armv7l" => Self::ArmV7l,
-			"aarch64" => Self::AArch64,
-			_ => Self::Nyani,
-		}
-	}
-}
-
-impl From<Arch> for &str {
-	fn from(value: Arch) -> &'static str {
-		match value {
-			Arch::X86 => "i386",
-			Arch::X86_64 => "x86_64",
-			Arch::ArmV7l => "armv7l",
-			Arch::AArch64 => "aarch64",
-			_ => panic!("Unknown architecture"),
-		}
-	}
-}
-
 const MNTS: &[(&str, &str, Option<&str>, nix::mount::MsFlags); 4] = &[
 	("/proc", "proc", Some("proc"), nix::mount::MsFlags::empty()),
 	("/sys", "sys", Some("sysfs"), nix::mount::MsFlags::empty()),
