@@ -97,7 +97,7 @@ impl Script {
 		{
 			let f = tmpfile.as_file_mut();
 			f.write_all(script.as_bytes())?;
-		}
+		};
 		let mut cmd = Command::new(tmpfile.path());
 		if let Some(chroot) = chroot {
 			cmd.env("CHROOT", chroot);

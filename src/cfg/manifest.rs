@@ -30,7 +30,7 @@ pub trait BootstrapOption: Debug + dyn_clone::DynClone {
 }
 
 mod bootstrap_option_serde {
-	use super::*;
+	use super::BootstrapOption;
 
 	pub fn serialize<'se, S>(
 		bootstrap_option: &Box<dyn BootstrapOption>, serializer: S,
@@ -97,6 +97,7 @@ impl Manifest {
 	}
 
 	/// Evaluate expressions into a JSON object
+	#[must_use]
 	pub fn to_json(&self) -> serde_json::Value {
 		serde_json::to_value(self).unwrap()
 	}

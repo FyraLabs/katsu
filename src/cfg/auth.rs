@@ -40,6 +40,7 @@ impl Auth {
 	///
 	/// May be useful when one wants to write shadowdb manually
 	/// instead of imperatively writing commands
+	#[must_use]
 	pub fn to_shadow(&self) -> String {
 		let mut shadow = format!(
 			"{}:{}:{}:{}::::::",

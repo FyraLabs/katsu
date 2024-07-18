@@ -6,15 +6,14 @@ use crate::{
 		script::Script,
 	},
 	cmd, env_flag,
-	util::{just_write, loopdev_with_file},
+	util::loopdev_with_file,
 	OutputFormat, SkipPhases,
 };
 use color_eyre::{
-	eyre::{bail, eyre, OptionExt},
+	eyre::{bail, eyre},
 	Result, Section,
 };
 use indexmap::IndexMap;
-use lazy_format::lazy_format as lzf;
 use serde_derive::{Deserialize, Serialize};
 use std::{
 	collections::BTreeMap,
@@ -116,7 +115,7 @@ impl RootBuilder for DnfRootBuilder {
 		options.append(&mut exclude.iter().map(|p| format!("--exclude={p}")).collect());
 
 		info!("Initializing system with dnf");
-		tiffin::Container::new(chroot.to_owned()).run(||{
+		tiffin::Container::new(chroot.clone()).run(||{
 		    let res = cmd!({dnf} "install" "-y" ["--releasever={releasever}"] ["--installroot={chroot:?}"] [[&packages]] [[&options]]).status()?;
 			res.success().then(|| cmd!(? {dnf} "clean" "all" ["--installroot={chroot:?}"])).transpose().and_then(|x| x.ok_or_else(|| {
 				eyre!("Unknown error while running dracut")
@@ -410,7 +409,7 @@ impl IsoBuilder {
 		let grub2_mbr_hybrid = chroot.join("usr/lib/grub/i386-pc/boot_hybrid.img");
 		let efiboot = tree.join("boot/efiboot.img");
 
-		if let Bootloader::Grub = self.bootloader {
+		if matches!(self.bootloader, Bootloader::Grub) {
 			// cmd_lib::run_cmd!(grub2-mkrescue -o $image $tree -volid $volid 2>&1)?;
 			// todo: normal xorriso command does not work for some reason, errors out with some GPT partition shenanigans
 			// todo: maybe we need to replicate mkefiboot? (see lorax/efiboot)
