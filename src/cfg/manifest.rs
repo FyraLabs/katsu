@@ -8,7 +8,7 @@ use super::{partition::PartitionType, script::Script};
 const DEFAULT_VOLID: &str = "KATSU-LIVEOS";
 
 fn _default_volid() -> String {
-	DEFAULT_VOLID.to_string()
+	DEFAULT_VOLID.to_owned()
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize)]

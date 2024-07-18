@@ -53,6 +53,10 @@ impl Auth {
 		shadow
 	}
 
+	/// Run command (`useradd`).
+	///
+	/// # Errors
+	/// - happens if the `useradd` command fails.
 	pub fn add_user(&self) -> std::io::Result<()> {
 		let mut cmd = std::process::Command::new("useradd");
 		cmd.arg(&self.username);

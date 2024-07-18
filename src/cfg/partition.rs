@@ -1,3 +1,4 @@
+#![allow(clippy::module_name_repetitions)]
 use bytesize::ByteSize;
 use color_eyre::Result;
 use serde::{Deserialize, Serialize};
@@ -9,7 +10,7 @@ use tracing::{debug, info, trace};
 
 use crate::cmd;
 
-/// Represents GPT partition attrbite flags which can be used, from https://uapi-group.org/specifications/specs/discoverable_partitions_specification/#partition-attribute-flags.
+/// Represents GPT partition attrbite flags which can be used, from `https://uapi-group.org/specifications/specs/discoverable_partitions_specification/#partition-attribute-flags`.
 #[derive(Deserialize, Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum PartitionFlag {
@@ -32,12 +33,12 @@ impl PartitionFlag {
 			Self::ReadOnly => 60,
 			Self::GrowFs => 59,
 			Self::FlagPosition(position @ 0..=63) => *position,
-			_ => unimplemented!(),
+			Self::FlagPosition(_) => unreachable!(),
 		}
 	}
 }
 
-/// Represents GPT partition types which can be used, a subset of https://uapi-group.org/specifications/specs/discoverable_partitions_specification.
+/// Represents GPT partition types which can be used, a subset of `https://uapi-group.org/specifications/specs/discoverable_partitions_specification`.
 /// If the partition type you need isn't in the enum, please file an issue and use the GUID variant.
 /// This is not the filesystem which is formatted on the partition.
 #[derive(Deserialize, Debug, Clone, Serialize, PartialEq, Eq)]
@@ -72,7 +73,7 @@ impl PartitionType {
 				return match target_arch {
 					"x86_64" => Self::RootX86_64.uuid(target_arch),
 					"aarch64" => Self::RootArm64.uuid(target_arch),
-					_ => unimplemented!(),
+					_ => unreachable!(),
 				}
 			},
 			Self::RootArm64 => "b921b045-1df0-41c3-af44-4c6f280d3fae",
@@ -83,7 +84,7 @@ impl PartitionType {
 			Self::LinuxGeneric => "0fc63daf-8483-4772-8e79-3d69d8477de4",
 			Self::Guid(guid) => return guid.to_string(),
 		}
-		.to_string()
+		.to_owned()
 	}
 }
 
@@ -123,6 +124,10 @@ pub struct PartitionLayout {
 }
 impl PartitionLayout {
 	/// Generate fstab entries for the partitions
+	///
+	/// # Errors
+	/// - cannot run `blkid` or `findmnt`
+	/// - templating issues ([`tera`])
 	pub fn fstab(&self, chroot: &Path) -> Result<String> {
 		// sort partitions by mountpoint
 		let ordered = self.sort_partitions();
@@ -359,7 +364,7 @@ pub struct Iso9660Partition {
 
 /// A partition table for an ISO9660 image
 #[derive(Clone, Debug)]
-pub struct Iso9660Table {}
+pub struct Iso9660Table;
 
 /// A wrapper around xorriso
 #[derive(Debug, Clone)]
