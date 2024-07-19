@@ -95,12 +95,6 @@ impl Manifest {
 	pub fn load(path: &Path) -> color_eyre::Result<Self> {
 		Ok(hcl::de::from_body(ensan::parse(std::fs::read_to_string(path)?)?)?)
 	}
-
-	/// Evaluate expressions into a JSON object
-	#[must_use]
-	pub fn to_json(&self) -> serde_json::Value {
-		serde_json::to_value(self).unwrap()
-	}
 }
 
 /// Variable types used for validation in `[Var]`
