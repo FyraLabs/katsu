@@ -1,11 +1,9 @@
 #![allow(clippy::module_name_repetitions)]
 use bytesize::ByteSize;
 use color_eyre::Result;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use std::{
-	collections::BTreeMap,
-	path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 use tracing::{debug, info, trace};
 
 use crate::cmd;
@@ -130,13 +128,13 @@ impl PartitionLayout {
 	/// - templating issues ([`tera`])
 	pub fn fstab(&self, chroot: &Path) -> Result<String> {
 		// sort partitions by mountpoint
-		let ordered = self.sort_partitions();
+		let mut ordered = self.sort_partitions();
 
 		crate::prepend_comment!(PREPEND: "/etc/fstab", "static file system information.", katsu::config::PartitionLayout::fstab);
 
 		let mut entries = vec![];
 
-		ordered.iter().try_for_each(|(_, part)| -> Result<()> {
+		ordered.try_for_each(|(_, part)| -> Result<()> {
 			let mp = PathBuf::from(&part.mountpoint).to_string_lossy().to_string();
 			let mountpoint_chroot = part.mountpoint.trim_start_matches('/');
 			let mountpoint_chroot = chroot.join(mountpoint_chroot);
@@ -159,7 +157,7 @@ impl PartitionLayout {
 
 		Ok(crate::tpl!("../../templates/fstab.tera" => { PREPEND, entries }))
 	}
-	pub fn sort_partitions(&self) -> Vec<(usize, Partition)> {
+	fn sort_partitions(&self) -> impl DoubleEndedIterator<Item = (usize, &Partition)> {
 		// We should sort partitions by mountpoint, so that we can mount them in order
 		// In this case, from the least nested to the most nested, so count the number of slashes
 
@@ -169,45 +167,19 @@ impl PartitionLayout {
 
 		// the key is the original index of the partition so we can get the right devname from its index
 
-		let mut ordered = BTreeMap::new();
-
-		for part in &self.partitions {
-			let index = self.get_index(&part.mountpoint).unwrap();
-			ordered.insert(index, part.clone());
-
-			tracing::trace!(?index, ?part, "Index and partition");
-		}
-
-		// now sort by mountpoint, least nested to most nested by counting the number of slashes
-		// but make an exception if it's just /, then it's 0
-
-		// if it has the same number of slashes, sort by alphabetical order
-
-		let mut ordered = ordered.into_iter().collect::<Vec<_>>();
-
-		ordered.sort_unstable_by(|(_, a), (_, b)| {
-			// trim trailing slashes
-			let am = a.mountpoint.trim_end_matches('/').matches('/').count();
-			let bm = b.mountpoint.trim_end_matches('/').matches('/').count();
-			if a.mountpoint == "/" {
-				// / should always come first
-				std::cmp::Ordering::Less
-			} else if b.mountpoint == "/" {
-				// / should always come first
-				std::cmp::Ordering::Greater
-			} else if am == bm {
-				// alphabetical order
-				a.mountpoint.cmp(&b.mountpoint)
-			} else {
-				am.cmp(&bm)
+		let parts = self.partitions.iter().enumerate().map(|(i, p)| (i.wrapping_add(1), p));
+		parts.clone().for_each(|(i, part)| () = tracing::trace!(?i, ?part, "Index and partition"));
+		parts.sorted_unstable_by(|(_, a), (_, b)| {
+			match (
+				a.mountpoint.chars().filter(|&c| c == '/').count(),
+				a.mountpoint.chars().filter(|&c| c == '/').count(),
+			) {
+				(1, _) => std::cmp::Ordering::Less,    // root dir
+				(_, 1) => std::cmp::Ordering::Greater, // root dir
+				(x, y) if x == y => a.mountpoint.cmp(&b.mountpoint),
+				(x, y) => x.cmp(&y),
 			}
-		});
-		ordered
-	}
-
-	fn get_index(&self, mountpoint: &str) -> Option<usize> {
-		// index should be +1 of the actual partition number (sda1 is index 0)
-		self.partitions.iter().position(|p| p.mountpoint == mountpoint).map(|i| i + 1)
+		})
 	}
 
 	#[deprecated(note = "Switch to systemd-repart")]
@@ -231,13 +203,13 @@ impl PartitionLayout {
 
 			let start_string = if i == 1 {
 				// create partition at start of disk
-				"1MiB".to_string()
+				"1MiB".to_owned()
 			} else {
 				// create partition after last partition
 				ByteSize::b(last_end).to_string_as(true).replace(' ', "")
 			};
 
-			let end_string = part.size.map_or("100%".to_string(), |size| {
+			let end_string = part.size.map_or("100%".to_owned(), |size| {
 				// create partition with size
 				last_end += size.as_u64();
 
@@ -275,7 +247,7 @@ impl PartitionLayout {
 			}
 
 			trace!("Refreshing partition tables");
-			let _ = cmd!(? "partprobe"); // comes with parted supposedly
+			_ = cmd!(? "partprobe"); // comes with parted supposedly
 
 			// time to format the filesystem
 			let fsname = &part.filesystem;
@@ -287,7 +259,7 @@ impl PartitionLayout {
 				cmd!(? {format!("mkfs.{fsname}")} devname)?;
 			}
 
-			Result::<_>::Ok((i + 1, last_end))
+			Result::<_>::Ok((i.wrapping_add(1), last_end))
 		})?;
 
 		Ok(())
@@ -299,7 +271,7 @@ impl PartitionLayout {
 		// mount partitions to chroot
 
 		// sort partitions by mountpoint
-		let ordered: Vec<_> = self.sort_partitions();
+		let ordered = self.sort_partitions().collect_vec();
 
 		// Ok, so for some reason the partitions are swapped?
 		for (index, part) in &ordered {
@@ -320,7 +292,7 @@ impl PartitionLayout {
 	pub fn unmount_from_chroot(&self, chroot: &Path) -> Result<()> {
 		// unmount partitions from chroot
 		// sort partitions by mountpoint
-		for mp in self.sort_partitions().into_iter().rev().map(|(_, p)| p.mountpoint) {
+		for mp in self.sort_partitions().rev().map(|(_, p)| &p.mountpoint) {
 			let mp = chroot.join(mp.trim_start_matches('/'));
 			cmd!(? "umount" {{mp.display()}})?;
 		}

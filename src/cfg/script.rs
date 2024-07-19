@@ -41,6 +41,8 @@ impl Default for Script {
 	}
 }
 
+/// # Errors
+/// - cannot create tempfile
 fn tmpfile_script(name: &str) -> std::io::Result<tempfile::NamedTempFile> {
 	tempfile::Builder::new().prefix("katsu-script").suffix(name).tempfile()
 }
@@ -81,7 +83,7 @@ impl Script {
 		let tmpfile_name = format!("katsu-script-{}", self.get_id());
 		if self.chroot {
 			tracing::trace!("chrooting to {:?}", container.root);
-			container.run(|| Self::_write_and_execute(&tmpfile_name, &script, None))?;
+			container.run(|| Self::_write_and_execute(&tmpfile_name, &script, None))??;
 		} else {
 			Self::_write_and_execute(&tmpfile_name, &script, Some(&container.root))?;
 		}

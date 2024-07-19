@@ -71,66 +71,6 @@ macro_rules! env_flag {
 	};
 }
 
-/// Macro that wraps around `cmd_lib::run_cmd`!, but runs it in a chroot
-///
-/// First argument is the chroot path, the following arguments are the command and arguments
-///
-/// Example:
-/// ```rs
-/// chroot_run!(PathBuf::from("/path/to/chroot"), "dnf", "install", "-y", "vim");
-/// ```
-///
-/// Uses run! but `unshare -R` prepended with first argument
-#[macro_export]
-macro_rules! chroot_run {
-	($chroot:expr, $n:expr $(, $arr:expr)* $(,)?) => {{
-		chroot_run!($chroot, $n; [$($arr,)*])
-	}};
-	($chroot:expr, $n:expr; $arr:expr) => {{
-		$crate::util::run_with_chroot(&std::path::PathBuf::from($chroot), || {
-			$crate::run!($n; $arr)?;
-			Ok(())
-		})
-	}};
-	(~$chroot:expr, $n:expr $(, $arr:expr)* $(,)?) => {{
-		chroot_run!(~$chroot, $n; [$($arr,)*])
-	}};
-	(~$chroot:expr, $n:expr; $arr:expr) => {{
-		$crate::util::run_with_chroot(&std::path::PathBuf::from($chroot), || {
-			$crate::run!(~$n; $arr)?;
-			Ok(())
-		})
-	}};
-}
-
-/// Wraps around `cmd_lib::run_cmd`!, but mounts the chroot
-/// Example:
-///
-/// ```rs
-/// chroot_run!(PathBuf::from("/path/to/chroot"), chroot /path/to/chroot echo "hello world" > /hello.txt);
-/// ```
-#[macro_export]
-macro_rules! chroot_run_cmd {
-	($chroot:expr, $($cmd:tt)*) => {{
-		$crate::util::run_with_chroot(&PathBuf::from($chroot), || {
-			tracing::debug!("Running command: {}", stringify!($($cmd)*) );
-			cmd_lib::run_cmd!($($cmd)*)?;
-			Ok(())
-		})
-	}};
-}
-
-/// Runs in chroot, returns stdout
-#[macro_export]
-macro_rules! chroot_run_fun {
-	($chroot:expr, $($cmd:tt)*) => {{
-		$crate::util::run_with_chroot(&PathBuf::from($chroot), || {
-			cmd_lib::run_fun!($($cmd)*)?;
-			Ok(())
-		})
-	}};
-}
-
 /// Perform the let statement, else bail out with specified error message
 #[macro_export]
 macro_rules! bail_let {
@@ -208,6 +148,7 @@ macro_rules! gen_phase {
 
 #[tracing::instrument]
 pub fn exec(cmd: &str, args: &[&str], pipe: bool) -> color_eyre::Result<Vec<u8>> {
+	use color_eyre::{eyre::eyre, Help, SectionExt};
 	tracing::debug!("Executing command");
 	let out = std::process::Command::new(cmd)
 		.args(args)
@@ -225,25 +166,27 @@ pub fn exec(cmd: &str, args: &[&str], pipe: bool) -> color_eyre::Result<Vec<u8>>
 			Ok(vec![])
 		};
 	}
-	use color_eyre::{eyre::eyre, Help, SectionExt};
 	if pipe {
 		let stdout = String::from_utf8_lossy(&out.stdout);
 		let stderr = String::from_utf8_lossy(&out.stderr);
 		Err(eyre!("Command returned code: {}", out.status.code().unwrap_or_default()))
-			.with_section(move || stdout.trim().to_string().header("Stdout:"))
-			.with_section(move || stderr.trim().to_string().header("Stderr:"))
+			.with_section(move || stdout.trim().to_owned().header("Stdout:"))
+			.with_section(move || stderr.trim().to_owned().header("Stderr:"))
 	} else {
 		Err(eyre!("Command returned code: {}", out.status.code().unwrap_or_default()))
 	}
 }
 
 /// Create an empty sparse file with given size
+///
+/// # Errors
+/// - IO-errors
 pub fn create_sparse(path: &Path, size: u64) -> Result<File> {
 	use std::io::{Seek, SeekFrom, Write};
 	debug!(?path, size, "Creating sparse file");
 	let mut f = File::create(path)?;
 	// We seek to size - 1, since we write a null byte at the end
-	f.seek(SeekFrom::Start(size - 1))?;
+	f.seek(SeekFrom::Start(size.saturating_sub(1)))?;
 	f.write_all(&[0])?;
 	Ok(f)
 }
@@ -266,12 +209,17 @@ pub fn loopdev_with_file(path: &Path) -> Result<(std::path::PathBuf, LoopDevHdl)
 	Ok((ldp, LoopDevHdl(loopdev)))
 }
 
-pub fn just_write(path: impl AsRef<Path>, content: impl AsRef<str>) -> Result<()> {
+/// Write content into `path`, also creating its parent dirs
+///
+/// # Errors
+/// - `path` is not a file
+/// - IO-errors
+pub fn just_write<S: AsRef<str>, P: AsRef<Path>>(path: P, content: S) -> Result<()> {
 	use std::io::Write;
 	let (path, content) = (path.as_ref(), content.as_ref());
 	tracing::trace!(?path, content, "Writing content to file");
 	crate::bail_let!(Some(parent) = path.parent() => "Invalid file path");
-	let _ = std::fs::create_dir_all(parent);
+	_ = std::fs::create_dir_all(parent);
 	File::create(path)?.write_all(content.as_bytes())?;
 	Ok(())
 }

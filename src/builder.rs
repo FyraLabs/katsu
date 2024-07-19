@@ -1,3 +1,4 @@
+#![allow(clippy::module_name_repetitions)]
 use crate::{
 	bail_let,
 	cfg::{
@@ -23,10 +24,9 @@ use std::{
 use tracing::{debug, info, trace, warn};
 
 const WORKDIR: &str = "katsu-work";
-crate::prepend_comment!(GRUB_PREPEND_COMMENT: "/boot/grub/grub.cfg", "Grub configurations", katsu::builder::Bootloader::cp_grub);
-crate::prepend_comment!(LIMINE_PREPEND_COMMENT: "/boot/limine.cfg", "Limine configurations", katsu::builder::Bootloader::cp_limine);
 
 pub trait RootBuilder {
+	#[allow(clippy::missing_errors_doc)]
 	fn build(&self, chroot: &Path, manifest: &Manifest) -> Result<()>;
 }
 
@@ -164,7 +164,7 @@ pub fn run_scripts(
 		}
 
 		// Find needs
-		let id = scr.id.clone().unwrap_or("<NULL>".into());
+		let id = scr.id.as_deref().unwrap_or("<NULL>").to_owned();
 		let mut needs = IndexMap::new();
 		let scr_needs_vec = &scr.needs.clone();
 		for need in scr_needs_vec {
@@ -191,6 +191,7 @@ pub fn run_scripts(
 }
 
 pub trait ImageBuilder {
+	#[allow(clippy::missing_errors_doc)]
 	fn build(
 		&self, chroot: &Path, image: &Path, manifest: &Manifest, skip_phases: &SkipPhases,
 	) -> Result<()>;
@@ -291,7 +292,12 @@ const KATSU_DRACUT_OMIT: &str = "";
 const KATSU_DRACUT_ARGS: &str = "--xz --no-early-microcode";
 
 impl IsoBuilder {
-	fn dracut(&self, root: &Path) -> Result<()> {
+	/// Install dracut.
+	///
+	/// # Errors
+	///
+	/// This function will return an error if `dracut` fails.
+	fn dracut(root: &Path) -> Result<()> {
 		info!(?root, "Generating initramfs");
 		bail_let!(
 			Some(kver) = fs::read_dir(root.join("boot"))?.find_map(|f| {
@@ -305,10 +311,7 @@ impl IsoBuilder {
 						return None;
 					}
 					debug!(?kver, "Kernel version");
-					Some(kver.to_string())
-					// Some(
-					// 	f.file_name().to_str()?.rsplit_once('/')?.1.strip_prefix("initramfs-")?.strip_suffix(".img")?.to_string()
-					// )
+					Some(kver.to_owned())
 				})
 			}) => "Can't find initramfs in /boot."
 		);
@@ -355,7 +358,7 @@ impl IsoBuilder {
 		// Extra configurable options, for now we use envars
 		// todo: document these
 
-		let sqfs_comp = env_flag!("KATSU_SQUASHFS_ARGS").unwrap_or_else(|| "zstd".to_string());
+		let sqfs_comp = env_flag!("KATSU_SQUASHFS_ARGS").unwrap_or_else(|| "zstd".to_owned());
 
 		info!("Determining squashfs options");
 
@@ -371,8 +374,8 @@ impl IsoBuilder {
 		.split(' ')
 		.collect::<Vec<_>>();
 
-		let binding = env_flag!("KATSU_SQUASHFS_ARGS").unwrap_or_default();
-		let sqfs_extra_args = binding.split(' ').collect::<Vec<_>>();
+		let sqfs_extra_args = env_flag!("KATSU_SQUASHFS_ARGS").unwrap_or_default();
+		let sqfs_extra_args = sqfs_extra_args.split(' ').collect::<Vec<_>>();
 
 		info!("Squashing file system (mksquashfs)");
 		let res = cmd!(
@@ -393,11 +396,20 @@ impl IsoBuilder {
 				.note(format!("sqfs_extra_args: {sqfs_extra_args:?}"))
 		})
 	}
+	/// # Errors
+	/// - fail to run `mkfs.erofs`
 	#[allow(dead_code)]
 	pub fn erofs(&self, chroot: &Path, image: &Path) -> Result<()> {
 		cmd!(? "mkfs.erofs" "-d" {{chroot.display()}} "-o" {{image.display()}})
 	}
+	/// # Errors
+	/// - fail to run `xorriso`
+	///
+	/// # Panics
+	/// - fail to parse `chroot` path (not UTF-8)
+	/// - `chroot` has no parent dir
 	// TODO: add mac support
+	#[allow(clippy::unwrap_in_result)]
 	pub fn xorriso(&self, chroot: &Path, image: &Path, manifest: &Manifest) -> Result<()> {
 		info!("Generating ISO image");
 		let volid = manifest.get_volid();
@@ -424,7 +436,7 @@ impl IsoBuilder {
 				// Hybrid mode is only supported on x86_64
 				"x86_64" => vec!["--grub2-mbr", grub2_mbr_hybrid.to_str().unwrap()],
 				"aarch64" => vec![],
-				_ => unimplemented!(),
+				_ => unreachable!(),
 			};
 
 			// todo: move to partition::Xorriso and Iso9660Table
@@ -473,6 +485,7 @@ impl IsoBuilder {
 const ISO_TREE: &str = "iso-tree";
 
 impl ImageBuilder for IsoBuilder {
+	#![allow(clippy::unwrap_in_result)]
 	fn build(
 		&self, chroot: &Path, _: &Path, manifest: &Manifest, skip_phases: &SkipPhases,
 	) -> Result<()> {
@@ -488,7 +501,7 @@ impl ImageBuilder for IsoBuilder {
 		phase!("root": self.root_builder.build(chroot, manifest));
 		// self.root_builder.build(chroot.canonicalize()?.as_path(), manifest)?;
 
-		phase!("dracut": self.dracut(chroot));
+		phase!("dracut": Self::dracut(chroot));
 
 		// temporarily store content of iso
 		let image_dir = workspace.join(ISO_TREE).join("LiveOS");
@@ -522,9 +535,7 @@ pub struct KatsuBuilder {
 }
 
 impl KatsuBuilder {
-	pub fn new(
-		manifest: Manifest, output_format: OutputFormat, skip_phases: SkipPhases,
-	) -> Result<Self> {
+	pub fn new(manifest: Manifest, output_format: OutputFormat, skip_phases: SkipPhases) -> Self {
 		let root_builder = manifest.builder.clone().into();
 
 		let bootloader = manifest.bootloader.clone();
@@ -544,9 +555,12 @@ impl KatsuBuilder {
 			_ => todo!(),
 		};
 
-		Ok(Self { image_builder, manifest, skip_phases })
+		Self { image_builder, manifest, skip_phases }
 	}
 
+	/// # Errors
+	/// - IO-errors
+	/// - `image_builder` failure
 	pub fn build(&self) -> Result<()> {
 		let workdir = PathBuf::from(WORKDIR);
 

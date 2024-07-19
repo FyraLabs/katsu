@@ -42,8 +42,7 @@ impl std::str::FromStr for OutputFormat {
 			"iso" => Ok(Self::Iso),
 			"disk-image" => Ok(Self::DiskImage),
 			"device" => Ok(Self::Device),
-			"folder" => Ok(Self::Folder),
-			"fs" => Ok(Self::Folder),
+			"folder" | "fs" => Ok(Self::Folder),
 			_ => Err(format!("{s} is not a valid output format")),
 		}
 	}
@@ -69,6 +68,15 @@ pub struct KatsuCli {
 	output_file: Option<PathBuf>,
 }
 
+/// # Panics
+/// - cannot set default subscriber
+/// - cannot escalate to sudo
+/// - cannot parse `output_file` (not utf-8)
+///
+/// # Errors
+/// - cannot install [`color_eyre`]
+/// - cannot read config file
+/// - etc.
 fn main() -> color_eyre::Result<()> {
 	if let Err(e) = dotenvy::dotenv() {
 		if !e.not_found() {
@@ -108,12 +116,13 @@ fn main() -> color_eyre::Result<()> {
 	}
 
 	if let Some(output_file) = cli.output_file {
-		manifest.out_file = Some(output_file.into_os_string().into_string().unwrap());
+		manifest.out_file =
+			Some(output_file.to_str().expect("Cannot convert output_file to string").to_owned());
 	}
 
 	trace!(?manifest, "Loaded manifest");
 
-	let builder = builder::KatsuBuilder::new(manifest, cli.output, cli.skip_phases)?;
+	let builder = builder::KatsuBuilder::new(manifest, cli.output, cli.skip_phases);
 
 	tracing::info!("Building image");
 	builder.build()?;
