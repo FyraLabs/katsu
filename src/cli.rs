@@ -85,7 +85,7 @@ impl std::str::FromStr for OutputFormat {
 pub fn parse(cli: KatsuCli) -> Result<()> {
 	// load manifest from config file
 
-	sudo::escalate_if_needed().unwrap();
+	sudo::with_env(&["KATSU_LOG"]).unwrap();
 
 	let mut manifest = Manifest::load_all(&cli.config.unwrap(), cli.output)?;
 
