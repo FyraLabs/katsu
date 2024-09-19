@@ -552,7 +552,7 @@ pub struct IsoBuilder {
 const DR_MODS: &str = "livenet dmsquash-live dmsquash-live-ntfs convertfs pollcdrom qemu qemu-net";
 const DR_OMIT: &str = "";
 const DR_ARGS: &str =
-	"--xz --no-early-microcode --strip --aggressive-strip --compress=zstd -20 -q -T0";
+	"--xz --no-early-microcode --strip --aggressive-strip --compress='zstd -22 -q -T0'";
 
 impl IsoBuilder {
 	fn dracut(&self, root: &Path) -> Result<()> {
