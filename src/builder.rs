@@ -551,8 +551,7 @@ pub struct IsoBuilder {
 
 const DR_MODS: &str = "livenet dmsquash-live dmsquash-live-ntfs convertfs pollcdrom qemu qemu-net";
 const DR_OMIT: &str = "";
-const DR_ARGS: &str =
-	"--xz --no-early-microcode --strip --aggressive-strip --compress='zstd -22 -q -T0'";
+const DR_ARGS: &str = "--xz --no-early-microcode --strip --aggressive-strip";
 
 impl IsoBuilder {
 	fn dracut(&self, root: &Path) -> Result<()> {
@@ -601,6 +600,9 @@ impl IsoBuilder {
 			dr_args.push(&dr_omit);
 		}
 
+		if std::env::var("INITRD_COMPRESS").is_err() {
+			std::env::set_var("INITRD_COMPRESS", "zstd --ultra -22 -q -T0");
+		}
 		crate::chroot_run_cmd!(root,
 			unshare -R $root env - DRACUT_SYSTEMD=0 dracut $[dr_args]
 			/boot/initramfs-$kver.img --kver $kver 2>&1;
