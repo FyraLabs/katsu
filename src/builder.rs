@@ -621,7 +621,7 @@ impl IsoBuilder {
 			"lzo" => "-comp lzo",
 			"lz4" => "-comp lz4 -Xhc",
 			"xz" => "-comp xz -Xbcj x86",
-			"zstd" => "-comp zstd -Xcompression-level 19",
+			"zstd" => "-comp zstd -Xcompression-level 22",
 			"lzma" => "-comp lzma",
 			_ => bail!("Unknown squashfs compression: {sqfs_comp}"),
 		}
