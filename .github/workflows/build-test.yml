@@ -76,6 +76,7 @@ jobs:
       - name: Run test
         run: |
           export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
           pushd tests/ng
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
@@ -120,12 +121,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build and install katsu
-        run: |
-          cargo install --path . --debug
+        run: cargo install --path . --debug
 
       - name: Run test
         run: |
           export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
           pushd tests/ng
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
@@ -161,8 +162,7 @@ jobs:
             dnf-
 
       - name: Install dependencies
-        run: |
-          dnf install -y $DNF_PKGS
+        run: dnf install -y $DNF_PKGS
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -170,12 +170,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build and install katsu
-        run: |
-          cargo install --path . --debug
+        run: cargo install --path . --debug
 
       - name: Run test
         run: |
           export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
           pushd tests/ng
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
@@ -211,8 +211,7 @@ jobs:
             dnf-
 
       - name: Install dependencies
-        run: |
-          dnf install -y $DNF_PKGS
+        run: dnf install -y $DNF_PKGS
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -220,12 +219,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build and install katsu
-        run: |
-          cargo install --path . --debug
+        run: cargo install --path . --debug
 
       - name: Run test
         run: |
           export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
           pushd tests/ng
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
@@ -261,8 +260,7 @@ jobs:
             dnf-
 
       - name: Install dependencies
-        run: |
-          dnf install -y $DNF_PKGS
+        run: dnf install -y $DNF_PKGS
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -270,12 +268,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build and install katsu
-        run: |
-          cargo install --path . --debug
+        run: cargo install --path . --debug
 
       - name: Run test
         run: |
           export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
           pushd tests/ng
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
