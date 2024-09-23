@@ -131,14 +131,13 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o disk-image katsu.yaml 2>&1
-          xz -z9 katsu-work/image/katsu.img -c > katsu-work/image/katsu.raw.xz
           popd
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
           name: image-x86_64
-          path: tests/ng/katsu-work/image/*.raw.xz
+          path: tests/ng/katsu-work/image/*.img
 
   iso-x86_64:
     runs-on: ubuntu-latest
@@ -180,14 +179,13 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o iso katsu-iso.yaml 2>&1
-          xz -z9 out.iso -c > katsu-work/image/katsu.iso.xz
           popd
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
           name: iso-x86_64
-          path: tests/ng/katsu-work/image/*.iso.xz
+          path: tests/ng/katsu-work/image/out.iso
 
   iso-limine-x86_64:
     runs-on: ubuntu-latest
@@ -229,14 +227,13 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o iso katsu-iso-limine.yaml 2>&1
-          xz -z9 out.iso -c > katsu-work/image/katsu.iso.xz
           popd
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
           name: iso-limine-x86_64
-          path: tests/ng/katsu-work/image/*.iso.xz
+          path: tests/ng/katsu-work/image/out.iso
 
   fs-test-x86_64:
     runs-on: ubuntu-latest
