@@ -81,14 +81,14 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o disk-image katsu-arm.yaml 2>&1
-          mv katsu-work/image/katsu.img katsu-work/image/katsu-arm.img
+          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu-arm.raw.zstd
           popd
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
           name: image-arm
-          path: tests/ng/katsu-work/image/*.img
+          path: tests/ng/katsu-work/image/*.raw.zstd
 
   image-x86_64:
     runs-on: ubuntu-latest
@@ -131,13 +131,14 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o disk-image katsu.yaml 2>&1
+          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu.raw.zstd
           popd
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
           name: image-x86_64
-          path: tests/ng/katsu-work/image/*.img
+          path: tests/ng/katsu-work/image/*.raw.zstd
 
   iso-x86_64:
     runs-on: ubuntu-latest
