@@ -76,18 +76,19 @@ jobs:
       - name: Run test
         run: |
           export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
           pushd tests/ng
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o disk-image katsu-arm.yaml 2>&1
-          xz -z9 katsu-work/image/katsu.img -c > katsu-work/image/katsu-arm.img.xz
+          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu-arm.raw.zstd
           popd
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
           name: image-arm
-          path: tests/ng/katsu-work/image/*.img.xz
+          path: tests/ng/katsu-work/image/*.raw.zstd
 
   image-x86_64:
     runs-on: ubuntu-latest
@@ -120,24 +121,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build and install katsu
-        run: |
-          cargo install --path . --debug
+        run: cargo install --path . --debug
 
       - name: Run test
         run: |
           export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
           pushd tests/ng
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o disk-image katsu.yaml 2>&1
-          xz -z9 katsu-work/image/katsu.img -c > katsu-work/image/katsu.raw.xz
+          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu.raw.zstd
           popd
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
           name: image-x86_64
-          path: tests/ng/katsu-work/image/*.raw.xz
+          path: tests/ng/katsu-work/image/*.raw.zstd
 
   iso-x86_64:
     runs-on: ubuntu-latest
@@ -161,8 +162,7 @@ jobs:
             dnf-
 
       - name: Install dependencies
-        run: |
-          dnf install -y $DNF_PKGS
+        run: dnf install -y $DNF_PKGS
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -170,24 +170,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build and install katsu
-        run: |
-          cargo install --path . --debug
+        run: cargo install --path . --debug
 
       - name: Run test
         run: |
           export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
           pushd tests/ng
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o iso katsu-iso.yaml 2>&1
-          xz -z9 out.iso -c > katsu-work/image/katsu.iso.xz
+          mv out.iso katsu-work/image/katsu.iso
           popd
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
           name: iso-x86_64
-          path: tests/ng/katsu-work/image/*.iso.xz
+          path: tests/ng/katsu-work/image/katsu.iso
 
   iso-limine-x86_64:
     runs-on: ubuntu-latest
@@ -211,8 +211,7 @@ jobs:
             dnf-
 
       - name: Install dependencies
-        run: |
-          dnf install -y $DNF_PKGS
+        run: dnf install -y $DNF_PKGS
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -220,24 +219,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build and install katsu
-        run: |
-          cargo install --path . --debug
+        run: cargo install --path . --debug
 
       - name: Run test
         run: |
           export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
           pushd tests/ng
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o iso katsu-iso-limine.yaml 2>&1
-          xz -z9 out.iso -c > katsu-work/image/katsu.iso.xz
+          mv out.iso katsu-work/image/katsu.iso
           popd
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
           name: iso-limine-x86_64
-          path: tests/ng/katsu-work/image/*.iso.xz
+          path: tests/ng/katsu-work/image/katsu.iso
 
   fs-test-x86_64:
     runs-on: ubuntu-latest
@@ -261,8 +260,7 @@ jobs:
             dnf-
 
       - name: Install dependencies
-        run: |
-          dnf install -y $DNF_PKGS
+        run: dnf install -y $DNF_PKGS
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -270,12 +268,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build and install katsu
-        run: |
-          cargo install --path . --debug
+        run: cargo install --path . --debug
 
       - name: Run test
         run: |
           export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
           pushd tests/ng
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env

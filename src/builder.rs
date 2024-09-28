@@ -460,6 +460,7 @@ pub trait ImageBuilder {
 	) -> Result<()>;
 }
 /// Creates a disk image, then installs to it
+#[allow(dead_code)]
 pub struct DiskImageBuilder {
 	pub image: PathBuf,
 	pub bootloader: Bootloader,
@@ -500,6 +501,7 @@ impl ImageBuilder for DiskImageBuilder {
 }
 
 /// Installs directly to a device
+#[allow(dead_code)]
 pub struct DeviceInstaller {
 	pub device: PathBuf,
 	pub bootloader: Bootloader,
@@ -518,6 +520,7 @@ impl ImageBuilder for DeviceInstaller {
 }
 
 /// Installs as a raw chroot
+#[allow(dead_code)]
 pub struct FsBuilder {
 	pub bootloader: Bootloader,
 	pub root_builder: Box<dyn RootBuilder>,
