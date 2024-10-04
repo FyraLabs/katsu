@@ -80,7 +80,6 @@ var "dnf_releasever" {
 
 // you should reference data from a submodule by doing module.data_name
 
-
 // in Rust code we can keep all of this in the heap, it's not a big deal
 // (Box<PkgList>) or something like that, Arc maybe?
 
@@ -156,8 +155,8 @@ output "disk" "xfce" {
         
         // import package lists from this
         package_lists = [
-            pkg_list.dnf.core,
-            pkg_list.dnf.xfce
+            // pkg_list.dnf.core,
+            // pkg_list.dnf.xfce
             // module.foo.pkg_list.dnf.bar
         ]
         
@@ -242,7 +241,7 @@ output "disk" "xfce" {
     // index will always be defined, so it will be used as a fallback if priority is not defined
     script {
         id = "grub"
-        source = file("./grub.cfg")
+        // source = file("./grub.cfg")
         priority = 10
     }
 }
@@ -279,7 +278,7 @@ output "iso" "xfce" {
         }
     }
     copy {
-        source = output.squashfs.xfce.output_file // evaluated from fs.katsu.hcl
+        // source = output.squashfs.xfce.output_file // evaluated from fs.katsu.hcl
         destination = "content:/LiveOS/xfce.iso" // somehow evaluate from context of current scope from partition_layout?
     }
 }

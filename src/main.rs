@@ -54,8 +54,8 @@ pub struct KatsuCli {
 	/// Config file location
 	config: PathBuf,
 
-	#[arg(short, long, value_parser = value_parser!(OutputFormat))]
-	output: OutputFormat,
+	// #[arg(short, long, value_parser = value_parser!(OutputFormat))]
+	// output: OutputFormat,
 	#[arg(short, long,env = "KATSU_SKIP_PHASES", value_parser = value_parser!(SkipPhases), default_value = "")]
 	skip_phases: SkipPhases,
 
@@ -122,10 +122,12 @@ fn main() -> color_eyre::Result<()> {
 
 	trace!(?manifest, "Loaded manifest");
 
-	let builder = builder::KatsuBuilder::new(manifest, cli.output, cli.skip_phases);
+	println!("Loaded manifest:\n{manifest:#?}");
 
-	tracing::info!("Building image");
-	builder.build()?;
+	// let builder = builder::KatsuBuilder::new(manifest, cli.output, cli.skip_phases);
+
+	// tracing::info!("Building image");
+	// builder.build()?;
 
 	Ok(())
 }

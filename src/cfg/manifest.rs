@@ -48,6 +48,7 @@ dyn_clone::clone_trait_object!(BootstrapOption);
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct Manifest {
 	/// Builder type
+	#[serde(default)]
 	pub builder: BuilderType,
 	/// The distro name for the build result
 	// entrypoint must have a distro name
@@ -83,6 +84,7 @@ pub struct Manifest {
 	#[serde(default)]
 	pub iso: Option<IsoConfig>,
 
+	#[serde(default)]
 	pub bootloader: super::boot::Bootloader,
 }
 
@@ -92,6 +94,10 @@ impl Manifest {
 		self.iso.as_ref().map_or(DEFAULT_VOLID, |iso| &iso.volume_id)
 	}
 	/// Load manifest from file
+	///
+	/// # Errors
+	///
+	/// This function will return an error if the file cannot be read or parsed.
 	pub fn load(path: &Path) -> color_eyre::Result<Self> {
 		Ok(hcl::de::from_body(ensan::parse(std::fs::read_to_string(path)?)?)?)
 	}
@@ -122,8 +128,10 @@ pub enum BootstrapMethod {
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type")]
 pub struct PartitionLayout {
-	pub partition: Vec<Partition>,
+	// pub partition: Vec<Partition>,
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
@@ -142,22 +150,24 @@ pub struct CopyFiles {
 	pub destination: String,
 }
 
-/// A Katsu output
+/// A Katsu target
 ///
-/// Represented by a HCL block `output`
+/// Represented by a HCL block `target`
 ///
 /// ```hcl
-/// output "type" "id" {}
+/// output "type" "id" {
+///     method = "oci"
+/// }
 /// ```
 // todo: evaluate dep graph for outputs, so we can build them in the correct order
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type")]
 // an output can be a filesystem, a container image, or a disk image.
 // It can also rely on other outputs for bootstrapping.
-pub struct Output {
+pub struct Target {
 	pub id: String,
 	/// Method to bootstrap the output filesystem
-	pub bootstrap_method: BootstrapMethod,
+	pub method: BootstrapMethod,
 	/// Copy files from the host to the output tree before packing
 	pub copy: Vec<CopyFiles>,
 	/// Scripts to run before and after the build
