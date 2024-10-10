@@ -327,7 +327,7 @@ jobs:
           pushd tests/ng
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
-          katsu -o fs katsu-script-test.yaml 2>&1
+          katsu -o folder katsu-script-test.yaml 2>&1
           tar -cJf katsu-work/chroot.tar.xz katsu-work/chroot
           popd
 
