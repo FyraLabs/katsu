@@ -380,6 +380,7 @@ impl RootBuilder for DnfRootBuilder {
 
 			// While grub2-mkconfig may not return 0 it should still work
 			// todo: figure out why it still wouldn't write the file to /boot/grub2/grub.cfg
+			//       but works when run inside a post script
 			let res = crate::chroot_run_cmd!(&chroot,
 				grub2-mkconfig -o /boot/grub2/grub.cfg;
 			);

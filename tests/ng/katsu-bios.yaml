@@ -18,6 +18,9 @@ scripts:
       name: Relabel SELinux for new filesystem
       file: modules/scripts/selinux.sh
 
+      # Generate GRUB configuration
+      # While Katsu tries to actually generate one for you before running scripts,
+      # That process is not perfect and usually does not actually write the configuration to the disk at least for now.
     - id: grub-install
       name: Install GRUB
       file: modules/scripts/grub-confgen.sh

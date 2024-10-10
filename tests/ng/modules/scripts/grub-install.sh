@@ -1,8 +1,7 @@
 #!/bin/bash
 set -x
-# Disable os-prober for now
-
-
+# Re-generate GRUB configuration in case Katsu fails to create one during the build process
+grub2-mkconfig -o /boot/grub2/grub.cfg
 
 # get /dev/ of /boot, or / if /boot is not a separate partition
 function find_bootdev {
