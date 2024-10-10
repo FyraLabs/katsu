@@ -273,7 +273,7 @@ impl Bootloader {
 		Ok(())
 	}
 
-	pub fn cp_grub_bios(&self, chroot: &Path) -> Result<()> {
+	pub fn cp_grub_bios(&self, _chroot: &Path) -> Result<()> {
 		todo!()
 	}
 }
@@ -521,7 +521,7 @@ impl ImageBuilder for DiskImageBuilder {
 		let (ldp, hdl) = loopdev_with_file(sparse_path)?;
 
 		// Partition disk
-		disk.apply(&ldp, arch, uefi)?;
+		disk.apply(&ldp, arch)?;
 
 		// Mount partitions to chroot
 		disk.mount_to_chroot(&ldp, chroot)?;

@@ -437,7 +437,7 @@ impl PartitionLayout {
 		Ok(crate::tpl!("fstab.tera" => { PREPEND, entries }))
 	}
 
-	pub fn apply(&self, disk: &PathBuf, target_arch: &str, uefi: bool) -> Result<()> {
+	pub fn apply(&self, disk: &PathBuf, target_arch: &str) -> Result<()> {
 		// This is a destructive operation, so we need to make sure we don't accidentally wipe the wrong disk
 
 		info!("Applying partition layout to disk: {disk:#?}");
