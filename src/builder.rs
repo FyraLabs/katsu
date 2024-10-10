@@ -373,12 +373,13 @@ impl RootBuilder for DnfRootBuilder {
 		}
 
 		if manifest.bootloader == Bootloader::GrubBios || manifest.bootloader == Bootloader::Grub {
-			info!("Generating GRUB configuration");
-			crate::chroot_run_cmd!(&chroot,
-				echo "GRUB_DISABLE_OS_PROBER=true" > /etc/default/grub;
-			)?;
+			info!("Attempting to run grub2-mkconfig");
+			// crate::chroot_run_cmd!(&chroot,
+			// 	echo "GRUB_DISABLE_OS_PROBER=true" > /etc/default/grub;
+			// )?;
 
 			// While grub2-mkconfig may not return 0 it should still work
+			// todo: figure out why it still wouldn't write the file to /boot/grub2/grub.cfg
 			let res = crate::chroot_run_cmd!(&chroot,
 				grub2-mkconfig -o /boot/grub2/grub.cfg;
 			);
@@ -387,9 +388,9 @@ impl RootBuilder for DnfRootBuilder {
 				warn!(?e, "grub2-mkconfig not returning 0, continuing anyway");
 			}
 
-			crate::chroot_run_cmd!(&chroot,
-				rm -f /etc/default/grub;
-			)?;
+			// crate::chroot_run_cmd!(&chroot,
+			// 	rm -f /etc/default/grub;
+			// )?;
 		}
 
 		// now, let's run some funny post-install scripts

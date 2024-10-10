@@ -18,6 +18,11 @@ scripts:
       name: Relabel SELinux for new filesystem
       file: modules/scripts/selinux.sh
 
+    - id: grub-install
+      name: Install GRUB
+      file: modules/scripts/grub-confgen.sh
+
+
 
 disk:
   size: 8GiB
