@@ -23,10 +23,10 @@ disk:
   size: 8GiB
   partitions:
     - label: mbr_grub
-      type: 21686148-6449-6E6F-744E-656564454649
+      type: bios-grub
       size: 1MiB
       filesystem: none # no filesystem
-      mountpoint: ""
+      mountpoint: "-"
 
     - label: boot
       type: xbootldr

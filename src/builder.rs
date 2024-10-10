@@ -376,7 +376,18 @@ impl RootBuilder for DnfRootBuilder {
 			info!("Generating GRUB configuration");
 			crate::chroot_run_cmd!(&chroot,
 				echo "GRUB_DISABLE_OS_PROBER=true" > /etc/default/grub;
+			)?;
+
+			// While grub2-mkconfig may not return 0 it should still work
+			let res = crate::chroot_run_cmd!(&chroot,
 				grub2-mkconfig -o /boot/grub2/grub.cfg;
+			);
+
+			if let Err(e) = res {
+				warn!(?e, "grub2-mkconfig not returning 0, continuing anyway");
+			}
+
+			crate::chroot_run_cmd!(&chroot,
 				rm -f /etc/default/grub;
 			)?;
 		}
