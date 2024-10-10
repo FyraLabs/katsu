@@ -61,14 +61,20 @@ macro_rules! chroot_run {
 	}};
 }
 
-/// Wraps around cmd_lib::run_cmd!, but mounts the chroot
+/// Preps chroot, then wraps around cmd_lib::run_cmd!
+/// 
+/// # ***DOES NOT ACTUALLY CHROOT INTO THE ENVIRONMENT!!! YOU NEED TO RUN `unshare -R` YOURSELF***
 /// Example:
 ///
 /// ```rs
 /// chroot_run!(PathBuf::from("/path/to/chroot"), chroot /path/to/chroot echo "hello world" > /hello.txt);
 /// ```
+// The fact I misnamed this macro back in 2023 caused me so much trouble...
+// I wasted 6 hours trying to debug this macro, only to find out it's not
+// supposed to chroot into the environment for you.
+// - @korewaChino, 2024-10-10
 #[macro_export]
-macro_rules! chroot_run_cmd {
+macro_rules! run_cmd_prep_chroot {
 	($chroot:expr, $($cmd:tt)*) => {{
 		$crate::util::run_with_chroot(&PathBuf::from($chroot), || {
 			tracing::debug!("Running command: {}", stringify!($($cmd)*) );
@@ -78,9 +84,12 @@ macro_rules! chroot_run_cmd {
 	}};
 }
 
-/// Runs in chroot, returns stdout
+/// Preps chroot, then wraps around cmd_lib::run_fun!
+/// 
+/// # ***DOES NOT ACTUALLY CHROOT INTO THE ENVIRONMENT!!! YOU NEED TO RUN `unshare -R` YOURSELF***
+/// 
 #[macro_export]
-macro_rules! chroot_run_fun {
+macro_rules! prep_chroot_run_fun {
 	($chroot:expr, $($cmd:tt)*) => {{
 		$crate::util::run_with_chroot(&PathBuf::from($chroot), || {
 			cmd_lib::run_fun!($($cmd)*)?;

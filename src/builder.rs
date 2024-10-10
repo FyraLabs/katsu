@@ -359,7 +359,7 @@ impl RootBuilder for DnfRootBuilder {
 		options.append(&mut exclude.iter().map(|p| format!("--exclude={p}")).collect());
 
 		info!("Initializing system with dnf");
-		crate::chroot_run_cmd!(&chroot,
+		crate::run_cmd_prep_chroot!(&chroot,
 			$dnf install -y --releasever=$releasever --installroot=$chroot $[packages] $[options] 2>&1;
 			$dnf clean all --installroot=$chroot;
 		)?;
@@ -381,8 +381,8 @@ impl RootBuilder for DnfRootBuilder {
 			// While grub2-mkconfig may not return 0 it should still work
 			// todo: figure out why it still wouldn't write the file to /boot/grub2/grub.cfg
 			//       but works when run inside a post script
-			let res = crate::chroot_run_cmd!(&chroot,
-				grub2-mkconfig -o /boot/grub2/grub.cfg;
+			let res = crate::run_cmd_prep_chroot!(&chroot,
+				unshare -R $chroot grub2-mkconfig -o /boot/grub2/grub.cfg;
 			);
 
 			if let Err(e) = res {
@@ -418,7 +418,7 @@ pub fn run_script(script: Script, chroot: &Path, is_post: bool) -> Result<()> {
 
 	if script.chroot.unwrap_or(is_post) {
 		just_write(chroot.join("tmp").join(&name), data)?;
-		crate::chroot_run_cmd!(chroot,
+		crate::run_cmd_prep_chroot!(chroot,
 			chmod +x $chroot/tmp/$name;
 			unshare -R $chroot /tmp/$name 2>&1;
 			rm -f $chroot/tmp/$name;
@@ -649,7 +649,7 @@ impl IsoBuilder {
 			dr_args.push(&dr_omit);
 		}
 
-		crate::chroot_run_cmd!(root,
+		crate::run_cmd_prep_chroot!(root,
 			unshare -R $root env - DRACUT_SYSTEMD=0 dracut $[dr_args]
 			/boot/initramfs-$kver.img --kver $kver 2>&1;
 		)?;

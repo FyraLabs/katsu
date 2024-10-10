@@ -1,4 +1,4 @@
-use crate::{builder::Bootloader, chroot_run_cmd, cli::OutputFormat};
+use crate::{builder::Bootloader, cli::OutputFormat, run_cmd_prep_chroot};
 use bytesize::ByteSize;
 use color_eyre::Result;
 use serde::Deserialize;
@@ -843,7 +843,7 @@ impl Auth {
 
 		trace!(?args, "useradd args");
 
-		chroot_run_cmd!(chroot, unshare -R $chroot useradd $[args] 2>&1)?;
+		run_cmd_prep_chroot!(chroot, unshare -R $chroot useradd $[args] 2>&1)?;
 
 		// add ssh keys
 		if !self.ssh_keys.is_empty() {
