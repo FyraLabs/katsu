@@ -1,11 +1,7 @@
+# Example manifest for a Katsu build
 builder: dnf
-
-users:
-  - username: ultramarine
-    # plaintext password: ultramarine
-    password: "$y$j9T$6/DebcxXazPrtBYnNXtEM.$yaUJHww5Mo1L8xNJ9IDJ.bvKOrIJxAG9PGQKWioBMx3"
-    groups:
-      - wheel
+distro: Katsu Ultramarine
+bootloader: grub-bios
 
 scripts:
   post:
@@ -16,20 +12,53 @@ scripts:
 
     - id: image-cleanup
       name: Clean up root filesystem
-      file: scripts/image-cleanup.sh
+      file: modules/scripts/image-cleanup.sh
 
     - id: selinux-label
       name: Relabel SELinux for new filesystem
-      file: scripts/selinux.sh
+      file: modules/scripts/selinux.sh
+
+
+disk:
+  size: 8GiB
+  partitions:
+    - label: mbr_grub
+      type: 21686148-6449-6E6F-744E-656564454649
+      size: 1MiB
+      filesystem: none # no filesystem
+      mountpoint: ""
+
+    - label: boot
+      type: xbootldr
+      size: 1GiB
+      filesystem: ext4 
+      mountpoint: /boot
+
+    - label: root
+      type: xbootldr
+      flags:
+        - grow-fs
+      # size: 2.5MiB
+      filesystem: ext4
+      mountpoint: /
+
+users:
+  - username: ultramarine
+    # plaintext password: ultramarine
+    password: "$y$j9T$6/DebcxXazPrtBYnNXtEM.$yaUJHww5Mo1L8xNJ9IDJ.bvKOrIJxAG9PGQKWioBMx3"
+    groups:
+      - wheel
 
 
 dnf:
+  dnf5: false
   releasever: 40
-  repodir: repodir/
+  repodir: modules/repodir/
   options:
     - --setopt=cachedir=/var/cache/dnf
     - --nogpgcheck
     - --setopt=keepcache=True
+    - --verbose
   exclude:
     - fedora-release*
     - generic-release*
@@ -58,23 +87,11 @@ dnf:
     - ultramarine-release-identity-basic
     - ultramarine-release-basic
     - fedora-repos
-    - efibootmgr
 
   arch_packages:
-    aarch64:
-      - grub2-efi-aa64
-      - grub2-efi-aa64-modules
-      - grub2-efi-aa64-cdboot
-      - shim-aa64
-      - shim-unsigned-aarch64
-      - bcm283x-firmware
-      - bcm283x-overlays
-      - "@arm-tools"
     x86_64:
-      - grub2-efi-x64
-      - grub2-efi-x64-modules
-      - grub2-efi-x64-cdboot
       - grub2-pc
       - grub2-pc-modules
       - shim-x64
       - shim-unsigned-x64
+

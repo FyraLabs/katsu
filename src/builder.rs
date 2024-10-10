@@ -20,10 +20,11 @@ const WORKDIR: &str = "katsu-work";
 crate::prepend_comment!(GRUB_PREPEND_COMMENT: "/boot/grub/grub.cfg", "Grub configurations", katsu::builder::Bootloader::cp_grub);
 crate::prepend_comment!(LIMINE_PREPEND_COMMENT: "/boot/limine.cfg", "Limine configurations", katsu::builder::Bootloader::cp_limine);
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Bootloader {
 	#[default]
 	Grub,
+	GrubBios,
 	Limine,
 	SystemdBoot,
 }
@@ -33,6 +34,7 @@ impl From<&str> for Bootloader {
 		match &*value.to_lowercase() {
 			"limine" => Self::Limine,
 			"grub" | "grub2" => Self::Grub,
+			"grub-bios" => Self::GrubBios,
 			"systemd-boot" => Self::SystemdBoot,
 			_ => {
 				warn!("Unknown bootloader: {value}, falling back to GRUB");
@@ -48,6 +50,9 @@ impl Bootloader {
 			Self::Grub => info!("GRUB is not required to be installed to image, skipping"),
 			Self::Limine => cmd_lib::run_cmd!(limine bios-install $image 2>&1)?,
 			Self::SystemdBoot => cmd_lib::run_cmd!(bootctl --image=$image install 2>&1)?,
+			Self::GrubBios => {
+				cmd_lib::run_cmd!(grub-install --target=i386-pc --boot-directory=$image/boot 2>&1)?
+			},
 		}
 		Ok(())
 	}
@@ -55,6 +60,7 @@ impl Bootloader {
 		match *self {
 			Self::Grub => ("boot/efi/EFI/fedora/shim.efi", "boot/eltorito.img"),
 			Self::Limine => ("boot/limine-uefi-cd.bin", "boot/limine-bios-cd.bin"),
+			Self::GrubBios => todo!(),
 			Self::SystemdBoot => todo!(),
 		}
 	}
@@ -262,8 +268,13 @@ impl Bootloader {
 			Self::Grub => self.cp_grub(manifest, chroot)?,
 			Self::Limine => self.cp_limine(manifest, chroot)?,
 			Self::SystemdBoot => todo!(),
+			Self::GrubBios => self.cp_grub_bios(chroot)?,
 		}
 		Ok(())
+	}
+
+	pub fn cp_grub_bios(&self, chroot: &Path) -> Result<()> {
+		todo!()
 	}
 }
 
@@ -359,6 +370,15 @@ impl RootBuilder for DnfRootBuilder {
 			warn!("No users specified, no users will be created!");
 		} else {
 			manifest.users.iter().try_for_each(|user| user.add_to_chroot(&chroot))?;
+		}
+
+		if manifest.bootloader == Bootloader::GrubBios || manifest.bootloader == Bootloader::Grub {
+			info!("Generating GRUB configuration");
+			crate::chroot_run_cmd!(&chroot,
+				echo "GRUB_DISABLE_OS_PROBER=true" > /etc/default/grub;
+				grub2-mkconfig -o /boot/grub2/grub.cfg;
+				rm -f /etc/default/grub;
+			)?;
 		}
 
 		// now, let's run some funny post-install scripts
@@ -482,16 +502,29 @@ impl ImageBuilder for DiskImageBuilder {
 		// 	disk.mount_to_chroot(&loopdev.path().unwrap(), &chroot)?;
 		// 	disk.unmount_from_chroot(&loopdev.path().unwrap(), &chroot)?;
 		// }
+		let uefi = { self.bootloader != Bootloader::GrubBios };
+		let arch = manifest.dnf.arch.as_deref().unwrap_or(std::env::consts::ARCH);
 
 		let (ldp, hdl) = loopdev_with_file(sparse_path)?;
 
 		// Partition disk
-		disk.apply(&ldp, manifest.dnf.arch.as_deref().unwrap_or(std::env::consts::ARCH))?;
+		disk.apply(&ldp, arch, uefi)?;
 
 		// Mount partitions to chroot
 		disk.mount_to_chroot(&ldp, chroot)?;
 
 		self.root_builder.build(&chroot.canonicalize()?, manifest)?;
+
+		if !uefi {
+			info!("Not UEFI, Setting up extra configs");
+
+			// Let's use grub2-install to bless the disk
+
+			info!("Blessing disk image with MBR");
+			cmd_lib::run_cmd!(
+				grub2-install --target=i386-pc --boot-directory=$chroot/boot $ldp 2>&1;
+			)?;
+		}
 
 		disk.unmount_from_chroot(chroot)?;
 

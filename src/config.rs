@@ -9,7 +9,7 @@ use std::{
 	io::Write,
 	path::{Path, PathBuf},
 };
-use tracing::{debug, info, trace};
+use tracing::{debug, info, trace, warn};
 const DEFAULT_VOLID: &str = "KATSU-LIVEOS";
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
@@ -334,7 +334,13 @@ impl PartitionLayout {
 			// trim trailing slashes
 			let am = a.mountpoint.trim_end_matches('/').matches('/').count();
 			let bm = b.mountpoint.trim_end_matches('/').matches('/').count();
-			if a.mountpoint == "/" {
+			if a.mountpoint.is_empty() {
+				// empty mountpoint should always come first
+				std::cmp::Ordering::Less
+			} else if b.mountpoint.is_empty() {
+				// empty mountpoint should always come first
+				std::cmp::Ordering::Greater
+			} else if a.mountpoint == "/" {
 				// / should always come first
 				std::cmp::Ordering::Less
 			} else if b.mountpoint == "/" {
@@ -358,6 +364,17 @@ impl PartitionLayout {
 
 		// Ok, so for some reason the partitions are swapped?
 		for (index, part) in &ordered {
+			// println!("Partition {index}: {part:#?}");
+
+			if part.mountpoint.is_empty()
+				|| part.filesystem == "none"
+				|| part.filesystem == "swap"
+				|| part.mountpoint == "-"
+			{
+				// skip empty mountpoints
+				warn!(?part, "This partition is not supposed to be mounted! Skipping... If you want this partition to be mounted, please specify a mountpoint starting with /");
+				continue;
+			}
 			let devname = partition_name(&disk.to_string_lossy(), *index);
 
 			// clean the mountpoint so we don't have the slash at the start
@@ -378,6 +395,9 @@ impl PartitionLayout {
 		// unmount partitions from chroot
 		// sort partitions by mountpoint
 		for mp in self.sort_partitions().into_iter().rev().map(|(_, p)| p.mountpoint) {
+			if mp.is_empty() || mp == "-" {
+				continue;
+			}
 			let mp = chroot.join(mp.trim_start_matches('/'));
 			trace!("umount {mp:?}");
 			cmd_lib::run_cmd!(umount $mp 2>&1)?;
@@ -395,21 +415,20 @@ impl PartitionLayout {
 		let mut entries = vec![];
 
 		ordered.iter().try_for_each(|(_, part)| -> Result<()> {
-			let mp = PathBuf::from(&part.mountpoint).to_string_lossy().to_string();
-			let mountpoint_chroot = part.mountpoint.trim_start_matches('/');
-			let mountpoint_chroot = chroot.join(mountpoint_chroot);
-			let devname = cmd_lib::run_fun!(findmnt -n -o SOURCE $mountpoint_chroot)?;
+			if part.filesystem != "none" {
+				let mp = PathBuf::from(&part.mountpoint).to_string_lossy().to_string();
+				let mountpoint_chroot = part.mountpoint.trim_start_matches('/');
+				let mountpoint_chroot = chroot.join(mountpoint_chroot);
+				let devname = cmd_lib::run_fun!(findmnt -n -o SOURCE $mountpoint_chroot)?;
 
-			// We will generate by UUID
-			let uuid = cmd_lib::run_fun!(blkid -s UUID -o value $devname)?;
+				// We will generate by UUID
+				let uuid = cmd_lib::run_fun!(blkid -s UUID -o value $devname)?;
 
-			// clean the mountpoint so we don't have the slash at the start
-			// let mp_cleaned = part.mountpoint.trim_start_matches('/');
+				let fsname = if part.filesystem == "efi" { "vfat" } else { &part.filesystem };
+				let fsck = if part.filesystem == "efi" { 0 } else { 2 };
 
-			let fsname = if part.filesystem == "efi" { "vfat" } else { &part.filesystem };
-			let fsck = if part.filesystem == "efi" { 0 } else { 2 };
-
-			entries.push(TplFstabEntry { uuid, mp, fsname, fsck });
+				entries.push(TplFstabEntry { uuid, mp, fsname, fsck });
+			}
 			Ok(())
 		})?;
 
@@ -418,7 +437,7 @@ impl PartitionLayout {
 		Ok(crate::tpl!("fstab.tera" => { PREPEND, entries }))
 	}
 
-	pub fn apply(&self, disk: &PathBuf, target_arch: &str) -> Result<()> {
+	pub fn apply(&self, disk: &PathBuf, target_arch: &str, uefi: bool) -> Result<()> {
 		// This is a destructive operation, so we need to make sure we don't accidentally wipe the wrong disk
 
 		info!("Applying partition layout to disk: {disk:#?}");
@@ -439,7 +458,7 @@ impl PartitionLayout {
 
 			let start_string = if i == 1 {
 				// create partition at start of disk
-				"1MiB".to_string()
+				"0".to_string()
 			} else {
 				// create partition after last partition
 				ByteSize::b(last_end).to_string_as(true).replace(' ', "")
@@ -453,7 +472,6 @@ impl PartitionLayout {
 				ByteSize::b(last_end).to_string_as(true).replace(' ', "")
 			});
 
-			// TODO: primary/extended/logical is a MBR concept, since we're using GPT, we should be using this field to set the label
 			// not going to change this for now though, but will revisit
 			debug!(start = start_string, end = end_string, "Creating partition");
 			trace!("parted -s {disk:?} mkpart primary fat32 {start_string} {end_string}");
@@ -497,6 +515,7 @@ impl PartitionLayout {
 			if fsname == "efi" {
 				trace!("mkfs.fat -F32 {devname}");
 				cmd_lib::run_cmd!(mkfs.fat -F32 $devname 2>&1)?;
+			} else if fsname == "none" {
 			} else {
 				trace!("mkfs.{fsname} {devname}");
 				cmd_lib::run_cmd!(mkfs.$fsname $devname 2>&1)?;
