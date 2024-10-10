@@ -1,8 +1,0 @@
-dnf:
-  packages:
-    - bar
-
-scripts:
-  pre:
-    - inline: |
-        echo "Hello from recurse2.yaml"

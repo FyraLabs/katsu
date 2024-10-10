@@ -20,6 +20,10 @@ const fn script_default_priority() -> i32 {
 	50
 }
 
+pub fn sort_script_priority(scripts: &mut [Script]) {
+	scripts.sort_by_key(|s| s.priority);
+}
+
 #[derive(Deserialize, Debug, Clone, Serialize, PartialEq, Eq)]
 // load script from file, or inline if there's one specified
 pub struct Script {

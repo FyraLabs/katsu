@@ -1,6 +1,6 @@
 #![warn(rust_2018_idioms)]
 
-mod builder;
+// mod builder;
 pub mod cfg;
 mod util;
 
@@ -52,7 +52,16 @@ impl std::str::FromStr for OutputFormat {
 #[command(author, version, about)]
 pub struct KatsuCli {
 	/// Config file location
+	#[arg(short, long, default_value = "main.katsu.hcl")]
 	config: PathBuf,
+
+	#[arg(short, long, default_value = ".")]
+	/// Project directory
+	/// 
+	/// By default, Katsu will look for the config file in the current directory.
+	/// 
+	// unimplemented yet, will just load the config file for now i guess
+	project_dir: PathBuf,
 
 	// #[arg(short, long, value_parser = value_parser!(OutputFormat))]
 	// output: OutputFormat,
@@ -66,6 +75,10 @@ pub struct KatsuCli {
 	#[arg(long, short = 'O')]
 	/// Override output file location
 	output_file: Option<PathBuf>,
+}
+
+impl KatsuCli {
+	
 }
 
 /// # Panics
@@ -107,18 +120,17 @@ fn main() -> color_eyre::Result<()> {
 		Some(ext) => tracing::warn!(cfg=?cli.config, ?ext, "Unknown file extension for config file; trying to parse as HCL"),
 		None => tracing::warn!(cfg=?cli.config, "Config file does not have any file extensions; trying to parse as HCL"),
 	};
+
+	let debug_str: hcl::Value = hcl::from_str(&std::fs::read_to_string(&cli.config)?)?;
+	println!("Debug: {debug_str:#?}");
+
 	let mut manifest = cfg::manifest::Manifest::load(&cli.config)?;
 
 	// check for overrides
 
-	if let Some(arch) = cli.arch {
-		manifest.dnf.arch = Some(arch);
-	}
-
-	if let Some(output_file) = cli.output_file {
-		manifest.out_file =
-			Some(output_file.to_str().expect("Cannot convert output_file to string").to_owned());
-	}
+	// if let Some(arch) = cli.arch {
+	// 	manifest.dnf.arch = Some(arch);
+	// }
 
 	trace!(?manifest, "Loaded manifest");
 
