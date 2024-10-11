@@ -665,12 +665,14 @@ impl IsoBuilder {
 			dr_args.push(&dr_omit);
 		}
 
-
-
 		crate::util::enter_chroot_run(root, || -> Result<()> {
-			cmd_lib::run_cmd!(
-				env - DRACUT_SYSTEMD=0 dracut $[dr_args] /boot/initramfs-$kver.img --kver $kver 2>&1;
-			)?;
+			std::process::Command::new("dracut")
+				.env("DRACUT_SYSTEMD", "0")
+				.args(&dr_args)
+				.arg(format!("/boot/initramfs-{kver}.img"))
+				.arg("--kver")
+				.arg(&kver)
+				.status()?;
 			Ok(())
 		})?;
 		Ok(())
@@ -700,22 +702,38 @@ impl IsoBuilder {
 		let sqfs_extra_args = binding.split(' ').collect::<Vec<_>>();
 
 		info!("Squashing file system (mksquashfs)");
-		cmd_lib::run_cmd!(
-			mksquashfs $chroot $image $[sqfs_comp_args] -b 1048576 -noappend
-			-e /dev/
-			-e /proc/
-			-e /sys/
-			-p "/dev 755 0 0"
-			-p "/proc 755 0 0"
-			-p "/sys 755 0 0"
-			$[sqfs_extra_args]
-		)?;
+		std::process::Command::new("mksquashfs")
+			.arg(chroot)
+			.arg(image)
+			.args(&sqfs_comp_args)
+			.arg("-b")
+			.arg("1048576")
+			.arg("-noappend")
+			.arg("-e")
+			.arg("/dev/")
+			.arg("-e")
+			.arg("/proc/")
+			.arg("-e")
+			.arg("/sys/")
+			.arg("-p")
+			.arg("/dev 755 0 0")
+			.arg("-p")
+			.arg("/proc 755 0 0")
+			.arg("-p")
+			.arg("/sys 755 0 0")
+			.args(&sqfs_extra_args)
+			.status()?;
 
 		Ok(())
 	}
 	#[allow(dead_code)]
 	pub fn erofs(&self, chroot: &Path, image: &Path) -> Result<()> {
-		cmd_lib::run_cmd!(mkfs.erofs -d $chroot -o $image)?;
+		std::process::Command::new("mkfs.erofs")
+			.arg("-d")
+			.arg(chroot)
+			.arg("-o")
+			.arg(image)
+			.status()?;
 		Ok(())
 	}
 	// TODO: add mac support
@@ -750,38 +768,76 @@ impl IsoBuilder {
 					_ => unimplemented!(),
 				};
 
-				cmd_lib::run_cmd!(xorrisofs -R -V $volid
-					$[arch_args]
-					-partition_offset 16
-					-appended_part_as_gpt
-					-append_partition 2 C12A7328-F81F-11D2-BA4B-00A0C93EC93B $efiboot
-					-iso_mbr_part_type EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
-					-c boot.cat
-					--boot-catalog-hide
-					-b $bios_bin
-					-no-emul-boot
-					-boot-load-size 4
-					-boot-info-table
-					--grub2-boot-info
-					-eltorito-alt-boot
-					-e --interval:appended_partition_2:all::
-					-no-emul-boot
-					-vvvvv
-					// implant MD5 checksums
-					--md5
-					// -isohybrid-gpt-basdat
-					// -b grub2_mbr=$grub2_mbr_hybrid
-					$tree -o $image 2>&1)?;
+				std::process::Command::new("xorrisofs")
+					.arg("-R")
+					.arg("-V")
+					.arg(&volid)
+					.args(&arch_args)
+					.arg("-partition_offset")
+					.arg("16")
+					.arg("-appended_part_as_gpt")
+					.arg("-append_partition")
+					.arg("2")
+					.arg("C12A7328-F81F-11D2-BA4B-00A0C93EC93B")
+					.arg(&efiboot)
+					.arg("-iso_mbr_part_type")
+					.arg("EBD0A0A2-B9E5-4433-87C0-68B6B72699C7")
+					.arg("-c")
+					.arg("boot.cat")
+					.arg("--boot-catalog-hide")
+					.arg("-b")
+					.arg(bios_bin)
+					.arg("-no-emul-boot")
+					.arg("-boot-load-size")
+					.arg("4")
+					.arg("-boot-info-table")
+					.arg("--grub2-boot-info")
+					.arg("-eltorito-alt-boot")
+					.arg("-e")
+					.arg("--interval:appended_partition_2:all::")
+					.arg("-no-emul-boot")
+					.arg("-vvvvv")
+					.arg("--md5")
+					.arg(&tree)
+					.arg("-o")
+					.arg(image)
+					.status()?;
 			},
 			_ => {
 				debug!("xorriso -as mkisofs --efi-boot {uefi_bin} -b {bios_bin} -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot {uefi_bin} -efi-boot-part --efi-boot-image --protective-msdos-label {root} -volid KATSU-LIVEOS -o {image}", root = tree.display(), image = image.display());
-				cmd_lib::run_cmd!(xorriso -as mkisofs -R --efi-boot $uefi_bin -b $bios_bin -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot $uefi_bin -efi-boot-part --efi-boot-image --protective-msdos-label $tree -volid $volid -o $image 2>&1)?;
+				std::process::Command::new("xorriso")
+					.arg("-as")
+					.arg("mkisofs")
+					.arg("-R")
+					.arg("--efi-boot")
+					.arg(uefi_bin)
+					.arg("-b")
+					.arg(bios_bin)
+					.arg("-no-emul-boot")
+					.arg("-boot-load-size")
+					.arg("4")
+					.arg("-boot-info-table")
+					.arg("--efi-boot")
+					.arg(uefi_bin)
+					.arg("-efi-boot-part")
+					.arg("--efi-boot-image")
+					.arg("--protective-msdos-label")
+					.arg(tree)
+					.arg("-volid")
+					.arg(volid)
+					.arg("-o")
+					.arg(image)
+					.status()?;
 			},
 		}
 
 		// implant MD5 checksums
 		info!("Implanting MD5 checksums into ISO");
-		cmd_lib::run_cmd!(implantisomd5 --force --supported-iso $image)?;
+		std::process::Command::new("implantisomd5")
+			.arg("--force")
+			.arg("--supported-iso")
+			.arg(image)
+			.status()?;
 		Ok(())
 	}
 }
