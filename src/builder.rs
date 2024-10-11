@@ -381,9 +381,13 @@ impl RootBuilder for DnfRootBuilder {
 			// While grub2-mkconfig may not return 0 it should still work
 			// todo: figure out why it still wouldn't write the file to /boot/grub2/grub.cfg
 			//       but works when run inside a post script
-			let res = crate::run_cmd_prep_chroot!(&chroot,
-				unshare -R $chroot grub2-mkconfig -o /boot/grub2/grub.cfg;
-			);
+			let res = crate::util::enter_chroot_run(&chroot, || {
+				std::process::Command::new("grub2-mkconfig")
+					.arg("-o")
+					.arg("/boot/grub2/grub.cfg")
+					.status()?;
+				Ok(())
+			});
 
 			if let Err(e) = res {
 				warn!(?e, "grub2-mkconfig not returning 0, continuing anyway");
@@ -407,7 +411,8 @@ pub fn run_script(script: Script, chroot: &Path, is_post: bool) -> Result<()> {
 	let id = script.id.as_ref().map_or("<NULL>", |s| s);
 	bail_let!(Some(mut data) = script.load() => "Cannot load script `{id}`");
 	let name = script.name.as_ref().map_or("<Untitled>", |s| s);
-	info!(id, name, "Running script");
+
+	info!(id, name, in_chroot = script.chroot, "Running script");
 
 	let name = format!("script-{}", script.id.as_ref().map_or("untitled", |s| s));
 	// check if data has shebang
@@ -416,13 +421,21 @@ pub fn run_script(script: Script, chroot: &Path, is_post: bool) -> Result<()> {
 		data.insert_str(0, "#!/bin/sh\n");
 	}
 
+	let mut tiffin = tiffin::Container::new(chroot.to_path_buf());
+
 	if script.chroot.unwrap_or(is_post) {
-		just_write(chroot.join("tmp").join(&name), data)?;
-		crate::run_cmd_prep_chroot!(chroot,
-			chmod +x $chroot/tmp/$name;
-			unshare -R $chroot /tmp/$name 2>&1;
-			rm -f $chroot/tmp/$name;
-		)?;
+		tiffin.run(|| -> Result<()> {
+			// just_write(chroot.join("tmp").join(&name), data)?;
+			just_write(PathBuf::from(format!("/tmp/{name}")), data)?;
+
+			cmd_lib::run_cmd!(
+				chmod +x /tmp/$name;
+				/tmp/$name 2>&1;
+				rm -f /tmp/$name;
+			)?;
+
+			Ok(())
+		})??;
 	} else {
 		just_write(PathBuf::from(format!("katsu-work/{name}")), data)?;
 		// export envar
@@ -534,9 +547,12 @@ impl ImageBuilder for DiskImageBuilder {
 			// Let's use grub2-install to bless the disk
 
 			info!("Blessing disk image with MBR");
-			cmd_lib::run_cmd!(
-				grub2-install --target=i386-pc --boot-directory=$chroot/boot $ldp 2>&1;
-			)?;
+			std::process::Command::new("grub2-install")
+				.arg("--target=i386-pc")
+				.arg(format!("--boot-directory={}", chroot.join("boot").display()))
+				.arg(ldp)
+				.output()
+				.map_err(|e| color_eyre::eyre::eyre!("Failed to execute grub2-install: {}", e))?;
 		}
 
 		disk.unmount_from_chroot(chroot)?;
@@ -649,10 +665,14 @@ impl IsoBuilder {
 			dr_args.push(&dr_omit);
 		}
 
-		crate::run_cmd_prep_chroot!(root,
-			unshare -R $root env - DRACUT_SYSTEMD=0 dracut $[dr_args]
-			/boot/initramfs-$kver.img --kver $kver 2>&1;
-		)?;
+
+
+		crate::util::enter_chroot_run(root, || -> Result<()> {
+			cmd_lib::run_cmd!(
+				env - DRACUT_SYSTEMD=0 dracut $[dr_args] /boot/initramfs-$kver.img --kver $kver 2>&1;
+			)?;
+			Ok(())
+		})?;
 		Ok(())
 	}
 

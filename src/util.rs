@@ -18,6 +18,14 @@ macro_rules! run {
 	}};
 }
 
+/// Enters a chroot environment using `tiffin`, then runs the function
+pub fn enter_chroot_run<F>(root: &Path, f: F) -> Result<()>
+where
+	F: FnOnce() -> Result<()>,
+{
+	tiffin::Container::new(root.to_path_buf()).run(f)?
+}
+
 /// Macro for string feature flags.
 /// Should return the value of the environment variable if defined, else None.
 ///
@@ -62,7 +70,7 @@ macro_rules! chroot_run {
 }
 
 /// Preps chroot, then wraps around cmd_lib::run_cmd!
-/// 
+///
 /// # ***DOES NOT ACTUALLY CHROOT INTO THE ENVIRONMENT!!! YOU NEED TO RUN `unshare -R` YOURSELF***
 /// Example:
 ///
@@ -85,9 +93,9 @@ macro_rules! run_cmd_prep_chroot {
 }
 
 /// Preps chroot, then wraps around cmd_lib::run_fun!
-/// 
+///
 /// # ***DOES NOT ACTUALLY CHROOT INTO THE ENVIRONMENT!!! YOU NEED TO RUN `unshare -R` YOURSELF***
-/// 
+///
 #[macro_export]
 macro_rules! prep_chroot_run_fun {
 	($chroot:expr, $($cmd:tt)*) => {{

@@ -1,4 +1,4 @@
-use crate::{builder::Bootloader, cli::OutputFormat, run_cmd_prep_chroot};
+use crate::{builder::Bootloader, cli::OutputFormat, util::enter_chroot_run};
 use bytesize::ByteSize;
 use color_eyre::Result;
 use serde::Deserialize;
@@ -843,7 +843,11 @@ impl Auth {
 
 		trace!(?args, "useradd args");
 
-		run_cmd_prep_chroot!(chroot, unshare -R $chroot useradd $[args] 2>&1)?;
+		enter_chroot_run(chroot, || {
+			info!(?self, "Adding user to chroot");
+			std::process::Command::new("useradd").args(&args).status()?;
+			Ok(())
+		})?;
 
 		// add ssh keys
 		if !self.ssh_keys.is_empty() {
