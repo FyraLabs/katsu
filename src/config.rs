@@ -461,7 +461,7 @@ impl PartitionLayout {
 				"0".to_string()
 			} else {
 				// create partition after last partition
-				ByteSize::b(last_end).to_string_as(true).replace(' ', "")
+				format!("{}MiB", last_end / 1024 / 1024)
 			};
 
 			let end_string = part.size.map_or("100%".to_string(), |size| {
@@ -469,7 +469,7 @@ impl PartitionLayout {
 				last_end += size.as_u64();
 
 				// remove space for partition table
-				ByteSize::b(last_end).to_string_as(true).replace(' ', "")
+				format!("{}MiB", last_end / 1024 / 1024)
 			});
 
 			// not going to change this for now though, but will revisit
