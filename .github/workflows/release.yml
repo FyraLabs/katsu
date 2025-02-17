@@ -67,7 +67,7 @@ jobs:
         run: cargo build --release
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.arch }}
           path: target/release/terra
