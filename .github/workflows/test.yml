@@ -21,7 +21,7 @@ env:
 jobs:
   check:
     container:
-      image: ghcr.io/terrapkg/builder:f38
+      image: ghcr.io/terrapkg/builder:f42
     name: Check
     runs-on: ubuntu-latest
     steps:
@@ -48,7 +48,7 @@ jobs:
   clippy:
     name: Clippy
     container:
-      image: ghcr.io/terrapkg/builder:f38
+      image: ghcr.io/terrapkg/builder:f42
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -76,7 +76,7 @@ jobs:
   unit-test:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/terrapkg/builder:f38
+      image: ghcr.io/terrapkg/builder:f42
 
     steps:
       - uses: actions/checkout@v4

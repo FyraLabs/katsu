@@ -1,4 +1,4 @@
-FROM ghcr.io/terrapkg/builder:f38
+FROM ghcr.io/terrapkg/builder:f42
 
 RUN dnf install -y \
     xorriso \

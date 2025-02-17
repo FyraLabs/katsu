@@ -42,7 +42,7 @@ jobs:
   image-arm:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/terrapkg/builder:f38
+      image: ghcr.io/terrapkg/builder:f42
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -85,7 +85,7 @@ jobs:
           popd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: image-arm
           path: tests/ng/katsu-work/image/*.raw.zstd
@@ -93,7 +93,7 @@ jobs:
   bios-x86_64:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/terrapkg/builder:f38
+      image: ghcr.io/terrapkg/builder:f42
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -135,7 +135,7 @@ jobs:
           popd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: bios-x86_64
           path: tests/ng/katsu-work/image/*.raw.zstd
@@ -143,7 +143,7 @@ jobs:
   image-x86_64:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/terrapkg/builder:f38
+      image: ghcr.io/terrapkg/builder:f42
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -185,7 +185,7 @@ jobs:
           popd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: image-x86_64
           path: tests/ng/katsu-work/image/*.raw.zstd
@@ -193,7 +193,7 @@ jobs:
   iso-x86_64:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/terrapkg/builder:f38
+      image: ghcr.io/terrapkg/builder:f42
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -234,7 +234,7 @@ jobs:
           popd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: iso-x86_64
           path: tests/ng/katsu-work/image/katsu.iso
@@ -242,7 +242,7 @@ jobs:
   iso-limine-x86_64:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/terrapkg/builder:f38
+      image: ghcr.io/terrapkg/builder:f42
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -283,7 +283,7 @@ jobs:
           popd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: iso-limine-x86_64
           path: tests/ng/katsu-work/image/katsu.iso
@@ -291,7 +291,7 @@ jobs:
   fs-test-x86_64:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/terrapkg/builder:f38
+      image: ghcr.io/terrapkg/builder:f42
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -332,7 +332,7 @@ jobs:
           popd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: iso-limine-x86_64
           path: tests/ng/katsu-work/chroot.tar.xz
