@@ -45,10 +45,10 @@ jobs:
         arch: [x86_64, aarch64]
 
     # run job on ubuntu-latest unless aarch64 then arm64
-    runs-on: ${{ matrix.arch == 'aarch64' && 'arm64' || 'ubuntu-latest' }}
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-latest-arm' || 'ubuntu-latest' }}
 
     container:
-      image: ghcr.io/terrapkg/builder:f38
+      image: ghcr.io/terrapkg/builder:f42
 
     steps:
       - uses: actions/checkout@v4
