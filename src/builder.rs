@@ -982,6 +982,7 @@ impl KatsuBuilder {
 	) -> Result<Self> {
 		let root_builder = match manifest.builder.as_ref().expect("Builder unspecified").as_str() {
 			"dnf" => Box::new(manifest.dnf.clone()) as Box<dyn RootBuilder>,
+			"bootc" => Box::new(manifest.bootc.clone()) as Box<dyn RootBuilder>,
 			_ => todo!("builder not implemented"),
 		};
 
