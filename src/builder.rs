@@ -749,7 +749,7 @@ pub struct IsoBuilder {
 
 const DR_MODS: &str = "livenet dmsquash-live dmsquash-live-autooverlay convertfs pollcdrom qemu qemu-net";
 const DR_OMIT: &str = "";
-const DR_ARGS: &str = "--xz --reproducible";
+const DR_ARGS: &str = "-vv --xz --reproducible";
 
 impl IsoBuilder {
 	fn dracut(&self, root: &Path) -> Result<String> {
