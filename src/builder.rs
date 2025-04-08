@@ -210,7 +210,7 @@ impl Bootloader {
 		let volid = manifest.get_volid();
 
 		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &bootimgs)?;
-		
+
 		// oh.
 		let _ = std::fs::remove_dir_all(imgd.join("boot"));
 		// copy boot files
@@ -221,16 +221,9 @@ impl Bootloader {
 		}
 
 		// copy the vmlinuz and kernel initramfs
-		std::fs::copy(
-			bootimgs.join("boot").join(&vmlinuz),
-			imgd.join("boot").join(&vmlinuz),
-		)?;
+		std::fs::copy(bootimgs.join("boot").join(&vmlinuz), imgd.join("boot").join(&vmlinuz))?;
 
-
-		std::fs::copy(
-			bootimgs.join("boot").join(&initramfs),
-			imgd.join("boot").join(&initramfs),
-		)?;
+		std::fs::copy(bootimgs.join("boot").join(&initramfs), imgd.join("boot").join(&initramfs))?;
 
 		let distro = &manifest.distro.as_ref().map_or("Linux", |s| s);
 
@@ -364,8 +357,13 @@ pub struct BootcRootBuilder {
 	/// (Optional, if not specified, the image will be used as-is)
 	pub derivation: Option<String>,
 	pub context: Option<String>,
-}
 
+	#[serde(default = "default_true")]
+	pub embed_image: bool,
+}
+fn default_true() -> bool {
+	true
+}
 impl RootBuilder for BootcRootBuilder {
 	fn build(&self, chroot: &Path, _manifest: &Manifest) -> Result<()> {
 		let image = &self.image;
@@ -408,12 +406,14 @@ impl RootBuilder for BootcRootBuilder {
 		let container_store = chroot.canonicalize()?.join("var/lib/containers/storage");
 		std::fs::create_dir_all(&container_store)?;
 
-		info!(?chroot, ?image, "Copying OCI image to chroot's container store");
+		if self.embed_image {
+			info!(?chroot, ?image, "Copying OCI image to chroot's container store");
 
-		// Push the original image to the chroot's container store, not the derived one
-		cmd_lib::run_cmd!(
-			podman push ${image} "containers-storage:[overlay@${container_store}]$image" --remove-signatures
-		)?;
+			// Push the original image to the chroot's container store, not the derived one
+			cmd_lib::run_cmd!(
+				podman push ${image} "containers-storage:[overlay@${container_store}]$image" --remove-signatures
+			)?;
+		}
 
 		Ok(())
 	}
@@ -747,7 +747,8 @@ pub struct IsoBuilder {
 	pub root_builder: Box<dyn RootBuilder>,
 }
 
-const DR_MODS: &str = "livenet dmsquash-live dmsquash-live-autooverlay convertfs pollcdrom qemu qemu-net";
+const DR_MODS: &str =
+	"livenet dmsquash-live dmsquash-live-autooverlay convertfs pollcdrom qemu qemu-net";
 const DR_OMIT: &str = "";
 const DR_ARGS: &str = "-vv --xz --reproducible";
 
