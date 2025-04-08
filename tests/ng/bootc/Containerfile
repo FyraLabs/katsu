@@ -8,7 +8,7 @@ RUN dnf install -y grub2 grub2-efi grub2-tools grub2-tools-extra xorriso shim do
 FROM ${DERIVE_FROM}
 
 # Install the necessary packages
-RUN dnf install -y kernel dracut dracut-live dracut-config-generic dracut-config-rescue grub2-tools grub2-common grub2-pc-modules grub2-efi-x64 shim-x64 && \
+RUN dnf install -y kernel dracut dracut-live grub2-tools grub2-common grub2-pc-modules grub2-efi-x64 shim-x64 && \
     dnf clean all
 
 COPY --from=bootloader_base /boot/efi /boot/efi
