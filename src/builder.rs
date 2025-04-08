@@ -286,6 +286,89 @@ fn _default_dnf() -> String {
 	String::from("dnf")
 }
 
+// credits to the Universal Blue people for figuring out how to build a bootc-based image :3
+/// A bootc-based image. This is the second implementation of the RootBuilder trait.
+/// This takes an OCI image and builds a rootfs out of it, optionally with a containerfile
+/// to build a derivation specific to this image.
+///
+///
+/// A derivation is a containerfile with 1 custom argument: `DERIVE_FROM`
+///
+/// It will be run as `podman build -t <image>:katsu-deriv --build-arg DERIVE_FROM=<image> -f <derivation> <CONTEXT>`
+///
+/// A containerfile should look like this:
+///
+/// ```dockerfile
+/// ARG DERIVE_FROM
+/// FROM $DERIVE_FROM
+///
+/// RUN echo "Hello from the containerfile!"
+/// RUN touch /grass
+///
+/// # ... Do whatever you want here
+/// ```
+#[derive(Deserialize, Debug, Clone, Serialize, Default)]
+pub struct BootcRootBuilder {
+	/// The original image to use as a base
+	pub image: String,
+	/// Path to a containerfile (Dockerfile) to build a derivation out of
+	/// (Optional, if not specified, the image will be used as-is)
+	pub derivation: Option<String>,
+	pub context: Option<String>,
+}
+
+impl RootBuilder for BootcRootBuilder {
+	fn build(&self, chroot: &Path, _manifest: &Manifest) -> Result<()> {
+		let image = &self.image;
+
+		// Pull the image for us
+		info!("Loading OCI image");
+		cmd_lib::run_cmd!(
+			podman pull $image 2>&1;
+		)?;
+
+		let context = self.context.as_deref().unwrap_or(".");
+
+		info!("Building OCI image");
+		let d_image = if let Some(derivation) = &self.derivation {
+			let og_image = image.split(':').next().unwrap_or(image);
+			// get the image, but change the tag to katsu_<variant>
+			let deriv = format!("{og_image}:katsu_deriv");
+
+			cmd_lib::run_cmd!(
+				podman build -t $deriv --build-arg DERIVE_FROM=$image -f $derivation $context;
+			)?;
+			deriv
+		} else {
+			image.to_string()
+		};
+
+		info!("Exporting OCI image");
+		std::fs::create_dir_all(chroot)?;
+
+		let container = cmd_lib::run_fun!(
+			podman create --rm $d_image /bin/bash
+		)?;
+
+		cmd_lib::run_cmd!(
+			podman export $container | sudo tar -xf - -C $chroot;
+		)?;
+
+		let container_store = chroot.canonicalize()?.join("var/lib/containers/storage");
+		std::fs::create_dir_all(&container_store)?;
+
+		info!(?chroot, "Copying OCI image to chroot's container store");
+
+
+		// Push the original image to the chroot's container store, not the derived one
+		cmd_lib::run_cmd!(
+			podman push ${image} "containers-storage:[overlay@${container_store}]$image" --remove-signatures
+		)?;
+
+		Ok(())
+	}
+}
+
 #[derive(Deserialize, Debug, Clone, Serialize, Default)]
 pub struct DnfRootBuilder {
 	#[serde(default = "_default_dnf")]
