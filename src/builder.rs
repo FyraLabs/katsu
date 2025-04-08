@@ -67,8 +67,24 @@ impl Bootloader {
 	fn cp_vmlinuz_initramfs(&self, chroot: &Path, dest: &Path) -> Result<(String, String)> {
 		trace!("Finding vmlinuz and initramfs");
 		let bootdir = chroot.join("boot");
-		let mut vmlinuz = None;
+		let modules_dir = chroot.join("usr/lib/modules");
+		// find vmlinuz
+		let mut kernels = fs::read_dir(&modules_dir)?;
+
+		let mut vmlinuz: Option<String> = None;
 		let mut initramfs = None;
+		let kver = kernels.find_map(|f| {
+			// find any directory
+			trace!(?f, "File in /usr/lib/modules");
+			f.ok().and_then(|entry| entry.file_name().to_str().map(|s| s.to_string()))
+		});
+
+		trace!("Kernel version found: {:?}", kver);
+		if let Some(kernel_version) = kver {
+			vmlinuz = Some(
+				modules_dir.join(&kernel_version).join("vmlinuz").to_string_lossy().to_string(),
+			);
+		}
 		for f in bootdir.read_dir()? {
 			let f = f?;
 			if !f.metadata()?.is_file() {
@@ -79,11 +95,10 @@ impl Bootloader {
 			let name = name.to_string_lossy();
 			if name.contains("-rescue-") {
 				continue;
-			}
-
-			if name.starts_with("vmlinuz-") {
-				vmlinuz = Some(name.to_string());
-			} else if name.starts_with("initramfs-") {
+			} else if name == "initramfs.img" || name.starts_with("initramfs-") {
+				// todo: somehow get dracut to actually output static file paths???
+				// why the hell is it outputting to /boot/initramfs-<kernel_version>.img
+				// when we expicitly set the output to /boot/initramfs.img
 				initramfs = Some(name.to_string());
 			}
 			if vmlinuz.is_some() && initramfs.is_some() {
@@ -91,15 +106,28 @@ impl Bootloader {
 			}
 		}
 
+		// todo: hardcode from above
+		// initramfs = Some("initramfs.img".to_string());
+		trace!(?vmlinuz, ?initramfs, "vmlinuz and initramfs");
+
 		bail_let!(Some(vmlinuz) = vmlinuz => "Cannot find vmlinuz in {bootdir:?}");
 		bail_let!(Some(initramfs) = initramfs => "Cannot find initramfs in {bootdir:?}");
 
 		trace!(vmlinuz, initramfs, "Copying vmlinuz and initramfs");
 		std::fs::create_dir_all(dest.join("boot"))?;
-		std::fs::copy(bootdir.join(&vmlinuz), dest.join("boot").join(&vmlinuz))?;
-		std::fs::copy(bootdir.join(&initramfs), dest.join("boot").join(&initramfs))?;
+		// std::fs::copy(vmlinuz, dest.join("boot").join(&vmlinuz))?;
+		let vmlinuz_dest = dest.join("boot").join("vmlinuz");
+		trace!(?vmlinuz, ?vmlinuz_dest, "Copying vmlinuz to destination");
+		if let Err(e) = run_cmd!(cp -v $vmlinuz $vmlinuz_dest) {
+			tracing::error!(?e, ?vmlinuz, ?vmlinuz_dest, "Failed to copy vmlinuz");
+			return Err(e.into());
+		}
+		if let Err(e) = run_cmd!(cp -v $bootdir/$initramfs $dest/boot/initramfs.img) {
+			tracing::error!(?e, ?initramfs, "Failed to copy initramfs");
+			return Err(e.into());
+		}
 
-		Ok((vmlinuz, initramfs))
+		Ok(("vmlinuz".to_string(), "initramfs.img".to_string()))
 	}
 
 	fn cp_limine(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
@@ -173,15 +201,36 @@ impl Bootloader {
 	}
 
 	fn cp_grub(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
+		const BOOTIMGS: &str = "boot_imgs";
 		let imgd = chroot.parent().unwrap().join(ISO_TREE);
+		let bootimgs = chroot.parent().unwrap().join(BOOTIMGS);
+		std::fs::create_dir_all(&imgd)?;
+		std::fs::create_dir_all(&bootimgs)?;
 		let cmd = &manifest.kernel_cmdline.as_ref().map_or("", |s| s);
 		let volid = manifest.get_volid();
 
-		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &imgd)?;
-
+		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &bootimgs)?;
+		
+		// oh.
 		let _ = std::fs::remove_dir_all(imgd.join("boot"));
+		// copy boot files
 		cmd_lib::run_cmd!(cp -r $chroot/boot $imgd/)?;
-		std::fs::rename(imgd.join("boot/grub2"), imgd.join("boot/grub"))?;
+		// rename them if needed
+		if imgd.join("boot/grub2").exists() && !imgd.join("boot/grub").exists() {
+			std::fs::rename(imgd.join("boot/grub2"), imgd.join("boot/grub"))?;
+		}
+
+		// copy the vmlinuz and kernel initramfs
+		std::fs::copy(
+			bootimgs.join("boot").join(&vmlinuz),
+			imgd.join("boot").join(&vmlinuz),
+		)?;
+
+
+		std::fs::copy(
+			bootimgs.join("boot").join(&initramfs),
+			imgd.join("boot").join(&initramfs),
+		)?;
 
 		let distro = &manifest.distro.as_ref().map_or("Linux", |s| s);
 
@@ -326,9 +375,11 @@ impl RootBuilder for BootcRootBuilder {
 		cmd_lib::run_cmd!(
 			podman pull $image 2>&1;
 		)?;
+		info!("Current working directory: {}", std::env::current_dir()?.display());
 
 		let context = self.context.as_deref().unwrap_or(".");
 
+		// get pwd
 		info!("Building OCI image");
 		let d_image = if let Some(derivation) = &self.derivation {
 			let og_image = image.split(':').next().unwrap_or(image);
@@ -343,7 +394,7 @@ impl RootBuilder for BootcRootBuilder {
 			image.to_string()
 		};
 
-		info!("Exporting OCI image");
+		info!(?d_image, "Exporting OCI image");
 		std::fs::create_dir_all(chroot)?;
 
 		let container = cmd_lib::run_fun!(
@@ -357,8 +408,7 @@ impl RootBuilder for BootcRootBuilder {
 		let container_store = chroot.canonicalize()?.join("var/lib/containers/storage");
 		std::fs::create_dir_all(&container_store)?;
 
-		info!(?chroot, "Copying OCI image to chroot's container store");
-
+		info!(?chroot, ?image, "Copying OCI image to chroot's container store");
 
 		// Push the original image to the chroot's container store, not the derived one
 		cmd_lib::run_cmd!(
@@ -697,32 +747,23 @@ pub struct IsoBuilder {
 	pub root_builder: Box<dyn RootBuilder>,
 }
 
-const DR_MODS: &str = "livenet dmsquash-live dmsquash-live-ntfs convertfs pollcdrom qemu qemu-net";
+const DR_MODS: &str = "livenet dmsquash-live convertfs pollcdrom qemu qemu-net";
 const DR_OMIT: &str = "";
-const DR_ARGS: &str = "--xz --no-early-microcode";
+const DR_ARGS: &str = "--xz --no-early-microcode --reproducible";
 
 impl IsoBuilder {
-	fn dracut(&self, root: &Path) -> Result<()> {
+	fn dracut(&self, root: &Path) -> Result<String> {
 		info!(?root, "Generating initramfs");
 		bail_let!(
-			Some(kver) = fs::read_dir(root.join("boot"))?.find_map(|f| {
-				// find filename: initramfs-*.img
-				trace!(?f, "File in /boot");
-				f.ok().and_then(|f| {
-					let filename = f.file_name();
-					let filename = filename.to_str()?;
-					let kver = filename.strip_prefix("initramfs-")?.strip_suffix(".img")?;
-					if kver.contains("-rescue-") {
-						return None;
-					}
-					debug!(?kver, "Kernel version");
-					Some(kver.to_string())
-					// Some(
-					// 	f.file_name().to_str()?.rsplit_once('/')?.1.strip_prefix("initramfs-")?.strip_suffix(".img")?.to_string()
-					// )
-				})
-			}) => "Can't find initramfs in /boot."
+			Some(kver) = fs::read_dir(root.join("usr/lib/modules"))?.find_map(|f| {
+				// find any directory
+				trace!(?f, "File in /usr/lib/modules");
+				f.ok()
+					.and_then(|entry| entry.file_name().to_str().map(|s| s.to_string()))
+			}) => "Can't find any kernel version in /usr/lib/modules"
 		);
+
+		info!(?kver, "Found kernel version");
 
 		// set dracut options
 		// this is kind of a hack, but uhh it works maybe
@@ -748,17 +789,24 @@ impl IsoBuilder {
 			dr_args.push(&dr_omit);
 		}
 
+		//make dir
+		std::fs::create_dir_all(root.join("boot"))?;
+
 		crate::util::enter_chroot_run(root, || -> Result<()> {
+			// get current dir
+			let current_dir = std::env::current_dir()?;
+			info!(?current_dir, "Current directory");
 			std::process::Command::new("dracut")
 				.env("DRACUT_SYSTEMD", "0")
 				.args(&dr_args)
-				.arg(format!("/boot/initramfs-{kver}.img"))
 				.arg("--kver")
 				.arg(&kver)
+				.arg("/boot/initramfs.img")
 				.status()?;
 			Ok(())
 		})?;
-		Ok(())
+
+		Ok(root.join("boot").join("initramfs.img").to_string_lossy().to_string())
 	}
 
 	pub fn squashfs(&self, chroot: &Path, image: &Path) -> Result<()> {
@@ -961,6 +1009,11 @@ impl ImageBuilder for IsoBuilder {
 		// However, we'll keep an env flag to keep the chroot for debugging purposes
 		if env_flag!("KATSU_KEEP_CHROOT").is_none() {
 			info!("Removing chroot");
+			// Try to unmount recursively first
+			cmd_lib::run_cmd!(
+				sudo umount -Rv $chroot;
+			)
+			.ok();
 			fs::remove_dir_all(chroot)?;
 		}
 
