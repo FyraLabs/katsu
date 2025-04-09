@@ -245,6 +245,7 @@ impl Bootloader {
 		.to_uppercase();
 
 		// Funny script to install GRUB
+		// todo: consider not hardcoding to fedora
 		let _ = std::fs::create_dir_all(imgd.join("EFI/BOOT/fonts"));
 		cmd_lib::run_cmd!(
 			cp -av $imgd/boot/efi/EFI/fedora/. $imgd/EFI/BOOT;
@@ -861,10 +862,12 @@ impl IsoBuilder {
 	#[allow(dead_code)]
 	pub fn erofs(&self, chroot: &Path, image: &Path) -> Result<()> {
 		std::process::Command::new("mkfs.erofs")
-			.arg("-d")
-			.arg(chroot)
-			.arg("-o")
+			.arg("-zlz4hc,level=12")
+			.args(["--exclude-path", "/dev/"])
+			.args(["--exclude-path", "/proc/"])
+			.args(["--exclude-path", "/sys/"])
 			.arg(image)
+			.arg(chroot)
 			.status()?;
 		Ok(())
 	}
@@ -901,6 +904,8 @@ impl IsoBuilder {
 				};
 
 				std::process::Command::new("xorrisofs")
+					// Multi-extent ISO9660
+					.args(["-iso-level", "3"])
 					.arg("-R")
 					.arg("-V")
 					.arg(&volid)
@@ -998,7 +1003,11 @@ impl ImageBuilder for IsoBuilder {
 		let image_dir = workspace.join(ISO_TREE).join("LiveOS");
 		fs::create_dir_all(&image_dir)?;
 
-		phase!("rootimg": self.squashfs(chroot, &image_dir.join("squashfs.img")));
+		if env_flag!("KATSU_EROFS").is_some() {
+			phase!("rootimg": self.erofs(chroot, &image_dir.join("squashfs.img")));
+		} else {
+			phase!("rootimg": self.squashfs(chroot, &image_dir.join("squashfs.img")));
+		}
 
 		phase!("copy-live": self.bootloader.copy_liveos(manifest, chroot));
 
