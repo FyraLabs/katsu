@@ -34,6 +34,7 @@ env:
     grub2-tools-extra
     isomd5sum
     dnf5
+    podman
 
 on:
   push:
@@ -52,7 +53,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Cache DNF packages
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: /var/cache/dnf
           key: dnf-${{ runner.os }}
@@ -103,7 +104,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Cache DNF packages
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: /var/cache/dnf
           key: dnf-${{ runner.os }}
@@ -153,7 +154,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Cache DNF packages
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: /var/cache/dnf
           key: dnf-${{ runner.os }}
@@ -203,7 +204,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Cache DNF packages
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: /var/cache/dnf
           key: dnf-${{ runner.os }}
@@ -239,6 +240,55 @@ jobs:
           name: iso-x86_64
           path: tests/ng/katsu-work/image/katsu.iso
 
+  iso-bootc-x86_64:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/terrapkg/builder:f42
+      # Pass /dev from host to container
+      # Very hacky, but it works
+      # Microsoft/Github, if you're reading this,
+      # I'm sorry.
+      options: --privileged -v /dev:/dev
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache DNF packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/dnf
+          key: dnf-${{ runner.os }}
+          restore-keys: |
+            dnf-${{ runner.os }}-
+            dnf-
+
+      - name: Install dependencies
+        run: dnf install -y $DNF_PKGS
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build and install katsu
+        run: cargo install --path . --debug
+
+      - name: Run test
+        run: |
+          export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
+          pushd tests/ng
+          echo "COLORBT_SHOW_HIDDEN=1" >> .env
+          echo "KATSU_LOG=trace" >> .env
+          katsu -o iso bootc/katsu-iso-bootc.yaml 2>&1
+          mv out.iso katsu-work/image/katsu.iso
+          popd
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: iso-bootc-x86_64
+          path: tests/ng/katsu-work/image/katsu.iso
+
   iso-limine-x86_64:
     runs-on: ubuntu-latest
     container:
@@ -252,7 +302,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Cache DNF packages
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: /var/cache/dnf
           key: dnf-${{ runner.os }}
@@ -301,7 +351,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Cache DNF packages
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: /var/cache/dnf
           key: dnf-${{ runner.os }}

@@ -52,6 +52,9 @@ pub struct Manifest {
 	#[serde(default)]
 	pub dnf: crate::builder::DnfRootBuilder,
 
+	#[serde(default)]
+	pub bootc: crate::builder::BootcRootBuilder,
+
 	/// Scripts to run before and after the build
 	#[serde(default)]
 	pub scripts: ScriptsManifest,

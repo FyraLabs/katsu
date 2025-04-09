@@ -1,0 +1,36 @@
+ARG DERIVE_FROM
+FROM registry.fedoraproject.org/fedora:41 AS bootloader_base
+# HACK: We copy GRUB2 and shim from Fedora, because CentOS' GRUB2 is kinda wonky
+
+# todo: aarch64 hack
+RUN --mount=type=cache,target=/var/cache/dnf \
+    dnf install -y grub2 grub2-efi grub2-tools grub2-tools-extra xorriso shim dosfstools grub2-efi-x64-modules grub2-efi-x64-cdboot grub2-efi-x64
+
+FROM ${DERIVE_FROM}
+
+# Install the necessary packages
+RUN --mount=type=cache,target=/var/cache/dnf \
+    dnf install -y kernel dracut dracut-live grub2-tools grub2-common grub2-pc-modules grub2-efi-x64 shim-x64
+
+# install fuse-overlayfs so we can nest overlayfs inside overlayfs with FUSE magic
+# this is needed for the bootable ISO to work
+
+# This is a podman/dracut implementation detail
+
+RUN curl -fSsLo "/usr/bin/fuse-overlayfs" "https://github.com/containers/fuse-overlayfs/releases/download/v1.14/fuse-overlayfs-$(arch)" && \
+    chmod +x "/usr/bin/fuse-overlayfs"
+
+# HACK: Make /var/tmp be a tmpfs by symlinking to /tmp,
+# in order to make bootc work at runtime.
+# This is a bootc implementation detail
+# todo: consider if we have to do this inside katsu itself
+RUN rm -rf /var/tmp && \
+    ln -sr /tmp /var/tmp
+
+# convenience: write the bootc image tag to /etc/bootc-image
+RUN echo "${DERIVE_FROM}" > /etc/bootc-image
+
+COPY --from=bootloader_base /boot/efi /boot/efi
+COPY --from=bootloader_base /boot/grub2 /boot/grub2
+
+# yeah thats pretty much it

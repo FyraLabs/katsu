@@ -1,0 +1,7 @@
+# Example manifest for a Katsu bootc build
+builder: bootc
+distro: Katsu Atomic
+
+bootc:
+  image: ghcr.io/ublue-os/bluefin:lts
+  derivation: bootc/Containerfile
