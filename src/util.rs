@@ -37,6 +37,36 @@ macro_rules! env_flag {
 	};
 }
 
+/// Macro for feature flags (New)
+/// This makes use of the new CLI option `-X` (Feature Flags)
+///
+/// This one is a boolean value, detecting if the literal `$flag` is present in the feature flags
+#[macro_export]
+macro_rules! feature_flag_bool {
+	($flag:literal) => {
+		$crate::cli::KatsuCli::p_parse().feature_flags.iter().any(|x| x == $flag)
+	};
+}
+
+/// Macro for feature flags (New)
+/// This makes use of the new CLI option `-X` (Feature Flags)
+///
+/// This one is a string value, detecting if any feature flag with the prefix `$flag=` is present in the feature flags
+#[macro_export]
+macro_rules! feature_flag_str {
+	($flag:literal) => {{
+		{
+			let parsed_cli = $crate::cli::KatsuCli::p_parse();
+			let feature_flags = parsed_cli.feature_flags.clone();
+			feature_flags
+				.iter()
+				.find(|x| x.starts_with(&format!("{}=", $flag)))
+				.and_then(|x| x.split('=').nth(1))
+				.map(|s| s.to_string()) // Convert &str to owned String
+		}
+	}};
+}
+
 /// Macro that wraps around cmd_lib::run_cmd!, but runs it in a chroot
 ///
 /// First argument is the chroot path, the following arguments are the command and arguments

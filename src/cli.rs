@@ -12,7 +12,7 @@ use crate::{builder::KatsuBuilder, config::Manifest};
 // so we can do something like
 // katsu compose /path/to/manifest.yaml
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(author, version, about)]
 pub struct KatsuCli {
 	/// Enable verbose output
@@ -26,11 +26,11 @@ pub struct KatsuCli {
 	#[arg(value_enum)]
 	/// Format of the artifact Katsu should output
 	output: OutputFormat,
-	
+
 	/// Skip individual phases
-	/// 
+	///
 	/// By default, no phases are skipped for any format
-	/// 
+	///
 	#[arg(short, long,env = "KATSU_SKIP_PHASES", value_parser = value_parser!(SkipPhases))]
 	#[arg()]
 	skip_phases: Option<SkipPhases>,
@@ -38,13 +38,30 @@ pub struct KatsuCli {
 	#[arg(long)]
 	/// Override architecture to build for, makes use of DNF's `--arch` option
 	/// and chroots using userspace QEMU emulation if necessary
-	/// 
+	///
 	/// By default, Katsu will build for the host architecture
 	arch: Option<String>,
 
 	#[arg(long, short = 'O')]
 	/// Override output file location
 	output_file: Option<PathBuf>,
+
+	/// Katsu feature flags, comma separated
+	#[arg(
+		long,
+		short = 'X',
+		env = "KATSU_FEATURE_FLAGS",
+		default_value = "",
+		value_delimiter = ','
+	)]
+	pub feature_flags: Vec<String>,
+}
+
+impl KatsuCli {
+	// passthrough for clap::Parser::parse
+	pub fn p_parse() -> Self {
+		Self::parse()
+	}
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
