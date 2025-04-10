@@ -578,6 +578,7 @@ impl RootBuilder for BootcRootBuilder {
 		)?;
 
 		let container_store = chroot.canonicalize()?.join("var/lib/containers/storage");
+		let container_store_ovfs = container_store.join("overlay");
 		std::fs::create_dir_all(&container_store)?;
 
 		if self.embed_image {
@@ -585,8 +586,13 @@ impl RootBuilder for BootcRootBuilder {
 
 			// Push the original image to the chroot's container store, not the derived one
 			cmd_lib::run_cmd!(
-				podman push ${image} "containers-storage:[overlay@${container_store}]$image" --remove-signatures
+				podman push ${image} "containers-storage:[overlay@${container_store}]$image" --remove-signatures;
 			)?;
+			// Then we also unmount the thing so it doesn't get in the way
+			// but we don't wanna fail entirely if this fails
+			cmd_lib::run_cmd!(
+				umount -f $container_store_ovfs 2>&1;
+			).ok();
 		}
 
 		Ok(())
