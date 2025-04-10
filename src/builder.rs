@@ -174,8 +174,14 @@ impl Bootloader {
 
 	fn cp_grub(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
 		let imgd = chroot.parent().unwrap().join(ISO_TREE);
+		let assets = chroot.parent().unwrap().join("assets");
+		std::fs::create_dir_all(&assets)?;
 		let cmd = &manifest.kernel_cmdline.as_ref().map_or("", |s| s);
 		let volid = manifest.get_volid();
+		if manifest.dnf.arch.as_deref().unwrap_or(std::env::consts::ARCH) == "x86_64" {
+			let hybrid_img = chroot.join("usr/lib/grub/i386-pc/boot_hybrid.img");
+			std::fs::copy(&hybrid_img, assets.join("boot_hybrid.img"))?;
+		};
 
 		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &imgd)?;
 
@@ -742,9 +748,10 @@ impl IsoBuilder {
 		let volid = manifest.get_volid();
 		let (uefi_bin, bios_bin) = self.bootloader.get_bins();
 		let tree = chroot.parent().unwrap().join(ISO_TREE);
+		let assets = chroot.parent().unwrap().join("assets");
 
 		// TODO: refactor to new fn in Bootloader
-		let grub2_mbr_hybrid = chroot.join("usr/lib/grub/i386-pc/boot_hybrid.img");
+		let grub2_mbr_hybrid = assets.join("boot_hybrid.img");
 		let efiboot = tree.join("boot/efiboot.img");
 
 		match self.bootloader {
@@ -879,7 +886,6 @@ impl ImageBuilder for IsoBuilder {
 		phase!("bootloader": self.bootloader.install(&image));
 
 		info!("Build process completed successfully for image: {:?}", image);
-
 
 		Ok(())
 	}
