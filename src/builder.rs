@@ -867,6 +867,10 @@ impl ImageBuilder for IsoBuilder {
 		fs::create_dir_all(&image_dir)?;
 
 		phase!("rootimg": self.squashfs(chroot, &image_dir.join("squashfs.img")));
+		if env_flag!("KATSU_KEEP_CHROOT").is_none() {
+			info!("Removing chroot");
+			fs::remove_dir_all(chroot)?;
+		}
 
 		phase!("copy-live": self.bootloader.copy_liveos(manifest, chroot));
 
@@ -874,12 +878,8 @@ impl ImageBuilder for IsoBuilder {
 
 		phase!("bootloader": self.bootloader.install(&image));
 
-		// Reduce storage overhead by removing the original chroot
-		// However, we'll keep an env flag to keep the chroot for debugging purposes
-		if env_flag!("KATSU_KEEP_CHROOT").is_none() {
-			info!("Removing chroot");
-			fs::remove_dir_all(chroot)?;
-		}
+		info!("Build process completed successfully for image: {:?}", image);
+
 
 		Ok(())
 	}
