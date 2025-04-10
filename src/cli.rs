@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Mutex};
 
 use clap::{value_parser, Parser, ValueEnum};
 use color_eyre::Result;
@@ -6,6 +6,8 @@ use serde_derive::{Deserialize, Serialize};
 use tracing::trace;
 
 use crate::{builder::KatsuBuilder, config::Manifest};
+
+static CLI_MUTEX: Mutex<Option<KatsuCli>> = Mutex::new(None);
 
 // The structure should be like RPM-OSTree's Compose
 // CLI
@@ -60,7 +62,7 @@ pub struct KatsuCli {
 impl KatsuCli {
 	// passthrough for clap::Parser::parse
 	pub fn p_parse() -> Self {
-		Self::parse()
+		CLI_MUTEX.lock().unwrap().get_or_insert_with(Self::parse).clone()
 	}
 }
 
