@@ -867,12 +867,12 @@ impl ImageBuilder for IsoBuilder {
 		fs::create_dir_all(&image_dir)?;
 
 		phase!("rootimg": self.squashfs(chroot, &image_dir.join("squashfs.img")));
+
+		phase!("copy-live": self.bootloader.copy_liveos(manifest, chroot));
 		if env_flag!("KATSU_KEEP_CHROOT").is_none() {
 			info!("Removing chroot");
 			fs::remove_dir_all(chroot)?;
 		}
-
-		phase!("copy-live": self.bootloader.copy_liveos(manifest, chroot));
 
 		phase!("iso": self.xorriso(chroot, &image, manifest));
 
