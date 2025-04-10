@@ -1,11 +1,11 @@
 builder: dnf
 
-users:
-  - username: ultramarine
-    # plaintext password: ultramarine
-    password: "$y$j9T$6/DebcxXazPrtBYnNXtEM.$yaUJHww5Mo1L8xNJ9IDJ.bvKOrIJxAG9PGQKWioBMx3"
-    groups:
-      - wheel
+# users:
+#   - username: ultramarine
+#     # plaintext password: ultramarine
+#     password: "$y$j9T$6/DebcxXazPrtBYnNXtEM.$yaUJHww5Mo1L8xNJ9IDJ.bvKOrIJxAG9PGQKWioBMx3"
+#     groups:
+#       - wheel
 
 scripts:
   post:
