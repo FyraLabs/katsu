@@ -17,6 +17,7 @@ use std::{
 use tracing::{debug, info, trace, warn};
 
 const WORKDIR: &str = "katsu-work";
+const BOOTIMGS: &str = "boot_imgs";
 crate::prepend_comment!(GRUB_PREPEND_COMMENT: "/boot/grub/grub.cfg", "Grub configurations", katsu::builder::Bootloader::cp_grub);
 crate::prepend_comment!(LIMINE_PREPEND_COMMENT: "/boot/limine.cfg", "Limine configurations", katsu::builder::Bootloader::cp_limine);
 
@@ -279,9 +280,14 @@ impl Bootloader {
 	}
 
 	fn cp_grub(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
-		const BOOTIMGS: &str = "boot_imgs";
 		let iso_tree = chroot.parent().unwrap().join(ISO_TREE);
 		let boot_imgs_dir = chroot.parent().unwrap().join(BOOTIMGS);
+		// port from katsu 0.9.2 :3
+		if self.get_arch_short(manifest) == "x86_64" {
+			// Copy GRUB shit
+			let hybrid_img = chroot.join("usr/lib/grub/i386-pc/boot_hybrid.img");
+			std::fs::copy(&hybrid_img, boot_imgs_dir.join("boot_hybrid.img"))?;
+		}
 
 		// Create necessary directories
 		self.create_grub_directories(&iso_tree, &boot_imgs_dir)?;
@@ -1057,9 +1063,9 @@ impl IsoBuilder {
 		let volid = manifest.get_volid();
 		let (uefi_bin, bios_bin) = self.bootloader.get_bins();
 		let tree = chroot.parent().unwrap().join(ISO_TREE);
+		let boot_imgs_dir = chroot.parent().unwrap().join(BOOTIMGS);
 
-		// TODO: refactor to new fn in Bootloader
-		let grub2_mbr_hybrid = chroot.join("usr/lib/grub/i386-pc/boot_hybrid.img");
+		let grub2_mbr_hybrid = boot_imgs_dir.join("boot_hybrid.img");
 		let efiboot = tree.join("boot/efiboot.img");
 
 		match self.bootloader {
@@ -1191,11 +1197,6 @@ impl ImageBuilder for IsoBuilder {
 		}
 
 		phase!("copy-live": self.bootloader.copy_liveos(manifest, chroot));
-
-		phase!("iso": self.xorriso(chroot, &image, manifest));
-
-		phase!("bootloader": self.bootloader.install(&image));
-
 		// Reduce storage overhead by removing the original chroot
 		// However, we'll keep an env flag to keep the chroot for debugging purposes
 		if !feature_flag_bool!("keep-chroot")
@@ -1209,6 +1210,10 @@ impl ImageBuilder for IsoBuilder {
 			.ok();
 			fs::remove_dir_all(chroot)?;
 		}
+
+		phase!("iso": self.xorriso(chroot, &image, manifest));
+
+		phase!("bootloader": self.bootloader.install(&image));
 
 		Ok(())
 	}
