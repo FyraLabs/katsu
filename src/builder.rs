@@ -565,7 +565,7 @@ impl RootBuilder for BootcRootBuilder {
 			let deriv = format!("{og_image}:katsu_deriv");
 
 			cmd_lib::run_cmd!(
-				podman build -t $deriv --build-arg DERIVE_FROM=$image -f $derivation $context;
+				podman build -t $deriv --network host --build-arg DERIVE_FROM=$image -f $derivation $context;
 			)?;
 			deriv
 		} else {
