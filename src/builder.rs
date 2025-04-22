@@ -284,9 +284,17 @@ impl Bootloader {
 		let boot_imgs_dir = chroot.parent().unwrap().join(BOOTIMGS);
 		// port from katsu 0.9.2 :3
 		if self.get_arch_short(manifest) == "x86_64" {
-			// Copy GRUB shit
+			// Copy GRUB files for hybrid boot support
+			info!("Copying GRUB hybrid boot image");
 			let hybrid_img = chroot.join("usr/lib/grub/i386-pc/boot_hybrid.img");
-			std::fs::copy(&hybrid_img, boot_imgs_dir.join("boot_hybrid.img"))?;
+			trace!(?hybrid_img, "Source hybrid boot image location");
+			let dest = boot_imgs_dir.join("boot_hybrid.img");
+			trace!(?dest, "Destination hybrid boot image location");
+			if !hybrid_img.exists() {
+				warn!("Hybrid boot image not found at expected location");
+			}
+			std::fs::copy(&hybrid_img, &dest)?;
+			debug!("Successfully copied hybrid boot image");
 		}
 
 		// Create necessary directories
