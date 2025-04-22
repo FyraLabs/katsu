@@ -283,7 +283,7 @@ impl Bootloader {
 		let iso_tree = chroot.parent().unwrap().join(ISO_TREE);
 		let boot_imgs_dir = chroot.parent().unwrap().join(BOOTIMGS);
 		// port from katsu 0.9.2 :3
-		if self.get_arch_short(manifest) == "x86_64" {
+		if self.get_arch(manifest) == "x86_64" {
 			// Copy GRUB files for hybrid boot support
 			info!("Copying GRUB hybrid boot image");
 			let hybrid_img = chroot.join("usr/lib/grub/i386-pc/boot_hybrid.img");
@@ -402,8 +402,12 @@ impl Bootloader {
 		Ok(())
 	}
 
+	fn get_arch<'a>(&self, manifest: &'a Manifest) -> &'a str {
+		manifest.dnf.arch.as_deref().unwrap_or(std::env::consts::ARCH)
+	}
+
 	fn get_arch_short(&self, manifest: &Manifest) -> &'static str {
-		match manifest.dnf.arch.as_deref().unwrap_or(std::env::consts::ARCH) {
+		match self.get_arch(manifest) {
 			"x86_64" => "x64",
 			"aarch64" => "aa64",
 			_ => unimplemented!(),
@@ -411,7 +415,7 @@ impl Bootloader {
 	}
 
 	fn get_arch_32bit(&self, manifest: &Manifest) -> &'static str {
-		match manifest.dnf.arch.as_deref().unwrap_or(std::env::consts::ARCH) {
+		match self.get_arch(manifest) {
 			"x86_64" => "ia32",
 			"aarch64" => "arm",
 			_ => unimplemented!(),
