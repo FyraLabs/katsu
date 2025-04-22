@@ -282,7 +282,9 @@ impl Bootloader {
 	fn cp_grub(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
 		let iso_tree = chroot.parent().unwrap().join(ISO_TREE);
 		let boot_imgs_dir = chroot.parent().unwrap().join(BOOTIMGS);
+		// create if not exist
 		// port from katsu 0.9.2 :3
+		std::fs::create_dir_all(&boot_imgs_dir)?; // create if not exist
 		if self.get_arch(manifest) == "x86_64" {
 			// Copy GRUB files for hybrid boot support
 			info!("Copying GRUB hybrid boot image");
