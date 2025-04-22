@@ -292,10 +292,10 @@ impl Bootloader {
 			trace!(?hybrid_img, "Source hybrid boot image location");
 			let dest = boot_imgs_dir.join("boot_hybrid.img");
 			trace!(?dest, "Destination hybrid boot image location");
+			std::fs::copy(&hybrid_img, &dest)?;
 			if !hybrid_img.exists() {
 				warn!("Hybrid boot image not found at expected location");
 			}
-			std::fs::copy(&hybrid_img, &dest)?;
 			debug!("Successfully copied hybrid boot image");
 		}
 
