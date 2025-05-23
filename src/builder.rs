@@ -12,6 +12,7 @@ use serde_derive::{Deserialize, Serialize};
 use std::{
 	collections::BTreeMap,
 	fs,
+	io::{Write},
 	path::{Path, PathBuf},
 };
 use tracing::{debug, info, trace, warn};
@@ -20,6 +21,7 @@ const WORKDIR: &str = "katsu-work";
 const BOOTIMGS: &str = "boot_imgs";
 crate::prepend_comment!(GRUB_PREPEND_COMMENT: "/boot/grub/grub.cfg", "Grub configurations", katsu::builder::Bootloader::cp_grub);
 crate::prepend_comment!(LIMINE_PREPEND_COMMENT: "/boot/limine.cfg", "Limine configurations", katsu::builder::Bootloader::cp_limine);
+crate::prepend_comment!(REFIND_PREPEND_COMMENT: "/boot/efi/EFI/refind/refind.conf", "rEFInd configurations", katsu::builder::Bootloader::cp_refind);
 
 /// Represents the bootloader types supported by Katsu
 ///
@@ -37,6 +39,8 @@ pub enum Bootloader {
 	Limine,
 	/// systemd-boot, a simple UEFI boot manager
 	SystemdBoot,
+	/// rEFInd, a graphical UEFI boot manager
+	REFInd,
 }
 
 impl From<&str> for Bootloader {
@@ -46,6 +50,7 @@ impl From<&str> for Bootloader {
 			"grub" | "grub2" => Self::Grub,
 			"grub-bios" => Self::GrubBios,
 			"systemd-boot" => Self::SystemdBoot,
+			"refind" => Self::REFInd,
 			_ => {
 				warn!("Unknown bootloader: {value}, falling back to GRUB");
 				Self::Grub
@@ -76,6 +81,7 @@ impl Bootloader {
 			Self::GrubBios => {
 				cmd_lib::run_cmd!(grub-install --target=i386-pc --boot-directory=$image/boot 2>&1)?
 			},
+			Self::REFInd => info!("rEFInd doesn't need installation to ISO image, files already copied during ISO creation"),
 		}
 		Ok(())
 	}
@@ -96,6 +102,7 @@ impl Bootloader {
 			Self::Limine => ("boot/limine-uefi-cd.bin", "boot/limine-bios-cd.bin"),
 			Self::GrubBios => todo!(),
 			Self::SystemdBoot => todo!(),
+			Self::REFInd => ("boot/efi/EFI/refind/refind_x64.efi", ""),
 		}
 	}
 	/// Copies vmlinuz and initramfs files from the chroot to a destination directory
@@ -247,6 +254,54 @@ impl Bootloader {
 
 		Ok(())
 	}
+
+	fn cp_refind(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
+		info!("Copying rEFInd files");
+		let distro = &manifest.distro.as_ref().map_or("Linux", |s| s);
+		let cmd = &manifest.kernel_cmdline.as_ref().map_or("", |s| s);
+		let iso_tree = chroot.parent().unwrap().join(ISO_TREE);
+		
+		std::fs::create_dir_all(iso_tree.join("EFI/BOOT"))?;
+
+		std::fs::copy(
+			"/usr/share/rEFInd/refind/refind_x64.efi",
+			iso_tree.join("EFI/BOOT/BOOTX64.EFI"),
+		)?;
+
+		std::fs::create_dir_all(iso_tree.join("EFI/BOOT/drivers_x64"))?;
+
+		std::fs::copy(
+			"/usr/share/rEFInd/refind/drivers_x64/iso9660_x64.efi",
+			iso_tree.join("EFI/BOOT/drivers_x64/iso9660_x64.efi"),
+		)?;
+
+		std::fs::copy(
+			"/usr/share/rEFInd/refind/drivers_x64/ext4_x64.efi",
+			iso_tree.join("EFI/BOOT/drivers_x64/ext4_x64.efi"),
+		)?;
+
+		std::fs::create_dir_all(iso_tree.join("EFI/BOOT/icons"))?;
+
+		cmd_lib::run_cmd!(
+			cp -rv /usr/share/rEFInd/refind/icons/. $iso_tree/EFI/BOOT/icons/ 2>&1;
+		)?;
+
+		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &iso_tree)?;
+		let volid = manifest.get_volid();
+
+		let refind_cfg = iso_tree.join("EFI/BOOT/refind.conf");
+		crate::tpl!("refind.cfg.tera" => { REFIND_PREPEND_COMMENT, distro, vmlinuz, initramfs, cmd, volid } => &refind_cfg);
+
+		let mut nsh = std::fs::File::create(iso_tree.join("startup.nsh"))?;
+		// Point directly to the rEFInd EFI file
+		writeln!(nsh, "EFI\\BOOT\\BOOTX64.EFI")?;
+
+		// /usr/share/edk2/ovmf/Shell.efi
+		self.mkefiboot(chroot, manifest)?;
+
+		Ok(())
+	}
+
 	/// A clone of mkefiboot from lorax
 	/// Currently only works for PC, no mac support
 	fn mkefiboot(&self, chroot: &Path, _: &Manifest) -> Result<()> {
@@ -493,6 +548,7 @@ impl Bootloader {
 			Self::Limine => self.cp_limine(manifest, chroot)?,
 			Self::SystemdBoot => todo!(),
 			Self::GrubBios => self.cp_grub_bios(chroot)?,
+			Self::REFInd => self.cp_refind(manifest, chroot)?,
 		}
 		Ok(())
 	}
@@ -1134,6 +1190,39 @@ impl IsoBuilder {
 					.arg("--interval:appended_partition_2:all::")
 					.arg("-no-emul-boot")
 					.arg("-vvvvv")
+					.arg("--md5")
+					.arg(&tree)
+					.arg("-o")
+					.arg(image)
+					.status()?;
+			},
+			Bootloader::REFInd => {
+				std::process::Command::new("xorriso")
+					.arg("-as")
+					.arg("mkisofs")
+					.arg("-iso-level")
+					.arg("3")
+					.arg("-full-iso9660-filenames")
+					.arg("-joliet")
+					.arg("-joliet-long")
+					.arg("-rational-rock")
+					.arg("-volid")
+					.arg(volid)
+					.arg("-partition_offset")
+					.arg("16")
+					.arg("-append_partition")
+					.arg("2")
+					.arg("C12A7328-F81F-11D2-BA4B-00A0C93EC93B")
+					.arg(&efiboot)
+					.arg("-iso_mbr_part_type")
+					.arg("EBD0A0A2-B9E5-4433-87C0-68B6B72699C7")
+					.arg("-appended_part_as_gpt")
+					.arg("-eltorito-alt-boot")
+					.arg("-isohybrid-gpt-basdat")
+					.arg("-no-emul-boot")
+					.arg("-vvvvv")
+					.arg("-e")
+					.arg("--interval:appended_partition_2:all::")
 					.arg("--md5")
 					.arg(&tree)
 					.arg("-o")
