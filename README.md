@@ -22,7 +22,7 @@ Katsu uses YAML configuration files to describe the image, with modular manifest
 - `xorriso`
 - `clang-devel`
 - `dracut`
-- `limine` or `grub2`
+- `limine` or `grub2` or `refind`
 - `rpm`
 - `dnf` or `dnf5`
 - `systemd-devel`
