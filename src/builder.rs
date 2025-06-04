@@ -296,9 +296,42 @@ impl Bootloader {
 		// Point directly to the rEFInd EFI file
 		writeln!(nsh, "EFI\\BOOT\\BOOTX64.EFI")?;
 
-		// /usr/share/edk2/ovmf/Shell.efi
-		self.mkefiboot(chroot, manifest)?;
+		self.mk_refind_efiboot(chroot, manifest)?;
 
+		Ok(())
+	}
+
+	/// Creates the rEFInd EFI boot image
+	fn mk_refind_efiboot(&self, chroot: &Path, _: &Manifest) -> Result<()> {
+		let tree = chroot.parent().unwrap().join(ISO_TREE);
+
+		// make EFI disk
+		let sparse_path = &tree.join("boot/efiboot.img");
+		crate::util::create_sparse(sparse_path, 256 * 1024 * 1024)?; // 50MiB (increased from 25MiB)
+
+		// let's mount the disk as a loop device
+		let (ldp, hdl) = loopdev_with_file(sparse_path)?;
+
+		cmd_lib::run_cmd!(
+			// Format disk with mkfs.fat
+			mkfs.msdos $ldp -v -n EFI 2>&1;
+
+			// Mount disk to /tmp/katsu.efiboot
+			mkdir -p /tmp/katsu.efiboot;
+			mount $ldp /tmp/katsu.efiboot;
+
+			mkdir -p /tmp/katsu.efiboot/EFI/BOOT;
+			cp -avr $tree/EFI/BOOT/. /tmp/katsu.efiboot/EFI/BOOT 2>&1;
+			
+			// Copy kernel and initramfs to efiboot
+			mkdir -p /tmp/katsu.efiboot/boot;
+			cp -av $tree/boot/vmlinuz /tmp/katsu.efiboot/boot/ 2>&1;
+			cp -av $tree/boot/initramfs.img /tmp/katsu.efiboot/boot/ 2>&1;
+
+			umount /tmp/katsu.efiboot;
+		)?;
+
+		drop(hdl);
 		Ok(())
 	}
 
@@ -1208,25 +1241,18 @@ impl IsoBuilder {
 					.arg("-rational-rock")
 					.arg("-volid")
 					.arg(volid)
-					.arg("-partition_offset")
-					.arg("16")
+					.arg("-eltorito-alt-boot")
+					.arg("-e")
+					.arg("boot/efiboot.img")
+					.arg("-no-emul-boot")
 					.arg("-append_partition")
 					.arg("2")
 					.arg("C12A7328-F81F-11D2-BA4B-00A0C93EC93B")
 					.arg(&efiboot)
-					.arg("-iso_mbr_part_type")
-					.arg("EBD0A0A2-B9E5-4433-87C0-68B6B72699C7")
 					.arg("-appended_part_as_gpt")
-					.arg("-eltorito-alt-boot")
-					.arg("-isohybrid-gpt-basdat")
-					.arg("-no-emul-boot")
-					.arg("-vvvvv")
-					.arg("-e")
-					.arg("--interval:appended_partition_2:all::")
-					.arg("--md5")
-					.arg(&tree)
 					.arg("-o")
 					.arg(image)
+					.arg(&tree)
 					.status()?;
 			},
 			_ => {
