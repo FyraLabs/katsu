@@ -86,7 +86,7 @@ jobs:
                   context: .
                   file: scripts/test-env.Dockerfile
                   push: true
-                  tags: ghcr.io/FyraLabs/katsu-cache:${{ github.ref_name || 'latest' }}
+                  tags: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
 
     image-arm:
         needs: build-katsu
