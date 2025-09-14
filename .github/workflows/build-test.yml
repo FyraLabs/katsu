@@ -75,6 +75,19 @@ jobs:
                   name: katsu-binary
                   path: target/release/katsu
 
+    # Build docker image for the rest of the tests
+    build-environment:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - name: Build OCI test cache
+              uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  file: scripts/test-env.Dockerfile
+                  push: true
+                  tags: ghcr.io/FyraLabs/katsu-cache:${{ github.base_ref }}
+
     image-arm:
         needs: build-katsu
         runs-on: ubuntu-latest
@@ -107,7 +120,7 @@ jobs:
             - uses: actions/download-artifact@v5
               with:
                   name: katsu-binary
-                  path: /usr/bin/katsu
+                  path: /usr/bin/
 
             - name: Run test
               run: |
