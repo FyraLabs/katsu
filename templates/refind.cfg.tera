@@ -1,0 +1,18 @@
+{{ REFIND_PREPEND_COMMENT }}
+
+timeout 20
+
+scan_driver_dirs /EFI/BOOT/drivers_x64,drivers_x64
+
+menuentry "{{ distro }}" {
+    volume   "{{ volid }}"
+    loader   /boot/{{ vmlinuz }}
+    initrd   /boot/{{ initramfs }}
+    options  "root=live:LABEL={{ volid }} rd.live.image enforcing=0 {{ cmd }}"
+    submenuentry "{{ distro }} (Check Image)" {
+        add_options "rd.live.check"
+    }
+    submenuentry "{{ distro }} (nomodeset)" {
+        add_options "nomodeset"
+    }
+}

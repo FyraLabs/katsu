@@ -4,6 +4,7 @@ RUN dnf install -y \
     xorriso \
     rpm \
     limine \
+    rEFInd \
     systemd \
     btrfs-progs \
     e2fsprogs \
