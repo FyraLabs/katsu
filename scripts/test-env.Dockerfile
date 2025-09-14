@@ -1,6 +1,6 @@
 FROM ghcr.io/terrapkg/builder:f42
 
-RUN --mount-type=cache,target=/var/cache/dnf \
+RUN --mount=type=bind,target=/var/cache/dnf \
     dnf install -y \
     xorriso \
     rpm \
