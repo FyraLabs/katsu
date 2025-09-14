@@ -12,7 +12,7 @@ use serde_derive::{Deserialize, Serialize};
 use std::{
 	collections::BTreeMap,
 	fs,
-	io::{Write},
+	io::Write,
 	path::{Path, PathBuf},
 };
 use tracing::{debug, info, trace, warn};
@@ -260,7 +260,7 @@ impl Bootloader {
 		let distro = &manifest.distro.as_ref().map_or("Linux", |s| s);
 		let cmd = &manifest.kernel_cmdline.as_ref().map_or("", |s| s);
 		let iso_tree = chroot.parent().unwrap().join(ISO_TREE);
-		
+
 		std::fs::create_dir_all(iso_tree.join("EFI/BOOT"))?;
 
 		std::fs::copy(
@@ -322,7 +322,7 @@ impl Bootloader {
 
 			mkdir -p /tmp/katsu.efiboot/EFI/BOOT;
 			cp -avr $tree/EFI/BOOT/. /tmp/katsu.efiboot/EFI/BOOT 2>&1;
-			
+
 			// Copy kernel and initramfs to efiboot
 			mkdir -p /tmp/katsu.efiboot/boot;
 			cp -av $tree/boot/vmlinuz /tmp/katsu.efiboot/boot/ 2>&1;
@@ -691,6 +691,9 @@ impl RootBuilder for BootcRootBuilder {
 		std::fs::create_dir_all(&container_store)?;
 
 		if self.embed_image {
+			// redeclare container_store as string, so cmd_lib doesn't complain
+			let container_store = container_store.display();
+			let container_store_ovfs = container_store_ovfs.display();
 			info!(?chroot, ?image, "Copying OCI image to chroot's container store");
 
 			// Push the original image to the chroot's container store, not the derived one
