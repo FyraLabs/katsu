@@ -76,6 +76,7 @@ jobs:
                   path: target/release/katsu
 
     image-arm:
+        needs: build-katsu
         runs-on: ubuntu-latest
         container:
             image: ghcr.io/terrapkg/builder:f42
