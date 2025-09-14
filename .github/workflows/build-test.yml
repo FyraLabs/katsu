@@ -1,437 +1,473 @@
 name: Build test
 
 env:
-  DNF_PKGS: |
-    xorriso
-    rpm
-    limine
-    systemd
-    btrfs-progs
-    e2fsprogs
-    xfsprogs
-    dosfstools
-    grub2
-    parted
-    gdisk
-    util-linux-core
-    systemd-container
-    grub2-efi
-    uboot-images-armv8
-    uboot-tools
-    rustc
-    qemu-user-static-aarch64
-    qemu-user-binfmt
-    qemu-kvm
-    qemu-img
-    cargo
-    systemd-devel
-    mkpasswd
-    clang-devel
-    moby-engine
-    squashfs-tools
-    erofs-utils
-    grub2-tools
-    grub2-tools-extra
-    isomd5sum
-    dnf5
-    podman
+    DNF_PKGS: |
+        xorriso
+        rpm
+        limine
+        systemd
+        btrfs-progs
+        e2fsprogs
+        xfsprogs
+        dosfstools
+        grub2
+        parted
+        gdisk
+        util-linux-core
+        systemd-container
+        grub2-efi
+        uboot-images-armv8
+        uboot-tools
+        rustc
+        qemu-user-static-aarch64
+        qemu-user-binfmt
+        qemu-kvm
+        qemu-img
+        cargo
+        systemd-devel
+        mkpasswd
+        clang-devel
+        moby-engine
+        squashfs-tools
+        erofs-utils
+        grub2-tools
+        grub2-tools-extra
+        isomd5sum
+        dnf5
+        podman
 
 on:
-  push:
+    push:
 
 jobs:
-  image-arm:
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/terrapkg/builder:f42
-      # Pass /dev from host to container
-      # Very hacky, but it works
-      # Microsoft/Github, if you're reading this,
-      # I'm sorry.
-      options: --privileged -v /dev:/dev
+    build-katsu:
+        runs-on: ubuntu-latest
+        container:
+            image: ghcr.io/terrapkg/builder:f42
 
-    steps:
-      - uses: actions/checkout@v4
-      - name: Cache DNF packages
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/dnf
-          key: dnf-${{ runner.os }}
-          restore-keys: |
-            dnf-${{ runner.os }}-
-            dnf-
+        steps:
+            - uses: actions/checkout@v4
+            - name: Cache DNF packages
+              uses: actions/cache@v4
+              with:
+                  path: /var/cache/dnf
+                  key: dnf-${{ runner.os }}
+                  restore-keys: |
+                      dnf-${{ runner.os }}-
+                      dnf-
 
-      - name: Install dependencies
-        run: |
-          dnf install -y $DNF_PKGS
+            - name: Install dependencies
+              run: |
+                  dnf install -y $DNF_PKGS
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+            - name: Set up QEMU
+              uses: docker/setup-qemu-action@v3
 
-      - uses: Swatinem/rust-cache@v2
+            - uses: Swatinem/rust-cache@v2
 
-      - name: Build and install katsu
-        run: |
-          cargo install --path . --debug
+            - name: Build katsu
+              run: |
+                  cargo build --release
 
-      - name: Run test
-        run: |
-          export PATH=$HOME/.cargo/bin:$PATH
-          export KATSU_KEEP_CHROOT=1
-          pushd tests/ng
-          echo "COLORBT_SHOW_HIDDEN=1" >> .env
-          echo "KATSU_LOG=trace" >> .env
-          katsu -o disk-image katsu-arm.yaml 2>&1
-          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu-arm.raw.zstd
-          popd
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: katsu-binary
+                  path: target/release/katsu
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: image-arm
-          path: tests/ng/katsu-work/image/*.raw.zstd
+    image-arm:
+        runs-on: ubuntu-latest
+        container:
+            image: ghcr.io/terrapkg/builder:f42
+            # Pass /dev from host to container
+            # Very hacky, but it works
+            # Microsoft/Github, if you're reading this,
+            # I'm sorry.
+            options: --privileged -v /dev:/dev
 
-  bios-x86_64:
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/terrapkg/builder:f42
-      # Pass /dev from host to container
-      # Very hacky, but it works
-      # Microsoft/Github, if you're reading this,
-      # I'm sorry.
-      options: --privileged -v /dev:/dev
+        steps:
+            - uses: actions/checkout@v4
+            - name: Cache DNF packages
+              uses: actions/cache@v4
+              with:
+                  path: /var/cache/dnf
+                  key: dnf-${{ runner.os }}
+                  restore-keys: |
+                      dnf-${{ runner.os }}-
+                      dnf-
 
-    steps:
-      - uses: actions/checkout@v4
-      - name: Cache DNF packages
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/dnf
-          key: dnf-${{ runner.os }}
-          restore-keys: |
-            dnf-${{ runner.os }}-
-            dnf-
+            - name: Install dependencies
+              run: |
+                  dnf install -y $DNF_PKGS
 
-      - name: Install dependencies
-        run: |
-          dnf install -y $DNF_PKGS
+            - name: Set up QEMU
+              uses: docker/setup-qemu-action@v3
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+            - uses: actions/download-artifact@v5
+              with:
+                  name: katsu-binary
+                  path: /usr/bin/katsu
 
-      - uses: Swatinem/rust-cache@v2
+            - name: Run test
+              run: |
+                  ls -lah /usr/bin/katsu
+                  chmod +x /usr/bin/katsu
+                  export PATH=$HOME/.cargo/bin:$PATH
+                  export KATSU_KEEP_CHROOT=1
+                  pushd tests/ng
+                  echo "COLORBT_SHOW_HIDDEN=1" >> .env
+                  echo "KATSU_LOG=trace" >> .env
+                  katsu -o disk-image katsu-arm.yaml 2>&1
+                  zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu-arm.raw.zstd
+                  popd
 
-      - name: Build and install katsu
-        run: cargo install --path . --debug
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: image-arm
+                  path: tests/ng/katsu-work/image/*.raw.zstd
 
-      - name: Run test
-        run: |
-          export PATH=$HOME/.cargo/bin:$PATH
-          export KATSU_KEEP_CHROOT=1
-          pushd tests/ng
-          echo "COLORBT_SHOW_HIDDEN=1" >> .env
-          echo "KATSU_LOG=trace" >> .env
-          katsu -o disk-image katsu-bios.yaml 2>&1
-          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu.raw.zstd
-          popd
+    bios-x86_64:
+        runs-on: ubuntu-latest
+        container:
+            image: ghcr.io/terrapkg/builder:f42
+            # Pass /dev from host to container
+            # Very hacky, but it works
+            # Microsoft/Github, if you're reading this,
+            # I'm sorry.
+            options: --privileged -v /dev:/dev
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: bios-x86_64
-          path: tests/ng/katsu-work/image/*.raw.zstd
+        steps:
+            - uses: actions/checkout@v4
+            - name: Cache DNF packages
+              uses: actions/cache@v4
+              with:
+                  path: /var/cache/dnf
+                  key: dnf-${{ runner.os }}
+                  restore-keys: |
+                      dnf-${{ runner.os }}-
+                      dnf-
 
-  image-x86_64:
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/terrapkg/builder:f42
-      # Pass /dev from host to container
-      # Very hacky, but it works
-      # Microsoft/Github, if you're reading this,
-      # I'm sorry.
-      options: --privileged -v /dev:/dev
+            - name: Install dependencies
+              run: |
+                  dnf install -y $DNF_PKGS
 
-    steps:
-      - uses: actions/checkout@v4
-      - name: Cache DNF packages
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/dnf
-          key: dnf-${{ runner.os }}
-          restore-keys: |
-            dnf-${{ runner.os }}-
-            dnf-
+            - name: Set up QEMU
+              uses: docker/setup-qemu-action@v3
 
-      - name: Install dependencies
-        run: |
-          dnf install -y $DNF_PKGS
+            - uses: Swatinem/rust-cache@v2
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+            - name: Build and install katsu
+              run: cargo install --path . --debug
 
-      - uses: Swatinem/rust-cache@v2
+            - name: Run test
+              run: |
+                  export PATH=$HOME/.cargo/bin:$PATH
+                  export KATSU_KEEP_CHROOT=1
+                  pushd tests/ng
+                  echo "COLORBT_SHOW_HIDDEN=1" >> .env
+                  echo "KATSU_LOG=trace" >> .env
+                  katsu -o disk-image katsu-bios.yaml 2>&1
+                  zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu.raw.zstd
+                  popd
 
-      - name: Build and install katsu
-        run: cargo install --path . --debug
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: bios-x86_64
+                  path: tests/ng/katsu-work/image/*.raw.zstd
 
-      - name: Run test
-        run: |
-          export PATH=$HOME/.cargo/bin:$PATH
-          export KATSU_KEEP_CHROOT=1
-          pushd tests/ng
-          echo "COLORBT_SHOW_HIDDEN=1" >> .env
-          echo "KATSU_LOG=trace" >> .env
-          katsu -o disk-image katsu.yaml 2>&1
-          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu.raw.zstd
-          popd
+    image-x86_64:
+        runs-on: ubuntu-latest
+        container:
+            image: ghcr.io/terrapkg/builder:f42
+            # Pass /dev from host to container
+            # Very hacky, but it works
+            # Microsoft/Github, if you're reading this,
+            # I'm sorry.
+            options: --privileged -v /dev:/dev
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: image-x86_64
-          path: tests/ng/katsu-work/image/*.raw.zstd
+        steps:
+            - uses: actions/checkout@v4
+            - name: Cache DNF packages
+              uses: actions/cache@v4
+              with:
+                  path: /var/cache/dnf
+                  key: dnf-${{ runner.os }}
+                  restore-keys: |
+                      dnf-${{ runner.os }}-
+                      dnf-
 
-  iso-x86_64:
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/terrapkg/builder:f42
-      # Pass /dev from host to container
-      # Very hacky, but it works
-      # Microsoft/Github, if you're reading this,
-      # I'm sorry.
-      options: --privileged -v /dev:/dev
+            - name: Install dependencies
+              run: |
+                  dnf install -y $DNF_PKGS
 
-    steps:
-      - uses: actions/checkout@v4
-      - name: Cache DNF packages
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/dnf
-          key: dnf-${{ runner.os }}
-          restore-keys: |
-            dnf-${{ runner.os }}-
-            dnf-
+            - name: Set up QEMU
+              uses: docker/setup-qemu-action@v3
 
-      - name: Install dependencies
-        run: dnf install -y $DNF_PKGS
+            - uses: Swatinem/rust-cache@v2
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+            - name: Build and install katsu
+              run: cargo install --path . --debug
 
-      - uses: Swatinem/rust-cache@v2
+            - name: Run test
+              run: |
+                  export PATH=$HOME/.cargo/bin:$PATH
+                  export KATSU_KEEP_CHROOT=1
+                  pushd tests/ng
+                  echo "COLORBT_SHOW_HIDDEN=1" >> .env
+                  echo "KATSU_LOG=trace" >> .env
+                  katsu -o disk-image katsu.yaml 2>&1
+                  zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu.raw.zstd
+                  popd
 
-      - name: Build and install katsu
-        run: cargo install --path . --debug
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: image-x86_64
+                  path: tests/ng/katsu-work/image/*.raw.zstd
 
-      - name: Run test
-        run: |
-          export PATH=$HOME/.cargo/bin:$PATH
-          export KATSU_KEEP_CHROOT=1
-          pushd tests/ng
-          echo "COLORBT_SHOW_HIDDEN=1" >> .env
-          echo "KATSU_LOG=trace" >> .env
-          katsu -o iso katsu-iso.yaml 2>&1
-          mv out.iso katsu-work/image/katsu.iso
-          popd
+    iso-x86_64:
+        runs-on: ubuntu-latest
+        container:
+            image: ghcr.io/terrapkg/builder:f42
+            # Pass /dev from host to container
+            # Very hacky, but it works
+            # Microsoft/Github, if you're reading this,
+            # I'm sorry.
+            options: --privileged -v /dev:/dev
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: iso-x86_64
-          path: tests/ng/katsu-work/image/katsu.iso
+        steps:
+            - uses: actions/checkout@v4
+            - name: Cache DNF packages
+              uses: actions/cache@v4
+              with:
+                  path: /var/cache/dnf
+                  key: dnf-${{ runner.os }}
+                  restore-keys: |
+                      dnf-${{ runner.os }}-
+                      dnf-
 
-  iso-bootc-x86_64:
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/terrapkg/builder:f42
-      # Pass /dev from host to container
-      # Very hacky, but it works
-      # Microsoft/Github, if you're reading this,
-      # I'm sorry.
-      options: --privileged -v /dev:/dev
+            - name: Install dependencies
+              run: dnf install -y $DNF_PKGS
 
-    steps:
-      - uses: actions/checkout@v4
-      - name: Cache DNF packages
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/dnf
-          key: dnf-${{ runner.os }}
-          restore-keys: |
-            dnf-${{ runner.os }}-
-            dnf-
+            - name: Set up QEMU
+              uses: docker/setup-qemu-action@v3
 
-      - name: Install dependencies
-        run: dnf install -y $DNF_PKGS
+            - uses: Swatinem/rust-cache@v2
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+            - name: Build and install katsu
+              run: cargo install --path . --debug
 
-      - uses: Swatinem/rust-cache@v2
+            - name: Run test
+              run: |
+                  export PATH=$HOME/.cargo/bin:$PATH
+                  export KATSU_KEEP_CHROOT=1
+                  pushd tests/ng
+                  echo "COLORBT_SHOW_HIDDEN=1" >> .env
+                  echo "KATSU_LOG=trace" >> .env
+                  katsu -o iso katsu-iso.yaml 2>&1
+                  mv out.iso katsu-work/image/katsu.iso
+                  popd
 
-      - name: Build and install katsu
-        run: cargo install --path . --debug
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: iso-x86_64
+                  path: tests/ng/katsu-work/image/katsu.iso
 
-      - name: Run test
-        run: |
-          export PATH=$HOME/.cargo/bin:$PATH
-          export KATSU_KEEP_CHROOT=1
-          pushd tests/ng
-          echo "COLORBT_SHOW_HIDDEN=1" >> .env
-          echo "KATSU_LOG=trace" >> .env
-          katsu -o iso bootc/katsu-iso-bootc.yaml 2>&1
-          mv out.iso katsu-work/image/katsu.iso
-          popd
+    iso-bootc-x86_64:
+        runs-on: ubuntu-latest
+        container:
+            image: ghcr.io/terrapkg/builder:f42
+            # Pass /dev from host to container
+            # Very hacky, but it works
+            # Microsoft/Github, if you're reading this,
+            # I'm sorry.
+            options: --privileged -v /dev:/dev
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: iso-bootc-x86_64
-          path: tests/ng/katsu-work/image/katsu.iso
+        steps:
+            - uses: actions/checkout@v4
+            - name: Cache DNF packages
+              uses: actions/cache@v4
+              with:
+                  path: /var/cache/dnf
+                  key: dnf-${{ runner.os }}
+                  restore-keys: |
+                      dnf-${{ runner.os }}-
+                      dnf-
 
-  iso-refind-x86_64:
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/terrapkg/builder:f42
-      # Pass /dev from host to container
-      # Very hacky, but it works
-      # Microsoft/Github, if you're reading this,
-      # I'm sorry.
-      options: --privileged -v /dev:/dev
+            - name: Install dependencies
+              run: dnf install -y $DNF_PKGS
 
-    steps:
-      - uses: actions/checkout@v4
-      - name: Cache DNF packages
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/dnf
-          key: dnf-${{ runner.os }}
-          restore-keys: |
-            dnf-${{ runner.os }}-
-            dnf-
+            - name: Set up QEMU
+              uses: docker/setup-qemu-action@v3
 
-      - name: Install dependencies
-        run: dnf install -y $DNF_PKGS
+            - uses: Swatinem/rust-cache@v2
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+            - name: Build and install katsu
+              run: cargo install --path . --debug
 
-      - uses: Swatinem/rust-cache@v2
+            - name: Run test
+              run: |
+                  export PATH=$HOME/.cargo/bin:$PATH
+                  export KATSU_KEEP_CHROOT=1
+                  pushd tests/ng
+                  echo "COLORBT_SHOW_HIDDEN=1" >> .env
+                  echo "KATSU_LOG=trace" >> .env
+                  katsu -o iso bootc/katsu-iso-bootc.yaml 2>&1
+                  mv out.iso katsu-work/image/katsu.iso
+                  popd
 
-      - name: Build and install katsu
-        run: cargo install --path . --debug
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: iso-bootc-x86_64
+                  path: tests/ng/katsu-work/image/katsu.iso
 
-      - name: Run test
-        run: |
-          export PATH=$HOME/.cargo/bin:$PATH
-          export KATSU_KEEP_CHROOT=1
-          pushd tests/ng
-          echo "COLORBT_SHOW_HIDDEN=1" >> .env
-          echo "KATSU_LOG=trace" >> .env
-          katsu -o iso katsu-iso-refind.yaml 2>&1
-          mv out.iso katsu-work/image/katsu.iso
-          popd
+    iso-refind-x86_64:
+        runs-on: ubuntu-latest
+        container:
+            image: ghcr.io/terrapkg/builder:f42
+            # Pass /dev from host to container
+            # Very hacky, but it works
+            # Microsoft/Github, if you're reading this,
+            # I'm sorry.
+            options: --privileged -v /dev:/dev
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: iso-refind-x86_64
-          path: tests/ng/katsu-work/image/katsu.iso
+        steps:
+            - uses: actions/checkout@v4
+            - name: Cache DNF packages
+              uses: actions/cache@v4
+              with:
+                  path: /var/cache/dnf
+                  key: dnf-${{ runner.os }}
+                  restore-keys: |
+                      dnf-${{ runner.os }}-
+                      dnf-
 
-  iso-limine-x86_64:
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/terrapkg/builder:f42
-      # Pass /dev from host to container
-      # Very hacky, but it works
-      # Microsoft/Github, if you're reading this,
-      # I'm sorry.
-      options: --privileged -v /dev:/dev
+            - name: Install dependencies
+              run: dnf install -y $DNF_PKGS
 
-    steps:
-      - uses: actions/checkout@v4
-      - name: Cache DNF packages
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/dnf
-          key: dnf-${{ runner.os }}
-          restore-keys: |
-            dnf-${{ runner.os }}-
-            dnf-
+            - name: Set up QEMU
+              uses: docker/setup-qemu-action@v3
 
-      - name: Install dependencies
-        run: dnf install -y $DNF_PKGS
+            - uses: Swatinem/rust-cache@v2
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+            - name: Build and install katsu
+              run: cargo install --path . --debug
 
-      - uses: Swatinem/rust-cache@v2
+            - name: Run test
+              run: |
+                  export PATH=$HOME/.cargo/bin:$PATH
+                  export KATSU_KEEP_CHROOT=1
+                  pushd tests/ng
+                  echo "COLORBT_SHOW_HIDDEN=1" >> .env
+                  echo "KATSU_LOG=trace" >> .env
+                  katsu -o iso katsu-iso-refind.yaml 2>&1
+                  mv out.iso katsu-work/image/katsu.iso
+                  popd
 
-      - name: Build and install katsu
-        run: cargo install --path . --debug
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: iso-refind-x86_64
+                  path: tests/ng/katsu-work/image/katsu.iso
 
-      - name: Run test
-        run: |
-          export PATH=$HOME/.cargo/bin:$PATH
-          export KATSU_KEEP_CHROOT=1
-          pushd tests/ng
-          echo "COLORBT_SHOW_HIDDEN=1" >> .env
-          echo "KATSU_LOG=trace" >> .env
-          katsu -o iso katsu-iso-limine.yaml 2>&1
-          mv out.iso katsu-work/image/katsu.iso
-          popd
+    iso-limine-x86_64:
+        runs-on: ubuntu-latest
+        container:
+            image: ghcr.io/terrapkg/builder:f42
+            # Pass /dev from host to container
+            # Very hacky, but it works
+            # Microsoft/Github, if you're reading this,
+            # I'm sorry.
+            options: --privileged -v /dev:/dev
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: iso-limine-x86_64
-          path: tests/ng/katsu-work/image/katsu.iso
+        steps:
+            - uses: actions/checkout@v4
+            - name: Cache DNF packages
+              uses: actions/cache@v4
+              with:
+                  path: /var/cache/dnf
+                  key: dnf-${{ runner.os }}
+                  restore-keys: |
+                      dnf-${{ runner.os }}-
+                      dnf-
 
-  fs-test-x86_64:
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/terrapkg/builder:f42
-      # Pass /dev from host to container
-      # Very hacky, but it works
-      # Microsoft/Github, if you're reading this,
-      # I'm sorry.
-      options: --privileged -v /dev:/dev
+            - name: Install dependencies
+              run: dnf install -y $DNF_PKGS
 
-    steps:
-      - uses: actions/checkout@v4
-      - name: Cache DNF packages
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/dnf
-          key: dnf-${{ runner.os }}
-          restore-keys: |
-            dnf-${{ runner.os }}-
-            dnf-
+            - name: Set up QEMU
+              uses: docker/setup-qemu-action@v3
 
-      - name: Install dependencies
-        run: dnf install -y $DNF_PKGS
+            - uses: Swatinem/rust-cache@v2
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+            - name: Build and install katsu
+              run: cargo install --path . --debug
 
-      - uses: Swatinem/rust-cache@v2
+            - name: Run test
+              run: |
+                  export PATH=$HOME/.cargo/bin:$PATH
+                  export KATSU_KEEP_CHROOT=1
+                  pushd tests/ng
+                  echo "COLORBT_SHOW_HIDDEN=1" >> .env
+                  echo "KATSU_LOG=trace" >> .env
+                  katsu -o iso katsu-iso-limine.yaml 2>&1
+                  mv out.iso katsu-work/image/katsu.iso
+                  popd
 
-      - name: Build and install katsu
-        run: cargo install --path . --debug
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: iso-limine-x86_64
+                  path: tests/ng/katsu-work/image/katsu.iso
 
-      - name: Run test
-        run: |
-          export PATH=$HOME/.cargo/bin:$PATH
-          export KATSU_KEEP_CHROOT=1
-          pushd tests/ng
-          echo "COLORBT_SHOW_HIDDEN=1" >> .env
-          echo "KATSU_LOG=trace" >> .env
-          katsu -o folder katsu-script-test.yaml 2>&1
-          tar -cJf katsu-work/chroot.tar.xz katsu-work/chroot
-          popd
+    fs-test-x86_64:
+        runs-on: ubuntu-latest
+        container:
+            image: ghcr.io/terrapkg/builder:f42
+            # Pass /dev from host to container
+            # Very hacky, but it works
+            # Microsoft/Github, if you're reading this,
+            # I'm sorry.
+            options: --privileged -v /dev:/dev
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: iso-limine-x86_64
-          path: tests/ng/katsu-work/chroot.tar.xz
+        steps:
+            - uses: actions/checkout@v4
+            - name: Cache DNF packages
+              uses: actions/cache@v4
+              with:
+                  path: /var/cache/dnf
+                  key: dnf-${{ runner.os }}
+                  restore-keys: |
+                      dnf-${{ runner.os }}-
+                      dnf-
+
+            - name: Install dependencies
+              run: dnf install -y $DNF_PKGS
+
+            - name: Set up QEMU
+              uses: docker/setup-qemu-action@v3
+
+            - uses: Swatinem/rust-cache@v2
+
+            - name: Build and install katsu
+              run: cargo install --path . --debug
+
+            - name: Run test
+              run: |
+                  export PATH=$HOME/.cargo/bin:$PATH
+                  export KATSU_KEEP_CHROOT=1
+                  pushd tests/ng
+                  echo "COLORBT_SHOW_HIDDEN=1" >> .env
+                  echo "KATSU_LOG=trace" >> .env
+                  katsu -o folder katsu-script-test.yaml 2>&1
+                  tar -cJf katsu-work/chroot.tar.xz katsu-work/chroot
+                  popd
+
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: iso-limine-x86_64
+                  path: tests/ng/katsu-work/chroot.tar.xz
