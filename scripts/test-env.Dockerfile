@@ -47,10 +47,10 @@ RUN --mount=type=cache,target=/src/target \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
-    cargo build --release
+    cargo build --release && cp target/release/katsu /usr/bin/katsu
 
 FROM base AS runtime
 
-COPY --from=rust-builder /src/target/release/katsu /usr/bin/katsu
+COPY --from=rust-builder /usr/bin/katsu /usr/bin/katsu
 
 ENTRYPOINT [ "katsu" ]
