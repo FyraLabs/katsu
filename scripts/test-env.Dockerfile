@@ -1,6 +1,6 @@
-FROM ghcr.io/terrapkg/builder:f42
+FROM ghcr.io/terrapkg/builder:f42 AS base
 
-RUN --mount=type=bind,target=/var/cache/dnf \
+RUN --mount=type=cache,target=/var/cache/dnf \
     dnf install -y \
     xorriso \
     rpm \
@@ -36,3 +36,21 @@ RUN --mount=type=bind,target=/var/cache/dnf \
     dnf5 \
     podman
 
+FROM base AS rust-builder
+
+COPY . /src
+
+WORKDIR /src
+
+RUN --mount=type=cache,target=/src/target \
+    --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/root/.cargo/git \
+    cargo build --release
+
+FROM base AS runtime
+
+COPY --from=rust-builder /src/target/release/katsu /usr/bin/katsu
+
+ENTRYPOINT [ "katsu" ]

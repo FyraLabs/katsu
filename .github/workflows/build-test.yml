@@ -40,46 +40,20 @@ on:
     push:
 
 jobs:
-    build-katsu:
-        runs-on: ubuntu-latest
-        container:
-            image: ghcr.io/terrapkg/builder:f42
-
-        steps:
-            - uses: actions/checkout@v4
-            - name: Cache DNF packages
-              uses: actions/cache@v4
-              with:
-                  path: /var/cache/dnf
-                  key: dnf-${{ runner.os }}
-                  restore-keys: |
-                      dnf-${{ runner.os }}-
-                      dnf-
-
-            - name: Install dependencies
-              run: |
-                  dnf install -y $DNF_PKGS
-
-            - name: Set up QEMU
-              uses: docker/setup-qemu-action@v3
-
-            - uses: Swatinem/rust-cache@v2
-
-            - name: Build katsu
-              run: |
-                  cargo build --release
-
-            - name: Upload artifacts
-              uses: actions/upload-artifact@v4
-              with:
-                  name: katsu-binary
-                  path: target/release/katsu
-
     # Build docker image for the rest of the tests
     build-environment:
         runs-on: ubuntu-latest
+        permissions:
+            packages: write
         steps:
             - uses: actions/checkout@v4
+            - name: Login to GitHub Container Registry
+              uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
             - name: Build OCI test cache
               uses: docker/build-push-action@v6
               with:
@@ -89,10 +63,10 @@ jobs:
                   tags: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
 
     image-arm:
-        needs: build-katsu
+        needs: build-environment
         runs-on: ubuntu-latest
         container:
-            image: ghcr.io/terrapkg/builder:f42
+            image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
             # Pass /dev from host to container
             # Very hacky, but it works
             # Microsoft/Github, if you're reading this,
@@ -101,31 +75,11 @@ jobs:
 
         steps:
             - uses: actions/checkout@v4
-            - name: Cache DNF packages
-              uses: actions/cache@v4
-              with:
-                  path: /var/cache/dnf
-                  key: dnf-${{ runner.os }}
-                  restore-keys: |
-                      dnf-${{ runner.os }}-
-                      dnf-
-
-            - name: Install dependencies
-              run: |
-                  dnf install -y $DNF_PKGS
-
             - name: Set up QEMU
               uses: docker/setup-qemu-action@v3
 
-            - uses: actions/download-artifact@v5
-              with:
-                  name: katsu-binary
-                  path: /usr/bin/
-
             - name: Run test
               run: |
-                  ls -lah /usr/bin/katsu
-                  chmod +x /usr/bin/katsu
                   export PATH=$HOME/.cargo/bin:$PATH
                   export KATSU_KEEP_CHROOT=1
                   pushd tests/ng
@@ -142,9 +96,10 @@ jobs:
                   path: tests/ng/katsu-work/image/*.raw.zstd
 
     bios-x86_64:
+        needs: build-environment
         runs-on: ubuntu-latest
         container:
-            image: ghcr.io/terrapkg/builder:f42
+            image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
             # Pass /dev from host to container
             # Very hacky, but it works
             # Microsoft/Github, if you're reading this,
@@ -153,26 +108,9 @@ jobs:
 
         steps:
             - uses: actions/checkout@v4
-            - name: Cache DNF packages
-              uses: actions/cache@v4
-              with:
-                  path: /var/cache/dnf
-                  key: dnf-${{ runner.os }}
-                  restore-keys: |
-                      dnf-${{ runner.os }}-
-                      dnf-
-
-            - name: Install dependencies
-              run: |
-                  dnf install -y $DNF_PKGS
 
             - name: Set up QEMU
               uses: docker/setup-qemu-action@v3
-
-            - uses: Swatinem/rust-cache@v2
-
-            - name: Build and install katsu
-              run: cargo install --path . --debug
 
             - name: Run test
               run: |
@@ -192,9 +130,10 @@ jobs:
                   path: tests/ng/katsu-work/image/*.raw.zstd
 
     image-x86_64:
+        needs: build-environment
         runs-on: ubuntu-latest
         container:
-            image: ghcr.io/terrapkg/builder:f42
+            image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
             # Pass /dev from host to container
             # Very hacky, but it works
             # Microsoft/Github, if you're reading this,
@@ -203,26 +142,9 @@ jobs:
 
         steps:
             - uses: actions/checkout@v4
-            - name: Cache DNF packages
-              uses: actions/cache@v4
-              with:
-                  path: /var/cache/dnf
-                  key: dnf-${{ runner.os }}
-                  restore-keys: |
-                      dnf-${{ runner.os }}-
-                      dnf-
-
-            - name: Install dependencies
-              run: |
-                  dnf install -y $DNF_PKGS
 
             - name: Set up QEMU
               uses: docker/setup-qemu-action@v3
-
-            - uses: Swatinem/rust-cache@v2
-
-            - name: Build and install katsu
-              run: cargo install --path . --debug
 
             - name: Run test
               run: |
@@ -242,9 +164,10 @@ jobs:
                   path: tests/ng/katsu-work/image/*.raw.zstd
 
     iso-x86_64:
+        needs: build-environment
         runs-on: ubuntu-latest
         container:
-            image: ghcr.io/terrapkg/builder:f42
+            image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
             # Pass /dev from host to container
             # Very hacky, but it works
             # Microsoft/Github, if you're reading this,
@@ -253,25 +176,9 @@ jobs:
 
         steps:
             - uses: actions/checkout@v4
-            - name: Cache DNF packages
-              uses: actions/cache@v4
-              with:
-                  path: /var/cache/dnf
-                  key: dnf-${{ runner.os }}
-                  restore-keys: |
-                      dnf-${{ runner.os }}-
-                      dnf-
-
-            - name: Install dependencies
-              run: dnf install -y $DNF_PKGS
 
             - name: Set up QEMU
               uses: docker/setup-qemu-action@v3
-
-            - uses: Swatinem/rust-cache@v2
-
-            - name: Build and install katsu
-              run: cargo install --path . --debug
 
             - name: Run test
               run: |
@@ -291,9 +198,10 @@ jobs:
                   path: tests/ng/katsu-work/image/katsu.iso
 
     iso-bootc-x86_64:
+        needs: build-environment
         runs-on: ubuntu-latest
         container:
-            image: ghcr.io/terrapkg/builder:f42
+            image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
             # Pass /dev from host to container
             # Very hacky, but it works
             # Microsoft/Github, if you're reading this,
@@ -302,25 +210,9 @@ jobs:
 
         steps:
             - uses: actions/checkout@v4
-            - name: Cache DNF packages
-              uses: actions/cache@v4
-              with:
-                  path: /var/cache/dnf
-                  key: dnf-${{ runner.os }}
-                  restore-keys: |
-                      dnf-${{ runner.os }}-
-                      dnf-
-
-            - name: Install dependencies
-              run: dnf install -y $DNF_PKGS
 
             - name: Set up QEMU
               uses: docker/setup-qemu-action@v3
-
-            - uses: Swatinem/rust-cache@v2
-
-            - name: Build and install katsu
-              run: cargo install --path . --debug
 
             - name: Run test
               run: |
@@ -340,9 +232,10 @@ jobs:
                   path: tests/ng/katsu-work/image/katsu.iso
 
     iso-refind-x86_64:
+        needs: build-environment
         runs-on: ubuntu-latest
         container:
-            image: ghcr.io/terrapkg/builder:f42
+            image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
             # Pass /dev from host to container
             # Very hacky, but it works
             # Microsoft/Github, if you're reading this,
@@ -351,25 +244,9 @@ jobs:
 
         steps:
             - uses: actions/checkout@v4
-            - name: Cache DNF packages
-              uses: actions/cache@v4
-              with:
-                  path: /var/cache/dnf
-                  key: dnf-${{ runner.os }}
-                  restore-keys: |
-                      dnf-${{ runner.os }}-
-                      dnf-
-
-            - name: Install dependencies
-              run: dnf install -y $DNF_PKGS
 
             - name: Set up QEMU
               uses: docker/setup-qemu-action@v3
-
-            - uses: Swatinem/rust-cache@v2
-
-            - name: Build and install katsu
-              run: cargo install --path . --debug
 
             - name: Run test
               run: |
@@ -389,9 +266,10 @@ jobs:
                   path: tests/ng/katsu-work/image/katsu.iso
 
     iso-limine-x86_64:
+        needs: build-environment
         runs-on: ubuntu-latest
         container:
-            image: ghcr.io/terrapkg/builder:f42
+            image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
             # Pass /dev from host to container
             # Very hacky, but it works
             # Microsoft/Github, if you're reading this,
@@ -400,25 +278,9 @@ jobs:
 
         steps:
             - uses: actions/checkout@v4
-            - name: Cache DNF packages
-              uses: actions/cache@v4
-              with:
-                  path: /var/cache/dnf
-                  key: dnf-${{ runner.os }}
-                  restore-keys: |
-                      dnf-${{ runner.os }}-
-                      dnf-
-
-            - name: Install dependencies
-              run: dnf install -y $DNF_PKGS
 
             - name: Set up QEMU
               uses: docker/setup-qemu-action@v3
-
-            - uses: Swatinem/rust-cache@v2
-
-            - name: Build and install katsu
-              run: cargo install --path . --debug
 
             - name: Run test
               run: |
@@ -438,9 +300,10 @@ jobs:
                   path: tests/ng/katsu-work/image/katsu.iso
 
     fs-test-x86_64:
+        needs: build-environment
         runs-on: ubuntu-latest
         container:
-            image: ghcr.io/terrapkg/builder:f42
+            image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
             # Pass /dev from host to container
             # Very hacky, but it works
             # Microsoft/Github, if you're reading this,
@@ -449,25 +312,9 @@ jobs:
 
         steps:
             - uses: actions/checkout@v4
-            - name: Cache DNF packages
-              uses: actions/cache@v4
-              with:
-                  path: /var/cache/dnf
-                  key: dnf-${{ runner.os }}
-                  restore-keys: |
-                      dnf-${{ runner.os }}-
-                      dnf-
-
-            - name: Install dependencies
-              run: dnf install -y $DNF_PKGS
 
             - name: Set up QEMU
               uses: docker/setup-qemu-action@v3
-
-            - uses: Swatinem/rust-cache@v2
-
-            - name: Build and install katsu
-              run: cargo install --path . --debug
 
             - name: Run test
               run: |
@@ -483,5 +330,5 @@ jobs:
             - name: Upload artifacts
               uses: actions/upload-artifact@v4
               with:
-                  name: iso-limine-x86_64
+                  name: fs-test-x86_64
                   path: tests/ng/katsu-work/chroot.tar.xz
