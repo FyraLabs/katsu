@@ -32,6 +32,9 @@ RUN --mount=type=cache,target=/var/cache/dnf \
     erofs-utils \
     grub2-tools \
     grub2-tools-extra \
+    rEFInd \
+    rEFInd-tools \
+    rEFIND-unsigned-* \
     isomd5sum \
     dnf5 \
     podman
