@@ -1,7 +1,7 @@
 # Example manifest for a Katsu bootc build
 builder: bootc
-distro: Katsu Atomic
+distro: Ultramarine Atomic
 
 bootc:
-  image: ghcr.io/ublue-os/bluefin:lts
+  image: ghcr.io/ultramarine-linux/base-bootc:42
   derivation: bootc/Containerfile
