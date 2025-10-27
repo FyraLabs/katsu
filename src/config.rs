@@ -542,7 +542,7 @@ fn test_partlay() {
 		tracing_subscriber::Registry::default().with(tracing_error::ErrorLayer::default()).with(
 			tracing_subscriber::fmt::layer()
 				.pretty()
-				.with_filter(tracing_subscriber::EnvFilter::from_str("trace").unwrap()),
+				.with_filter(tracing_subscriber::EnvFilter::from_str("trace").expect("Failed to parse trace filter")),
 		);
 	tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
@@ -585,7 +585,8 @@ fn test_partlay() {
 		println!("{part:#?}");
 
 		// get index of partition
-		let index = partlay.get_index(&part.mountpoint).unwrap();
+		let index = partlay.get_index(&part.mountpoint)
+			.expect("Partition mountpoint not found in layout");
 		println!("Index: {index}");
 
 		println!("Partition name: {}", partition_name(&mock_disk.to_string_lossy(), index));
@@ -644,7 +645,7 @@ fn test_partlay() {
 		),
 	];
 
-	assert_eq!(lay, assertion)
+	assert_eq!(lay, assertion);
 
 	// partlay.apply(&mock_disk).unwrap();
 	// check if parts would be applied correctly

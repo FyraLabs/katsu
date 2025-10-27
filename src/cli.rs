@@ -121,9 +121,13 @@ impl std::str::FromStr for OutputFormat {
 pub fn parse(cli: KatsuCli) -> Result<()> {
 	// load manifest from config file
 
-	sudo::with_env(&["KATSU_LOG"]).unwrap();
+	karen::with_env(&["KATSU_LOG"])
+		.map_err(|e| color_eyre::eyre::eyre!("Failed to escalate privileges: {e}"))?;
 
-	let mut manifest = Manifest::load_all(&cli.config.unwrap(), cli.output)?;
+	let config_path = cli.config.as_ref()
+		.ok_or_else(|| color_eyre::eyre::eyre!("No config file specified. Please provide a manifest YAML file."))?;
+
+	let mut manifest = Manifest::load_all(config_path, cli.output)?;
 
 	// check for overrides
 
@@ -132,7 +136,7 @@ pub fn parse(cli: KatsuCli) -> Result<()> {
 	}
 
 	if let Some(output_file) = cli.output_file {
-		manifest.out_file = Some(output_file.into_os_string().into_string().unwrap());
+		manifest.out_file = Some(output_file.to_string_lossy().to_string());
 	}
 
 	trace!(?manifest, "Loaded manifest");
