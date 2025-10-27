@@ -682,7 +682,7 @@ impl IsoBuilder {
 		// Extra configurable options, for now we use envars
 		// todo: document these
 
-		let sqfs_comp = env_flag!("KATSU_SQUASHFS_ARGS").unwrap_or("zstd".to_string());
+		let sqfs_comp = env_flag!("KATSU_SQUASHFS_COMP").unwrap_or("zstd".to_string());
 
 		info!("Determining squashfs options");
 
@@ -690,38 +690,24 @@ impl IsoBuilder {
 			"gzip" => "-comp gzip -Xcompression-level 9",
 			"lzo" => "-comp lzo",
 			"lz4" => "-comp lz4 -Xhc",
-			"xz" => "-comp xz -Xbcj x86",
+			"xz" => "-comp xz",
 			"zstd" => "-comp zstd -Xcompression-level 19",
 			"lzma" => "-comp lzma",
-			_ => bail!("Unknown squashfs compression: {sqfs_comp}"),
-		}
-		.split(' ')
-		.collect::<Vec<_>>();
+			sqfs_comp => {
+				warn!(?sqfs_comp, "unknown compression, passing directly to mksquashfs");
+				sqfs_comp
+			},
+		};
 
-		let binding = env_flag!("KATSU_SQUASHFS_ARGS").unwrap_or("".to_string());
-		let sqfs_extra_args = binding.split(' ').collect::<Vec<_>>();
+		let extra_args = env_flag!("KATSU_SQUASHFS_ARGS").unwrap_or("".to_string());
 
 		info!("Squashing file system (mksquashfs)");
 		std::process::Command::new("mksquashfs")
-			.arg(chroot)
-			.arg(image)
-			.args(&sqfs_comp_args)
-			.arg("-b")
-			.arg("1048576")
-			.arg("-noappend")
-			.arg("-e")
-			.arg("/dev/")
-			.arg("-e")
-			.arg("/proc/")
-			.arg("-e")
-			.arg("/sys/")
-			.arg("-p")
-			.arg("/dev 755 0 0")
-			.arg("-p")
-			.arg("/proc 755 0 0")
-			.arg("-p")
-			.arg("/sys 755 0 0")
-			.args(&sqfs_extra_args)
+			.args([chroot, image])
+			.args(shellish_parse::parse(sqfs_comp_args, false).unwrap())
+			.args(["-b", "1048576", "-noappend", "-e", "/dev/", "-e", "/proc/", "-e", "/sys/"])
+			.args(["-p", "/dev 755 0 0", "-p", "/proc 755 0 0", "-p", "/sys 755 0 0"])
+			.args(shellish_parse::parse(&extra_args, false).unwrap())
 			.status()?;
 
 		Ok(())
@@ -932,5 +918,13 @@ impl KatsuBuilder {
 		fs::create_dir_all(&image)?;
 
 		self.image_builder.build(&chroot, &image, &self.manifest, &self.skip_phases)
+	}
+}
+
+#[cfg(test)]
+mod test {
+	#[test]
+	fn shellish_parse_empty() {
+		assert!(shellish_parse::parse("", false).unwrap().is_empty());
 	}
 }
