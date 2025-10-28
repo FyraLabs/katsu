@@ -10,7 +10,7 @@ kernel_cmdline: "quiet splash"
 bootloader: refind
 
 dnf:
-  releasever: 39
+  releasever: 43
   options:
     - --setopt=keepcache=True
     - --nogpgcheck

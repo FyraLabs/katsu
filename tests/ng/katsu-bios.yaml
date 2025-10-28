@@ -59,8 +59,7 @@ users:
 
 
 dnf:
-  dnf5: false
-  releasever: 40
+  releasever: 43
   repodir: modules/repodir/
   options:
     - --setopt=cachedir=/var/cache/dnf

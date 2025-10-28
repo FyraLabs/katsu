@@ -10,13 +10,12 @@ kernel_cmdline: "quiet rhgb"
 bootloader: grub
 
 dnf:
-  releasever: 39
+  releasever: 43
   options:
     - --setopt=keepcache=True
     - --nogpgcheck
     - --setopt=cachedir=/var/cache/dnf
   packages:
-    - dracut-config-generic
     - dracut-live
     - dracut-config-generic
     - dracut-network

@@ -10,7 +10,7 @@ kernel_cmdline: "quiet rhgb"
 bootloader: limine
 
 dnf:
-  releasever: 39
+  releasever: 43
   options:
     - --setopt=keepcache=True
     - --nogpgcheck
@@ -18,7 +18,6 @@ dnf:
   packages:
     - dracut-config-generic
     - dracut-live
-    - dracut-config-generic
     - dracut-network
     - anaconda-dracut
     - dracut-squash
