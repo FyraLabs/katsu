@@ -1,6 +1,6 @@
 use std::{path::PathBuf, sync::Mutex};
 
-use clap::{value_parser, Parser, ValueEnum};
+use clap::{Parser, ValueEnum};
 use color_eyre::Result;
 use serde_derive::{Deserialize, Serialize};
 use tracing::trace;
@@ -33,9 +33,8 @@ pub struct KatsuCli {
 	///
 	/// By default, no phases are skipped for any format
 	///
-	#[arg(short, long,env = "KATSU_SKIP_PHASES", value_parser = value_parser!(SkipPhases))]
-	#[arg()]
-	skip_phases: Option<SkipPhases>,
+	#[arg(short, long, env = "KATSU_SKIP_PHASES", value_delimiter = ',')]
+	pub skip_phases: Vec<String>,
 
 	#[arg(long)]
 	/// Override architecture to build for, makes use of DNF's `--arch` option
@@ -63,21 +62,6 @@ impl KatsuCli {
 	// passthrough for clap::Parser::parse
 	pub fn p_parse() -> Self {
 		CLI_MUTEX.lock().unwrap().get_or_insert_with(Self::parse).clone()
-	}
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
-pub struct SkipPhases(Vec<String>);
-
-impl SkipPhases {
-	pub fn contains(&self, phase: &str) -> bool {
-		self.0.contains(&phase.to_string())
-	}
-}
-
-impl From<&str> for SkipPhases {
-	fn from(value: &str) -> SkipPhases {
-		SkipPhases(value.split(',').map(|s| s.to_string()).collect())
 	}
 }
 
@@ -124,8 +108,9 @@ pub fn parse(cli: KatsuCli) -> Result<()> {
 	karen::with_env(&["KATSU_LOG"])
 		.map_err(|e| color_eyre::eyre::eyre!("Failed to escalate privileges: {e}"))?;
 
-	let config_path = cli.config.as_ref()
-		.ok_or_else(|| color_eyre::eyre::eyre!("No config file specified. Please provide a manifest YAML file."))?;
+	let config_path = cli.config.as_ref().ok_or_else(|| {
+		color_eyre::eyre::eyre!("No config file specified. Please provide a manifest YAML file.")
+	})?;
 
 	let mut manifest = Manifest::load_all(config_path, cli.output)?;
 
@@ -141,7 +126,7 @@ pub fn parse(cli: KatsuCli) -> Result<()> {
 
 	trace!(?manifest, "Loaded manifest");
 
-	let builder = KatsuBuilder::new(manifest, cli.output, cli.skip_phases.unwrap_or_default())?;
+	let builder = KatsuBuilder::new(manifest, cli.output, cli.skip_phases)?;
 
 	tracing::info!("Building image");
 	builder.build()?;

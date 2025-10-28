@@ -1,6 +1,6 @@
 use crate::{
 	bail_let,
-	cli::{OutputFormat, SkipPhases},
+	cli::OutputFormat,
 	config::{Manifest, Script},
 	feature_flag_bool, feature_flag_str,
 	util::{just_write, loopdev_with_file},
@@ -974,7 +974,7 @@ pub fn run_scripts(
 
 pub trait ImageBuilder {
 	fn build(
-		&self, chroot: &Path, image: &Path, manifest: &Manifest, skip_phases: &SkipPhases,
+		&self, chroot: &Path, image: &Path, manifest: &Manifest, skip_phases: Vec<String>,
 	) -> Result<()>;
 }
 /// Creates a disk image, then installs to it
@@ -987,7 +987,7 @@ pub struct DiskImageBuilder {
 
 impl ImageBuilder for DiskImageBuilder {
 	fn build(
-		&self, chroot: &Path, image: &Path, manifest: &Manifest, _: &SkipPhases,
+		&self, chroot: &Path, image: &Path, manifest: &Manifest, _: Vec<String>,
 	) -> Result<()> {
 		// create sparse file on disk
 		bail_let!(Some(disk) = &manifest.disk => "Disk layout not specified");
@@ -1045,7 +1045,7 @@ pub struct DeviceInstaller {
 
 impl ImageBuilder for DeviceInstaller {
 	fn build(
-		&self, _chroot: &Path, _image: &Path, _manifest: &Manifest, _skip_phases: &SkipPhases,
+		&self, _chroot: &Path, _image: &Path, _manifest: &Manifest, _skip_phases: Vec<String>,
 	) -> Result<()> {
 		todo!();
 		// self.root_builder.build(_chroot, _manifest)?;
@@ -1062,7 +1062,7 @@ pub struct FsBuilder {
 
 impl ImageBuilder for FsBuilder {
 	fn build(
-		&self, _chroot: &Path, _image: &Path, manifest: &Manifest, _skip_phases: &SkipPhases,
+		&self, _chroot: &Path, _image: &Path, manifest: &Manifest, _skip_phases: Vec<String>,
 	) -> Result<()> {
 		let out = manifest.out_file.as_ref().map_or("katsu-work/chroot", |s| s);
 		let out = Path::new(out);
@@ -1361,7 +1361,7 @@ const ISO_TREE: &str = "iso-tree";
 
 impl ImageBuilder for IsoBuilder {
 	fn build(
-		&self, chroot: &Path, _: &Path, manifest: &Manifest, skip_phases: &SkipPhases,
+		&self, chroot: &Path, _: &Path, manifest: &Manifest, skip_phases: Vec<String>,
 	) -> Result<()> {
 		crate::gen_phase!(skip_phases);
 		// You can now skip phases by adding environment variable `KATSU_SKIP_PHASES` with a comma-separated list of phases to skip
@@ -1415,12 +1415,12 @@ impl ImageBuilder for IsoBuilder {
 pub struct KatsuBuilder {
 	pub image_builder: Box<dyn ImageBuilder>,
 	pub manifest: Manifest,
-	pub skip_phases: SkipPhases,
+	pub skip_phases: Vec<String>,
 }
 
 impl KatsuBuilder {
 	pub fn new(
-		manifest: Manifest, output_format: OutputFormat, skip_phases: SkipPhases,
+		manifest: Manifest, output_format: OutputFormat, skip_phases: Vec<String>,
 	) -> Result<Self> {
 		let root_builder = match manifest.builder.as_ref().expect("Builder unspecified").as_str() {
 			"dnf" => Box::new(manifest.dnf.clone()) as Box<dyn RootBuilder>,
@@ -1457,7 +1457,7 @@ impl KatsuBuilder {
 		let image = workdir.join("image");
 		fs::create_dir_all(&image)?;
 
-		self.image_builder.build(&chroot, &image, &self.manifest, &self.skip_phases)
+		self.image_builder.build(&chroot, &image, &self.manifest, self.skip_phases.clone())
 	}
 }
 
