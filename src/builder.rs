@@ -17,6 +17,9 @@ use std::{
 };
 use tracing::{debug, info, trace, warn};
 
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
+
 const WORKDIR: &str = "katsu-work";
 const BOOTIMGS: &str = "boot_imgs";
 crate::prepend_comment!(GRUB_PREPEND_COMMENT: "/boot/grub/grub.cfg", "Grub configurations", katsu::builder::Bootloader::cp_grub);
@@ -140,6 +143,7 @@ impl Bootloader {
 		Ok(("vmlinuz".to_string(), "initramfs.img".to_string()))
 	}
 
+	#[tracing::instrument]
 	fn find_vmlinuz(&self, chroot: &Path) -> Result<(String, Option<String>)> {
 		let modules_dir = chroot.join("usr/lib/modules");
 
@@ -163,6 +167,7 @@ impl Bootloader {
 		Ok((vmlinuz, kernel_version))
 	}
 
+	#[tracing::instrument]
 	fn find_initramfs(&self, chroot: &Path) -> Result<String> {
 		let bootdir = chroot.join("boot");
 
@@ -191,6 +196,7 @@ impl Bootloader {
 		bail!("Cannot find initramfs in {:?}", bootdir)
 	}
 
+	#[tracing::instrument]
 	fn copy_boot_files(
 		&self, chroot: &Path, dest: &Path, vmlinuz: &str, initramfs: &str,
 	) -> Result<()> {
@@ -426,29 +432,69 @@ impl Bootloader {
 		// Copy vmlinuz and initramfs to bootimgs directory
 		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, boot_imgs_dir)?;
 
-		// Clean existing boot directory if present
-		let _ = std::fs::remove_dir_all(iso_tree.join("boot"));
+		let iso_boot = iso_tree.join("boot");
+		let chroot_boot = chroot.join("boot");
 
-		// Copy boot files from chroot to ISO tree
-		cmd_lib::run_cmd!(cp -r $chroot/boot $iso_tree/)?;
+		// Clean existing boot directory if present and recreate minimal structure
+		let _ = std::fs::remove_dir_all(&iso_boot);
+		std::fs::create_dir_all(&iso_boot)?;
 
-		// Rename grub2 directory to grub if needed
-		if iso_tree.join("boot/grub2").exists() && !iso_tree.join("boot/grub").exists() {
-			std::fs::rename(iso_tree.join("boot/grub2"), iso_tree.join("boot/grub"))?;
+		let grub_dest = iso_boot.join("grub");
+		let grub2_src = chroot_boot.join("grub2");
+		let grub_src = chroot_boot.join("grub");
+		let _ = std::fs::remove_dir_all(&grub_dest);
+		if grub2_src.exists() {
+			Self::copy_dir(&grub2_src, &grub_dest)?;
+		} else if grub_src.exists() {
+			Self::copy_dir(&grub_src, &grub_dest)?;
+		} else {
+			bail!("Missing grub directory in {}", chroot_boot.display());
+		}
+
+		let efi_src = chroot_boot.join("efi");
+		let efi_dest = iso_boot.join("efi");
+		let _ = std::fs::remove_dir_all(&efi_dest);
+		if efi_src.exists() {
+			Self::copy_dir(&efi_src, &efi_dest)?;
+		} else {
+			warn!("No EFI directory found in {}", chroot_boot.display());
 		}
 
 		// Copy vmlinuz and initramfs from bootimgs to ISO tree
-		std::fs::copy(
-			boot_imgs_dir.join("boot").join(&vmlinuz),
-			iso_tree.join("boot").join(&vmlinuz),
-		)?;
+		std::fs::copy(boot_imgs_dir.join("boot").join(&vmlinuz), iso_boot.join(&vmlinuz))?;
 
-		std::fs::copy(
-			boot_imgs_dir.join("boot").join(&initramfs),
-			iso_tree.join("boot").join("initramfs.img"),
-		)?;
+		std::fs::copy(boot_imgs_dir.join("boot").join(&initramfs), iso_boot.join("initramfs.img"))?;
 
 		Ok((vmlinuz, "initramfs.img".to_string()))
+	}
+
+	fn copy_dir(src: &Path, dest: &Path) -> Result<()> {
+		if !src.exists() {
+			bail!("Source directory {} does not exist", src.display());
+		}
+		if dest.exists() {
+			std::fs::remove_dir_all(dest)?;
+		}
+		std::fs::create_dir_all(dest)?;
+
+		for entry in std::fs::read_dir(src)? {
+			let entry = entry?;
+			let entry_path = entry.path();
+			let dest_path = dest.join(entry.file_name());
+			let file_type = std::fs::symlink_metadata(&entry_path)?.file_type();
+			if file_type.is_dir() {
+				Self::copy_dir(&entry_path, &dest_path)?;
+			} else if file_type.is_file() {
+				std::fs::copy(&entry_path, &dest_path)?;
+			} else if file_type.is_symlink() {
+				let target = std::fs::read_link(&entry_path)?;
+				{
+					symlink(target, &dest_path)?;
+				}
+			}
+		}
+
+		Ok(())
 	}
 
 	fn generate_grub_config(
@@ -1047,21 +1093,19 @@ const DR_ARGS: &str = "-vv --xz --reproducible";
 
 impl IsoBuilder {
 	fn dracut(&self, root: &Path) -> Result<String> {
-		info!(?root, "Generating initramfs");
 		bail_let!(
 			Some(kver) = fs::read_dir(root.join("usr/lib/modules"))?.find_map(|f| {
 				// find any directory
 				trace!(?f, "File in /usr/lib/modules");
 				f.ok()
-					.and_then(|entry| entry.file_name().to_str().map(|s| s.to_string()))
+				.and_then(|entry| entry.file_name().to_str().map(|s| s.to_string()))
 			}) => "Can't find any kernel version in /usr/lib/modules"
 		);
-
 		info!(?kver, "Found kernel version");
+		info!(?root, "Generating initramfs");
 
 		// set dracut options
 		// this is kind of a hack, but uhh it works maybe
-		// todo: make this properly configurable without envvars
 
 		let dr_mods = feature_flag_str!("dracut-mods").unwrap_or(DR_MODS.to_string());
 		let dr_omit = feature_flag_str!("dracut-omit").unwrap_or(DR_OMIT.to_string());
@@ -1082,23 +1126,50 @@ impl IsoBuilder {
 			dr_args.push("--omit");
 			dr_args.push(&dr_omit);
 		}
+		let mut cmd = std::process::Command::new("dracut");
+
+		let dracut_outside_chroot = feature_flag_bool!("dracut-outside-chroot");
+
+		if dracut_outside_chroot {
+			cmd.arg("-r");
+			cmd.arg(root.canonicalize()?);
+		}
 
 		//make dir
 		std::fs::create_dir_all(root.join("boot"))?;
+		let cmd = cmd.env("DRACUT_SYSTEMD", "0").args(&dr_args).arg("--kver").arg(&kver);
 
-		crate::util::enter_chroot_run(root, || -> Result<()> {
-			// get current dir
-			let current_dir = std::env::current_dir()?;
-			info!(?current_dir, "Current directory");
-			std::process::Command::new("dracut")
-				.env("DRACUT_SYSTEMD", "0")
-				.args(&dr_args)
-				.arg("--kver")
-				.arg(&kver)
-				.arg("/boot/initramfs.img")
-				.status()?;
-			Ok(())
-		})?;
+		let current_dir = std::env::current_dir()?;
+		info!(?current_dir, "Current directory");
+		info!(?cmd, "Running dracut command");
+
+		if dracut_outside_chroot {
+			info!("Dracut run outside chroot, skipping chroot execution");
+
+			// get iso-tree
+			let iso_tree_path = root.join("../").join(ISO_TREE);
+			std::fs::create_dir_all(iso_tree_path.join("boot"))?;
+			cmd.arg(iso_tree_path.join("boot").canonicalize()?.join("initramfs.img"));
+			let status = cmd.status()?;
+			debug!(?status, "Dracut command finished");
+			if !status.success() {
+				bail!("Dracut failed with exit code: {}", status);
+			}
+		} else {
+			crate::util::enter_chroot_run(root, || -> Result<()> {
+				cmd.arg("/boot/initramfs.img");
+
+				let status = cmd.status()?;
+				debug!(?status, "Dracut command finished");
+				if !status.success() {
+					bail!("Dracut failed with exit code: {}", status);
+				}
+
+				Ok(())
+			})?;
+		}
+
+		// .arg("/boot/initramfs.img");
 
 		Ok(root.join("boot").join("initramfs.img").to_string_lossy().to_string())
 	}
