@@ -65,7 +65,6 @@ dnf:
     - --setopt=cachedir=/var/cache/dnf
     - --nogpgcheck
     - --setopt=keepcache=True
-    - --verbose
   exclude:
     - fedora-release*
     - generic-release*

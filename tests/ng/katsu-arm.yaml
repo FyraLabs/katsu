@@ -29,4 +29,4 @@ disk:
 
 dnf:
   arch: aarch64
-  releasever: 39
+  releasever: 43

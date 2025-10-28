@@ -9,4 +9,4 @@ scripts:
       file: liveimage.sh
 
 dnf:
-  releasever: 39
+  releasever: 43
