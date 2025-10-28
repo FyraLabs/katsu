@@ -73,7 +73,6 @@ dnf:
     - setup
     - lvm2
     - btrfs-progs
-    - dmraid
     - nvme-cli
     - kernel
     - glibc
@@ -91,7 +90,6 @@ dnf:
     - rpm
     - libgomp
     - ultramarine-release-identity-basic
-    - ultramarine-release-basic
     - fedora-repos
 
   arch_packages:
