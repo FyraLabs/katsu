@@ -1378,10 +1378,10 @@ impl ImageBuilder for IsoBuilder {
 		let image_dir = workspace.join(ISO_TREE).join("LiveOS");
 		fs::create_dir_all(&image_dir)?;
 
-		if feature_flag_bool!("erofs") {
-			phase!("rootimg": self.erofs(chroot, &image_dir.join("squashfs.img")));
-		} else {
+		if feature_flag_bool!("no-erofs") {
 			phase!("rootimg": self.squashfs(chroot, &image_dir.join("squashfs.img")));
+		} else {
+			phase!("rootimg": self.erofs(chroot, &image_dir.join("squashfs.img")));
 		}
 
 		phase!("copy-live": self.bootloader.copy_liveos(manifest, chroot));
