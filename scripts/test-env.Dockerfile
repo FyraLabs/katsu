@@ -1,4 +1,4 @@
-FROM ghcr.io/terrapkg/builder:f42 AS base
+FROM ghcr.io/terrapkg/builder:f43 AS base
 
 RUN --mount=type=cache,target=/var/cache/dnf \
     dnf install -y \
