@@ -1210,7 +1210,10 @@ impl IsoBuilder {
 	#[allow(dead_code)]
 	pub fn erofs(&self, chroot: &Path, image: &Path) -> Result<()> {
 		std::process::Command::new("mkfs.erofs")
-			.arg("-zlz4hc,level=12")
+			.arg("-zzstd,level=15")
+			// all fragments + dedupe inodes
+			.arg("-Eall-fragments,fragdedupe=inode")
+			.arg("-C1048576")
 			.args(["--exclude-path", "/dev/"])
 			.args(["--exclude-path", "/proc/"])
 			.args(["--exclude-path", "/sys/"])
