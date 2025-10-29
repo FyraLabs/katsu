@@ -1,8 +1,12 @@
 name: Release images
 
 on:
+  workflow_dispatch:
   release:
     types: [created]
+  push:
+    # Publish semver tags as releases.
+    tags: ["v*.*.*"]
 
 jobs:
   # Build docker image for the rest of the tests
