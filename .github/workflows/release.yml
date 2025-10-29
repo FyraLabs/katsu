@@ -57,6 +57,8 @@ jobs:
           context: .
           push: true
           tags: ghcr.io/fyralabs/katsu
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
