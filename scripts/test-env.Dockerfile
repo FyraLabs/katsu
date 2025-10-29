@@ -55,4 +55,19 @@ FROM base AS runtime
 
 COPY --from=rust-builder /usr/bin/katsu /usr/bin/katsu
 
+
+# clean up unnecessary packages to reduce image size
+RUN dnf mark user -y zstd
+RUN dnf remove -y \
+    anda \
+    mock \
+    mold \
+    gh \
+    jq \
+    subatomic-cli \
+    gdb-minimal \
+    *-srpm-macros \
+    terra-mock-configs
+RUN dnf clean all
+
 ENTRYPOINT [ "katsu" ]
