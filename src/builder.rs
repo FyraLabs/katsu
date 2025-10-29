@@ -26,6 +26,8 @@ crate::prepend_comment!(GRUB_PREPEND_COMMENT: "/boot/grub/grub.cfg", "Grub confi
 crate::prepend_comment!(LIMINE_PREPEND_COMMENT: "/boot/limine.cfg", "Limine configurations", katsu::builder::Bootloader::cp_limine);
 crate::prepend_comment!(REFIND_PREPEND_COMMENT: "/boot/efi/EFI/refind/refind.conf", "rEFInd configurations", katsu::builder::Bootloader::cp_refind);
 
+const DNF_TRANS_COMMENT: &str = "Initial transaction from building with Katsu";
+
 /// Represents the bootloader types supported by Katsu
 ///
 /// This enum defines the different bootloader implementations that can be used
@@ -850,7 +852,9 @@ impl RootBuilder for DnfRootBuilder {
 			let mut cmd = std::process::Command::new(&dnf);
 			cmd.arg("do")
 				.arg("-y")
-				.arg("--install")
+				.arg("--action=install")
+				.arg(format!("--comment={DNF_TRANS_COMMENT}"))
+				.arg("--setopt=tsflags=")
 				.arg(format!("--releasever={}", releasever))
 				.arg(format!("--installroot={}", chroot.display()))
 				.args(&packages)
