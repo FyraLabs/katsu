@@ -1,10 +1,10 @@
-FROM ghcr.io/terrapkg/builder:f43
+FROM ghcr.io/terrapkg/builder:f43 AS base
 
-RUN dnf install -y \
+RUN --mount=type=cache,target=/var/cache/dnf \
+    dnf install -y \
     xorriso \
     rpm \
     limine \
-    rEFInd \
     systemd \
     btrfs-progs \
     e2fsprogs \
@@ -12,22 +12,62 @@ RUN dnf install -y \
     dosfstools \
     grub2 \
     parted \
+    gdisk \
     util-linux-core \
     systemd-container \
     grub2-efi \
     uboot-images-armv8 \
     uboot-tools \
     rustc \
-    cargo
+    qemu-user-static-aarch64 \
+    qemu-user-binfmt \
+    qemu-kvm \
+    qemu-img \
+    cargo \
+    systemd-devel \
+    mkpasswd \
+    clang-devel \
+    moby-engine \
+    squashfs-tools \
+    erofs-utils \
+    grub2-tools \
+    grub2-tools-extra \
+    rEFInd \
+    rEFInd-tools \
+    isomd5sum \
+    dnf5 \
+    podman
+
+FROM base AS rust-builder
 
 COPY . /src
+
 WORKDIR /src
 
-RUN cargo build
+RUN --mount=type=cache,target=/src/target \
+    --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/root/.cargo/git \
+    cargo build --release && cp target/release/katsu /usr/bin/katsu
 
-RUN cp /src/target/debug/katsu /usr/bin/katsu
+FROM base AS runtime
 
-WORKDIR /src/tests
+COPY --from=rust-builder /usr/bin/katsu /usr/bin/katsu
 
-CMD ["/usr/bin/bash"]
 
+# clean up unnecessary packages to reduce image size
+RUN dnf mark user -y zstd
+RUN dnf remove -y \
+    anda \
+    mock \
+    mold \
+    gh \
+    jq \
+    subatomic-cli \
+    gdb-minimal \
+    *-srpm-macros \
+    terra-mock-configs
+RUN dnf clean all
+
+ENTRYPOINT [ "katsu" ]
