@@ -1293,8 +1293,6 @@ impl IsoBuilder {
 			},
 			Bootloader::REFInd => {
 				std::process::Command::new("xorriso")
-					.arg("-as")
-					.arg("mkisofs")
 					.arg("-iso-level")
 					.arg("3")
 					.arg("-full-iso9660-filenames")
@@ -1321,8 +1319,6 @@ impl IsoBuilder {
 				debug!("xorriso -as mkisofs --efi-boot {uefi_bin} -b {bios_bin} -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot {uefi_bin} -efi-boot-part --efi-boot-image --protective-msdos-label {root} -volid KATSU-LIVEOS -o {image}", root = tree.display(), image = image.display());
 				std::process::Command::new("xorriso")
 					.args(["-iso-level", "3"])
-					.arg("-as")
-					.arg("mkisofs")
 					.arg("-R")
 					.arg("--efi-boot")
 					.arg(uefi_bin)
