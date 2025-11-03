@@ -3,7 +3,6 @@ FROM ghcr.io/terrapkg/builder:f43 AS base
 RUN --mount=type=cache,target=/var/cache \
     dnf install -y \
     xorriso \
-    fedora-gpg-keys \
     rpm \
     limine \
     systemd \
@@ -40,6 +39,20 @@ RUN --mount=type=cache,target=/var/cache \
     podman
 
 FROM base AS rust-builder
+
+COPY . /src
+
+WORKDIR /src
+
+RUN --mount=type=cache,target=/src/target \
+    --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/root/.cargo/git \
+    cargo build --release && cp target/release/katsu /usr/bin/katsu
+
+FROM base AS runtime
+
 RUN dnf mark user -y zstd fedora-gpg-keys
 RUN dnf remove -y \
     anda \
@@ -52,20 +65,6 @@ RUN dnf remove -y \
     *-srpm-macros \
     terra-mock-configs
 RUN dnf clean all
-
-COPY . /src
-
-WORKDIR /src
-
-
-RUN --mount=type=cache,target=/src/target \
-    --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/root/.cargo/git \
-    cargo build --release && cp target/release/katsu /usr/bin/katsu
-
-FROM base AS runtime
 
 COPY --from=rust-builder /usr/bin/katsu /usr/bin/katsu
 
