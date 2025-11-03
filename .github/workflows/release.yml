@@ -50,7 +50,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build OCI test cache by digest
+      - name: Build OCI image and push by digest
         id: build
         uses: docker/build-push-action@v6
         with:
@@ -58,6 +58,8 @@ jobs:
           push: true
           tags: ghcr.io/fyralabs/katsu
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Export digest
         run: |
