@@ -1,6 +1,6 @@
 FROM ghcr.io/terrapkg/builder:f43 AS base
 
-RUN --mount=type=cache,target=/var/cache/dnf \
+RUN --mount=type=cache,target=/var/cache \
     dnf install -y \
     xorriso \
     rpm \
@@ -36,7 +36,9 @@ RUN --mount=type=cache,target=/var/cache/dnf \
     rEFInd-tools \
     isomd5sum \
     dnf5 \
-    podman
+    podman \
+    https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-43.noarch.rpm \
+    https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-43.noarch.rpm
 
 FROM base AS rust-builder
 
@@ -53,11 +55,7 @@ RUN --mount=type=cache,target=/src/target \
 
 FROM base AS runtime
 
-COPY --from=rust-builder /usr/bin/katsu /usr/bin/katsu
-
-
-# clean up unnecessary packages to reduce image size
-RUN dnf mark user -y zstd
+RUN dnf mark user -y zstd fedora-gpg-keys
 RUN dnf remove -y \
     anda \
     mock \
@@ -69,5 +67,11 @@ RUN dnf remove -y \
     *-srpm-macros \
     terra-mock-configs
 RUN dnf clean all
+
+COPY --from=rust-builder /usr/bin/katsu /usr/bin/katsu
+
+
+# clean up unnecessary packages to reduce image size
+
 
 ENTRYPOINT [ "katsu" ]

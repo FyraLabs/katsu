@@ -1248,6 +1248,7 @@ impl IsoBuilder {
 		let mut cmd = std::process::Command::new("mkfs.erofs");
 		let cmd = cmd
 			.arg("-zzstd,level=15")
+			.arg("--quiet")
 			// all fragments + dedupe inodes
 			.arg("-Eall-fragments,fragdedupe=inode")
 			.arg("-C1048576")

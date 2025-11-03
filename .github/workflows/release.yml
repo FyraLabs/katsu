@@ -11,6 +11,9 @@ on:
     # Publish semver tags as releases.
     tags: ["v*.*.*"]
 
+env:
+  REGISTRY_IMAGE: ghcr.io/fyralabs/katsu
+
 jobs:
   # Build docker image for the rest of the tests
   build-environment-arch:
@@ -34,7 +37,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+          images: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -50,16 +53,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build OCI test cache by digest
+      - name: Build OCI image and push by digest
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ghcr.io/fyralabs/katsu
+          tags: ${{ env.REGISTRY_IMAGE }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
         run: |
@@ -103,11 +106,11 @@ jobs:
         with:
           images: ${{ env.REGISTRY_IMAGE }}
           tags: |
-            type=raw,value=latest
-            type=ref,event=branch,enable={{is_default_branch}}
+            type=ref,event=branch
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=sha
 
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests
