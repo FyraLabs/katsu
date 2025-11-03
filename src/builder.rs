@@ -26,6 +26,8 @@ crate::prepend_comment!(GRUB_PREPEND_COMMENT: "/boot/grub/grub.cfg", "Grub confi
 crate::prepend_comment!(LIMINE_PREPEND_COMMENT: "/boot/limine.cfg", "Limine configurations", katsu::builder::Bootloader::cp_limine);
 crate::prepend_comment!(REFIND_PREPEND_COMMENT: "/boot/efi/EFI/refind/refind.conf", "rEFInd configurations", katsu::builder::Bootloader::cp_refind);
 
+const DNF_TRANS_COMMENT: &str = "Initial transaction from building with Katsu";
+
 /// Represents the bootloader types supported by Katsu
 ///
 /// This enum defines the different bootloader implementations that can be used
@@ -831,10 +833,44 @@ impl RootBuilder for DnfRootBuilder {
 		options.append(&mut exclude.iter().map(|p| format!("--exclude={p}")).collect());
 
 		info!("Initializing system with dnf");
-		crate::run_cmd_prep_chroot!(&chroot,
-			$dnf install -y --releasever=$releasever --installroot=$chroot $[packages] $[options] 2>&1;
-			$dnf clean all --installroot=$chroot;
-		)?;
+
+		// commenting this out for now, chroot mounts shouldn't need to be remade when bootstrapping packages
+
+		// crate::run_cmd_prep_chroot!(&chroot,
+		// 	$dnf install -y --releasever=$releasever --installroot=$chroot $[packages] $[options] 2>&1;
+		// 	$dnf clean all --installroot=$chroot;
+		// )?;
+
+		// span for DNF stuff
+		{
+			let chroot = chroot.clone();
+			let dnf = dnf.clone();
+			let packages = packages.clone();
+			let options = options.clone();
+			let releasever = releasever.clone();
+
+			let mut cmd = std::process::Command::new(&dnf);
+			cmd.arg("do")
+				.arg("-y")
+				.arg("--action=install")
+				.arg(format!("--comment={DNF_TRANS_COMMENT}"))
+				.arg("--setopt=tsflags=")
+				.arg(format!("--releasever={}", releasever))
+				.arg(format!("--installroot={}", chroot.display()))
+				.args(&packages)
+				.args(&options);
+			info!(?cmd, "Running dnf command to install packages");
+
+			let status = cmd.status()?;
+
+			if !status.success() {
+				bail!("DNF command failed with status: {}", status);
+			}
+
+			let mut clean_cmd = std::process::Command::new(&dnf);
+			clean_cmd.arg("clean").arg("all").arg(format!("--installroot={}", chroot.display()));
+			info!(?clean_cmd, "Running dnf clean command");
+		}
 
 		info!("Setting up users");
 
