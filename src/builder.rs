@@ -1245,7 +1245,8 @@ impl IsoBuilder {
 	}
 	#[allow(dead_code)]
 	pub fn erofs(&self, chroot: &Path, image: &Path) -> Result<()> {
-		std::process::Command::new("mkfs.erofs")
+		let mut cmd = std::process::Command::new("mkfs.erofs");
+		let cmd = cmd
 			.arg("-zzstd,level=15")
 			// all fragments + dedupe inodes
 			.arg("-Eall-fragments,fragdedupe=inode")
@@ -1254,8 +1255,14 @@ impl IsoBuilder {
 			.args(["--exclude-path", "/proc/"])
 			.args(["--exclude-path", "/sys/"])
 			.arg(image)
-			.arg(chroot)
-			.status()?;
+			.arg(chroot);
+
+		info!(cmd = ?cmd, "Creating EROFS image");
+		let status = cmd.status()?;
+
+		if !status.success() {
+			bail!("{:?} failed with exit code: {status}", cmd.get_program());
+		}
 		Ok(())
 	}
 	// TODO: add mac support
