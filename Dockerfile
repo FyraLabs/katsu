@@ -36,7 +36,9 @@ RUN --mount=type=cache,target=/var/cache \
     rEFInd-tools \
     isomd5sum \
     dnf5 \
-    podman
+    podman \
+    https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-43.noarch.rpm \
+    https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-43.noarch.rpm
 
 FROM base AS rust-builder
 
