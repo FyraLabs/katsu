@@ -40,10 +40,23 @@ RUN --mount=type=cache,target=/var/cache \
     podman
 
 FROM base AS rust-builder
+RUN dnf mark user -y zstd fedora-gpg-keys
+RUN dnf remove -y \
+    anda \
+    mock \
+    mold \
+    gh \
+    jq \
+    subatomic-cli \
+    gdb-minimal \
+    *-srpm-macros \
+    terra-mock-configs
+RUN dnf clean all
 
 COPY . /src
 
 WORKDIR /src
+
 
 RUN --mount=type=cache,target=/src/target \
     --mount=type=cache,target=/usr/local/cargo/registry \
@@ -58,17 +71,6 @@ COPY --from=rust-builder /usr/bin/katsu /usr/bin/katsu
 
 
 # clean up unnecessary packages to reduce image size
-RUN dnf mark user -y zstd
-RUN dnf remove -y \
-    anda \
-    mock \
-    mold \
-    gh \
-    jq \
-    subatomic-cli \
-    gdb-minimal \
-    *-srpm-macros \
-    terra-mock-configs
-RUN dnf clean all
+
 
 ENTRYPOINT [ "katsu" ]
