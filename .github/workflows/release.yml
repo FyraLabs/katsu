@@ -11,6 +11,9 @@ on:
     # Publish semver tags as releases.
     tags: ["v*.*.*"]
 
+env:
+  REGISTRY_IMAGE: ghcr.io/fyralabs/katsu
+
 jobs:
   # Build docker image for the rest of the tests
   build-environment-arch:
@@ -34,7 +37,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+          images: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -56,7 +59,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/fyralabs/katsu
+          tags: ${{ env.REGISTRY_IMAGE }}
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha
           cache-to: type=gha,mode=max
