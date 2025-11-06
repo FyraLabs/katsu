@@ -836,11 +836,6 @@ impl RootBuilder for DnfRootBuilder {
 
 		// commenting this out for now, chroot mounts shouldn't need to be remade when bootstrapping packages
 
-		// crate::run_cmd_prep_chroot!(&chroot,
-		// 	$dnf install -y --releasever=$releasever --installroot=$chroot $[packages] $[options] 2>&1;
-		// 	$dnf clean all --installroot=$chroot;
-		// )?;
-
 		// span for DNF stuff
 		{
 			let chroot = chroot.clone();
@@ -861,15 +856,20 @@ impl RootBuilder for DnfRootBuilder {
 				.args(&options);
 			info!(?cmd, "Running dnf command to install packages");
 
-			let status = cmd.status()?;
-
-			if !status.success() {
-				bail!("DNF command failed with status: {}", status);
-			}
-
 			let mut clean_cmd = std::process::Command::new(&dnf);
 			clean_cmd.arg("clean").arg("all").arg(format!("--installroot={}", chroot.display()));
-			info!(?clean_cmd, "Running dnf clean command");
+			crate::util::run_with_chroot(&chroot, || -> Result<()> {
+				let status = cmd.status()?;
+				if !status.success() {
+					bail!("DNF command failed with status: {}", status);
+				}
+				info!(?clean_cmd, "Running dnf clean command");
+				let clean_status = clean_cmd.spawn()?.wait()?;
+				if !clean_status.success() {
+					warn!("DNF clean command failed with status: {}", clean_status);
+				}
+				Ok(())
+			})?;
 		}
 
 		info!("Setting up users");
