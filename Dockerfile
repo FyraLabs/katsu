@@ -21,13 +21,11 @@ RUN --mount=type=cache,target=/var/cache \
     rustc \
     qemu-user-static-aarch64 \
     qemu-user-binfmt \
-    qemu-kvm \
     qemu-img \
     cargo \
     systemd-devel \
     mkpasswd \
     clang-devel \
-    moby-engine \
     squashfs-tools \
     erofs-utils \
     grub2-tools \
@@ -38,7 +36,9 @@ RUN --mount=type=cache,target=/var/cache \
     dnf5 \
     podman \
     https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-43.noarch.rpm \
-    https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-43.noarch.rpm
+    https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-43.noarch.rpm \
+    --exclude='mesa*' 
+
 
 FROM base AS rust-builder
 
