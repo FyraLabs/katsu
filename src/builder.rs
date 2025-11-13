@@ -110,24 +110,22 @@ impl Bootloader {
 			Self::REFInd => ("boot/efi/EFI/refind/refind_x64.efi", ""),
 		}
 	}
-	/// Copies vmlinuz and initramfs files from the chroot to a destination directory
+	/// Copies vmlinuz from /usr/lib/modules to destination directory
 	///
-	/// This helper method locates the kernel (vmlinuz) and initial ramdisk (initramfs)
-	/// files in the chroot environment and copies them to the destination directory.
-	/// These are essential files for booting the system.
+	/// This helper method locates the kernel (vmlinuz) file in /usr/lib/modules
+	/// and copies it to the destination directory. The initramfs is generated
+	/// separately by dracut directly to the iso-tree.
 	///
 	/// # Arguments
 	///
-	/// * `chroot` - The path to the chroot directory containing the kernel and initramfs
-	/// * `dest` - The destination directory where the files should be copied
+	/// * `chroot` - The path to the chroot directory containing the kernel
+	/// * `dest` - The destination directory where vmlinuz should be copied
 	///
 	/// # Returns
 	///
-	/// * `Result<(String, String)>` - Success with file names or failure with error details
-	///   * First element: The name of the kernel file (e.g., "vmlinuz")
-	///   * Second element: The name of the initramfs file (e.g., "initramfs.img")
+	/// * `Result<String>` - Success with kernel filename or failure with error details
 	fn cp_vmlinuz_initramfs(&self, chroot: &Path, dest: &Path) -> Result<(String, String)> {
-		trace!("Finding vmlinuz and initramfs");
+		trace!("Finding vmlinuz in /usr/lib/modules");
 
 		// Prepare required directories
 		std::fs::create_dir_all(dest.join("boot"))?;
@@ -136,12 +134,22 @@ impl Bootloader {
 		let (vmlinuz, kernel_version) = self.find_vmlinuz(chroot)?;
 		debug!(?vmlinuz, ?kernel_version, "Kernel version and vmlinuz found");
 
-		// Find initramfs
-		let initramfs = self.find_initramfs(chroot)?;
+		// Copy vmlinuz to destination
+		let vmlinuz_dest = dest.join("boot").join("vmlinuz");
+		trace!(?vmlinuz, ?vmlinuz_dest, "Copying vmlinuz to destination");
 
-		// Copy files to destination
-		self.copy_boot_files(chroot, dest, &vmlinuz, &initramfs)?;
+		let vmlinuz_src = if vmlinuz.is_empty() {
+			bail!("Could not find vmlinuz path");
+		} else {
+			PathBuf::from(&vmlinuz)
+		};
 
+		if !vmlinuz_src.exists() {
+			bail!("Source vmlinuz not found at {}", vmlinuz_src.display());
+		}
+		fs::copy(&vmlinuz_src, &vmlinuz_dest)?;
+
+		// Return kernel filename and dummy initramfs name (initramfs already in iso-tree)
 		Ok(("vmlinuz".to_string(), "initramfs.img".to_string()))
 	}
 
@@ -170,6 +178,7 @@ impl Bootloader {
 	}
 
 	#[tracing::instrument]
+	#[allow(dead_code)]
 	fn find_initramfs(&self, chroot: &Path) -> Result<String> {
 		let bootdir = chroot.join("boot");
 
@@ -199,6 +208,7 @@ impl Bootloader {
 	}
 
 	#[tracing::instrument]
+	#[allow(dead_code)]
 	fn copy_boot_files(
 		&self, chroot: &Path, dest: &Path, vmlinuz: &str, initramfs: &str,
 	) -> Result<()> {
@@ -209,17 +219,63 @@ impl Bootloader {
 		// Copy vmlinuz to destination
 		let vmlinuz_dest = dest.join("boot").join("vmlinuz");
 		trace!(?vmlinuz, ?vmlinuz_dest, "Copying vmlinuz to destination");
-
-		if let Err(e) = run_cmd!(cp -v $vmlinuz $vmlinuz_dest) {
-			tracing::error!(?e, ?vmlinuz, ?vmlinuz_dest, "Failed to copy vmlinuz");
-			return Err(e.into());
+		let vmlinuz_src =
+			if vmlinuz.is_empty() { bootdir.join("vmlinuz") } else { PathBuf::from(vmlinuz) };
+		if !vmlinuz_src.exists() {
+			bail!("Source vmlinuz not found at {}", vmlinuz_src.display());
 		}
+		fs::copy(&vmlinuz_src, &vmlinuz_dest)?;
 
 		// Copy initramfs to destination
-		if let Err(e) = run_cmd!(cp -v $bootdir/$initramfs $dest/boot/initramfs.img) {
-			tracing::error!(?e, ?initramfs, "Failed to copy initramfs");
-			return Err(e.into());
+		let initramfs_src = bootdir.join(initramfs);
+		let initramfs_dest = dest.join("boot").join("initramfs.img");
+		if !initramfs_src.exists() {
+			bail!("Source initramfs not found at {}", initramfs_src.display());
 		}
+		fs::copy(&initramfs_src, &initramfs_dest)?;
+
+		// === start /boot cleanup ===
+		if let Err(err) = fs::remove_file(&vmlinuz_src) {
+			warn!(?err, path = %vmlinuz_src.display(), "Failed to remove source vmlinuz after copying");
+		}
+		if let Err(err) = fs::remove_file(&initramfs_src) {
+			warn!(?err, path = %initramfs_src.display(), "Failed to remove source initramfs after copying");
+		}
+
+		// remove the rescue initramfs and vmlinuz if they exist
+		let rescue_initramfs = bootdir.read_dir()?.find_map(|f| {
+			let f = f.ok()?;
+			let name = f.file_name().to_string_lossy().to_string();
+			if name.contains("-rescue-") {
+				Some(f.path())
+			} else {
+				None
+			}
+		});
+
+		if let Some(rescue_initramfs) = rescue_initramfs {
+			if let Err(err) = fs::remove_file(&rescue_initramfs) {
+				warn!(?err, path = %rescue_initramfs.display(), "Failed to remove rescue initramfs after copying");
+			}
+		}
+
+		let rescue_vmlinuz = bootdir.read_dir()?.find_map(|f| {
+			let f = f.ok()?;
+			let name = f.file_name().to_string_lossy().to_string();
+			if name.contains("-rescue-") {
+				Some(f.path())
+			} else {
+				None
+			}
+		});
+
+		if let Some(rescue_vmlinuz) = rescue_vmlinuz {
+			if let Err(err) = fs::remove_file(&rescue_vmlinuz) {
+				warn!(?err, path = %rescue_vmlinuz.display(), "Failed to remove rescue vmlinuz after copying");
+			}
+		}
+
+		// === end /boot cleanup ===
 
 		Ok(())
 	}
@@ -836,11 +892,6 @@ impl RootBuilder for DnfRootBuilder {
 
 		// commenting this out for now, chroot mounts shouldn't need to be remade when bootstrapping packages
 
-		// crate::run_cmd_prep_chroot!(&chroot,
-		// 	$dnf install -y --releasever=$releasever --installroot=$chroot $[packages] $[options] 2>&1;
-		// 	$dnf clean all --installroot=$chroot;
-		// )?;
-
 		// span for DNF stuff
 		{
 			let chroot = chroot.clone();
@@ -861,15 +912,20 @@ impl RootBuilder for DnfRootBuilder {
 				.args(&options);
 			info!(?cmd, "Running dnf command to install packages");
 
-			let status = cmd.status()?;
-
-			if !status.success() {
-				bail!("DNF command failed with status: {}", status);
-			}
-
 			let mut clean_cmd = std::process::Command::new(&dnf);
 			clean_cmd.arg("clean").arg("all").arg(format!("--installroot={}", chroot.display()));
-			info!(?clean_cmd, "Running dnf clean command");
+			crate::util::run_with_chroot(&chroot, || -> Result<()> {
+				let status = cmd.status()?;
+				if !status.success() {
+					bail!("DNF command failed with status: {}", status);
+				}
+				info!(?clean_cmd, "Running dnf clean command");
+				let clean_status = clean_cmd.spawn()?.wait()?;
+				if !clean_status.success() {
+					warn!("DNF clean command failed with status: {}", clean_status);
+				}
+				Ok(())
+			})?;
 		}
 
 		info!("Setting up users");
@@ -1128,7 +1184,7 @@ const DR_OMIT: &str = "";
 const DR_ARGS: &str = "-vv --xz --reproducible";
 
 impl IsoBuilder {
-	fn dracut(&self, root: &Path) -> Result<String> {
+	fn dracut(&self, root: &Path) -> Result<PathBuf> {
 		bail_let!(
 			Some(kver) = fs::read_dir(root.join("usr/lib/modules"))?.find_map(|f| {
 				// find any directory
@@ -1171,29 +1227,33 @@ impl IsoBuilder {
 			cmd.arg(root.canonicalize()?);
 		}
 
-		//make dir
-		std::fs::create_dir_all(root.join("boot"))?;
 		let cmd = cmd.env("DRACUT_SYSTEMD", "0").args(&dr_args).arg("--kver").arg(&kver);
 
 		let current_dir = std::env::current_dir()?;
 		info!(?current_dir, "Current directory");
 		info!(?cmd, "Running dracut command");
 
-		if dracut_outside_chroot {
-			info!("Dracut run outside chroot, skipping chroot execution");
+		// Prepare iso-tree path for later
+		let iso_tree_path = root.join("../").join(ISO_TREE);
+		std::fs::create_dir_all(iso_tree_path.join("boot"))?;
+		let final_initramfs_path = iso_tree_path.join("boot").join("initramfs.img");
 
-			// get iso-tree
-			let iso_tree_path = root.join("../").join(ISO_TREE);
-			std::fs::create_dir_all(iso_tree_path.join("boot"))?;
-			cmd.arg(iso_tree_path.join("boot").canonicalize()?.join("initramfs.img"));
+		if dracut_outside_chroot {
+			info!("Dracut run outside chroot, generating to iso-tree");
+			cmd.arg(&final_initramfs_path);
 			let status = cmd.status()?;
 			debug!(?status, "Dracut command finished");
 			if !status.success() {
 				bail!("Dracut failed with exit code: {}", status);
 			}
 		} else {
+			// FIXME(dracut): @korewaChino #43 - dracut ignores CLI initramfs path and writes to /boot.
+			// Workaround: allow dracut to write to /boot then move the initramfs into place.
+			// Details: dracut appears to ignore the positional/flag argument for initramfs path;
+			// tracked in https://github.com/FyraLabs/katsu/issues/43. Remove when upstream
+			// fixes or we implement an alternative generation path.
 			crate::util::enter_chroot_run(root, || -> Result<()> {
-				cmd.arg("/boot/initramfs.img");
+				cmd.arg(format!("/boot/initramfs-{}.img", &kver));
 
 				let status = cmd.status()?;
 				debug!(?status, "Dracut command finished");
@@ -1203,11 +1263,18 @@ impl IsoBuilder {
 
 				Ok(())
 			})?;
+
+			// Move from chroot/boot to iso-tree/boot
+			let boot_initramfs = root.join(format!("boot/initramfs-{}.img", kver));
+			if boot_initramfs.exists() {
+				fs::copy(&boot_initramfs, &final_initramfs_path)?;
+				info!("Copied initramfs from chroot /boot to iso-tree");
+			} else {
+				bail!("Dracut did not create expected initramfs at {}", boot_initramfs.display());
+			}
 		}
 
-		// .arg("/boot/initramfs.img");
-
-		Ok(root.join("boot").join("initramfs.img").to_string_lossy().to_string())
+		Ok(final_initramfs_path)
 	}
 
 	pub fn squashfs(&self, chroot: &Path, image: &Path) -> Result<()> {
@@ -1248,7 +1315,11 @@ impl IsoBuilder {
 		let mut cmd = std::process::Command::new("mkfs.erofs");
 		let cmd = cmd
 			.arg("-zzstd,level=15")
-			.arg("--quiet")
+			.arg("-d1")
+			// xattr tolerance to 1: attempt to solve #46
+			.arg("-x1")
+			// selinux bs
+			.arg(format!("--file-contexts={}", chroot.join("etc/selinux/targeted/contexts/files/file_contexts").display()))
 			// all fragments + dedupe inodes
 			.arg("-Eall-fragments,fragdedupe=inode")
 			.arg("-C1048576")
@@ -1420,6 +1491,38 @@ impl ImageBuilder for IsoBuilder {
 		// self.root_builder.build(chroot.canonicalize()?.as_path(), manifest)?;
 
 		phase!("dracut": self.dracut(chroot));
+
+		// Clean up kernel artifacts from /boot before squashing
+		// kernel-install will regenerate them on target system
+		info!("Cleaning up kernel artifacts from chroot /boot before creating root image");
+		let boot_dir = chroot.join("boot");
+		if boot_dir.exists() {
+			// Remove vmlinuz* and initramfs* files, but keep grub/, efi/, etc.
+			if let Ok(entries) = fs::read_dir(&boot_dir) {
+				for entry in entries.flatten() {
+					let path = entry.path();
+					let filename = entry.file_name();
+					let name = filename.to_string_lossy();
+
+					// Remove various kernel artifacts we don't need
+					if name.contains("-rescue-")
+					// hack: don't remove initramfs for now
+					// || name.starts_with("initramfs")
+					// || name.starts_with("initrd")
+					// || name.starts_with("vmlinuz")
+					// || name.starts_with("System.map")
+					// || name.starts_with("config-")
+					// || name.ends_with(".img") && !path.is_dir()
+					{
+						if let Err(err) = fs::remove_file(&path) {
+							warn!(?err, ?path, "Failed to remove boot artifact");
+						} else {
+							debug!(?path, "Removed boot artifact");
+						}
+					}
+				}
+			}
+		}
 
 		// temporarily store content of iso
 		let image_dir = workspace.join(ISO_TREE).join("LiveOS");
