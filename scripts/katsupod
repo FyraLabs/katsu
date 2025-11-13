@@ -11,4 +11,4 @@ podman \
     -v ./:/workdir:Z \
     -w /workdir \
     $KATSU_IMAGE \
-    katsu "$@"
+    "$@"
