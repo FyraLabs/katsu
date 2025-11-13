@@ -1267,8 +1267,8 @@ impl IsoBuilder {
 			// Move from chroot/boot to iso-tree/boot
 			let boot_initramfs = root.join(format!("boot/initramfs-{}.img", kver));
 			if boot_initramfs.exists() {
-				fs::rename(&boot_initramfs, &final_initramfs_path)?;
-				info!("Moved initramfs from chroot /boot to iso-tree");
+				fs::copy(&boot_initramfs, &final_initramfs_path)?;
+				info!("Copied initramfs from chroot /boot to iso-tree");
 			} else {
 				bail!("Dracut did not create expected initramfs at {}", boot_initramfs.display());
 			}
@@ -1315,7 +1315,11 @@ impl IsoBuilder {
 		let mut cmd = std::process::Command::new("mkfs.erofs");
 		let cmd = cmd
 			.arg("-zzstd,level=15")
-			.arg("--quiet")
+			.arg("-d1")
+			// xattr tolerance to 1: attempt to solve #46
+			.arg("-x1")
+			// selinux bs
+			.arg(format!("--file-contexts={}", chroot.join("etc/selinux/targeted/contexts/files/file_contexts").display()))
 			// all fragments + dedupe inodes
 			.arg("-Eall-fragments,fragdedupe=inode")
 			.arg("-C1048576")
@@ -1500,13 +1504,15 @@ impl ImageBuilder for IsoBuilder {
 					let filename = entry.file_name();
 					let name = filename.to_string_lossy();
 
-					// Remove vmlinuz, initramfs, and related files
-					if name.starts_with("vmlinuz")
-						|| name.starts_with("initramfs")
-						|| name.starts_with("initrd")
-						|| name.starts_with("System.map")
-						|| name.starts_with("config-")
-						|| name.ends_with(".img") && !path.is_dir()
+					// Remove various kernel artifacts we don't need
+					if name.contains("-rescue-")
+					// hack: don't remove initramfs for now
+					// || name.starts_with("initramfs")
+					// || name.starts_with("initrd")
+					// || name.starts_with("vmlinuz")
+					// || name.starts_with("System.map")
+					// || name.starts_with("config-")
+					// || name.ends_with(".img") && !path.is_dir()
 					{
 						if let Err(err) = fs::remove_file(&path) {
 							warn!(?err, ?path, "Failed to remove boot artifact");
