@@ -5,7 +5,7 @@ oci_full := oci_image + ":" + oci_tag
 # reminder to run as rootful OR run in a vm
 
 podman-build:
-    podman build -t {{oci_full}} .
+    podman build --network=host -t {{oci_full}} .
 
 
 katsu *ARGS:
