@@ -9,6 +9,7 @@ podman \
     --cgroupns=host \
     --security-opt seccomp=unconfined \
     -v ./:/workdir:Z \
+    -v cache-katsu:/var/cache:Z \
     -w /workdir \
     $KATSU_IMAGE \
     "$@"
