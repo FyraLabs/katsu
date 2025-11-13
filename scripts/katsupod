@@ -1,0 +1,14 @@
+#!/bin/bash
+
+: ${KATSU_IMAGE:="ghcr.io/fyralabs/katsu:latest"}
+
+podman \
+ run --rm -it \
+    --privileged \
+    --cap-add=ALL \
+    --cgroupns=host \
+    --security-opt seccomp=unconfined \
+    -v ./:/workdir:Z \
+    -w /workdir \
+    $KATSU_IMAGE \
+    katsu "$@"
