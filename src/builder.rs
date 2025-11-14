@@ -1313,21 +1313,27 @@ impl IsoBuilder {
 	#[allow(dead_code)]
 	pub fn erofs(&self, chroot: &Path, image: &Path) -> Result<()> {
 		let mut cmd = std::process::Command::new("mkfs.erofs");
-		let cmd = cmd
+		let mut cmd = cmd
 			.arg("-zzstd,level=15")
 			.arg("-d1")
 			// xattr tolerance to 1: attempt to solve #46
 			.arg("-x1")
-			// selinux bs
-			.arg(format!("--file-contexts={}", chroot.join("etc/selinux/targeted/contexts/files/file_contexts").display()))
 			// all fragments + dedupe inodes
 			.arg("-Eall-fragments,fragdedupe=inode")
 			.arg("-C1048576")
 			.args(["--exclude-path", "/dev/"])
 			.args(["--exclude-path", "/proc/"])
-			.args(["--exclude-path", "/sys/"])
-			.arg(image)
-			.arg(chroot);
+			.args(["--exclude-path", "/sys/"]);
+
+		// selinux bs
+		let selinux_fcontexts = chroot.join("etc/selinux/targeted/contexts/files/file_contexts");
+		if selinux_fcontexts.exists() {
+			cmd = cmd.arg(format!("--file-contexts={}", selinux_fcontexts.display()));
+		} else {
+			warn!("SELinux file contexts not found, skipping");
+		}
+
+		cmd = cmd.arg(image).arg(chroot);
 
 		info!(cmd = ?cmd, "Creating EROFS image");
 		let status = cmd.status()?;
