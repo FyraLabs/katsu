@@ -110,11 +110,13 @@ impl Bootloader {
 			Self::REFInd => ("boot/efi/EFI/refind/refind_x64.efi", ""),
 		}
 	}
-	/// Copies vmlinuz from /usr/lib/modules to destination directory
+	/// Copies vmlinuz (and optionally initramfs) from /usr/lib/modules to destination
 	///
 	/// This helper method locates the kernel (vmlinuz) file in /usr/lib/modules
-	/// and copies it to the destination directory. The initramfs is generated
-	/// separately by dracut directly to the iso-tree.
+	/// and copies it to the destination directory. When requested, it will also
+	/// copy the initramfs image from the chroot's `/boot` into the destination,
+	/// normalising the name to `initramfs.img` so the rest of the ISO generation
+	/// pipeline can rely on a consistent filename.
 	///
 	/// # Arguments
 	///
@@ -124,7 +126,9 @@ impl Bootloader {
 	/// # Returns
 	///
 	/// * `Result<String>` - Success with kernel filename or failure with error details
-	fn cp_vmlinuz_initramfs(&self, chroot: &Path, dest: &Path) -> Result<(String, String)> {
+	fn cp_vmlinuz_initramfs(
+		&self, chroot: &Path, dest: &Path, copy_initramfs: bool,
+	) -> Result<(String, String)> {
 		trace!("Finding vmlinuz in /usr/lib/modules");
 
 		// Prepare required directories
@@ -148,22 +152,25 @@ impl Bootloader {
 			bail!("Source vmlinuz not found at {}", vmlinuz_src.display());
 		}
 
-		let initramfs_name = self.find_initramfs(chroot)?;
-		let initramfs_src = chroot.join("boot").join(&initramfs_name);
-		let initramfs_dest = dest.join("boot").join("initramfs.img");
-		trace!(?initramfs_src, ?initramfs_dest, "Copying initramfs to destination");
-
-		if !initramfs_src.exists() {
-			bail!("Source initramfs not found at {}", initramfs_src.display());
-		}
-
 		fs::copy(&vmlinuz_src, &vmlinuz_dest)?;
-		fs::copy(&initramfs_src, &initramfs_dest)?;
+
+		if copy_initramfs {
+			let initramfs_name = self.find_initramfs(chroot)?;
+			let initramfs_src = chroot.join("boot").join(&initramfs_name);
+			let initramfs_dest = dest.join("boot").join("initramfs.img");
+			trace!(?initramfs_src, ?initramfs_dest, "Copying initramfs to destination");
+
+			if !initramfs_src.exists() {
+				bail!("Source initramfs not found at {}", initramfs_src.display());
+			}
+
+			fs::copy(&initramfs_src, &initramfs_dest)?;
+		}
 
 		Ok(("vmlinuz".to_string(), "initramfs.img".to_string()))
 	}
 
-	#[tracing::instrument]
+	#[tracing::instrument(skip(self))]
 	fn find_vmlinuz(&self, chroot: &Path) -> Result<(String, Option<String>)> {
 		let modules_dir = chroot.join("usr/lib/modules");
 
@@ -308,7 +315,7 @@ impl Bootloader {
 		)?;
 		std::fs::copy("/usr/share/limine/limine-bios.sys", root.join("boot/limine-bios.sys"))?;
 
-		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &root)?;
+		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &root, false)?;
 		let volid = manifest.get_volid();
 
 		// Generate limine.cfg
@@ -360,7 +367,7 @@ impl Bootloader {
 			cp -rv /usr/share/rEFInd/refind/icons/. $iso_tree/EFI/BOOT/icons/ 2>&1;
 		)?;
 
-		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &iso_tree)?;
+		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &iso_tree, false)?;
 		let volid = manifest.get_volid();
 
 		let refind_cfg = iso_tree.join("EFI/BOOT/refind.conf");
@@ -498,7 +505,7 @@ impl Bootloader {
 		&self, chroot: &Path, boot_imgs_dir: &Path, iso_tree: &Path,
 	) -> Result<(String, String)> {
 		// Copy vmlinuz and initramfs to bootimgs directory
-		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, boot_imgs_dir)?;
+		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, boot_imgs_dir, true)?;
 
 		let iso_boot = iso_tree.join("boot");
 		let chroot_boot = chroot.join("boot");
