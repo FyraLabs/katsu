@@ -68,8 +68,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY_IMAGE }}
           tags: |
-            type=raw,value=latest
-            type=ref,event=branch,enable={{is_default_branch}}
+            type=ref,event=branch
             type=ref,event=tag
             type=ref,event=pr
             type=semver,pattern={{version}}
@@ -95,12 +94,10 @@ jobs:
         with:
           context: .
           file: Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
         run: |
