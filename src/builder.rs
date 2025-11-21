@@ -1315,7 +1315,7 @@ impl IsoBuilder {
 		let mut cmd = std::process::Command::new("mkfs.erofs");
 		let mut cmd = cmd
 			.arg("-zzstd,level=15")
-			.arg("-d1")
+			.arg("--quiet")
 			// xattr tolerance to 1: attempt to solve #46
 			.arg("-x1")
 			// all fragments + dedupe inodes
