@@ -194,7 +194,7 @@ impl Bootloader {
 		Ok((vmlinuz, kernel_version))
 	}
 
-	#[tracing::instrument]
+	#[tracing::instrument(skip(self))]
 	#[allow(dead_code)]
 	fn find_initramfs(&self, chroot: &Path) -> Result<String> {
 		let bootdir = chroot.join("boot");
@@ -224,7 +224,7 @@ impl Bootloader {
 		bail!("Cannot find initramfs in {:?}", bootdir)
 	}
 
-	#[tracing::instrument]
+	#[tracing::instrument(skip(self))]
 	#[allow(dead_code)]
 	fn copy_boot_files(
 		&self, chroot: &Path, dest: &Path, vmlinuz: &str, initramfs: &str,
