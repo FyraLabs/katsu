@@ -1,421 +1,424 @@
 name: Build test
 
 env:
-    DNF_PKGS: |
-        xorriso
-        rpm
-        limine
-        systemd
-        btrfs-progs
-        e2fsprogs
-        xfsprogs
-        dosfstools
-        grub2
-        parted
-        gdisk
-        util-linux-core
-        systemd-container
-        grub2-efi
-        uboot-images-armv8
-        uboot-tools
-        rustc
-        qemu-user-static-aarch64
-        qemu-user-binfmt
-        qemu-kvm
-        qemu-img
-        cargo
-        systemd-devel
-        mkpasswd
-        clang-devel
-        moby-engine
-        squashfs-tools
-        erofs-utils
-        grub2-tools
-        grub2-tools-extra
-        isomd5sum
-        dnf5
-        podman
-    REGISTRY_IMAGE: ghcr.io/fyralabs/katsu-cache
+  DNF_PKGS: |
+    xorriso
+    rpm
+    limine
+    systemd
+    btrfs-progs
+    e2fsprogs
+    xfsprogs
+    dosfstools
+    grub2
+    parted
+    gdisk
+    util-linux-core
+    systemd-container
+    grub2-efi
+    uboot-images-armv8
+    uboot-tools
+    rustc
+    qemu-user-static-aarch64
+    qemu-user-binfmt
+    qemu-kvm
+    qemu-img
+    cargo
+    systemd-devel
+    mkpasswd
+    clang-devel
+    moby-engine
+    squashfs-tools
+    erofs-utils
+    grub2-tools
+    grub2-tools-extra
+    isomd5sum
+    dnf5
+    podman
+  REGISTRY_IMAGE: ghcr.io/fyralabs/katsu-cache
 
 on:
-    push:
+  push:
 
 jobs:
-    # Build docker image for the rest of the tests
-    build-environment-arch:
-        strategy:
-            fail-fast: false
-            matrix:
-                platform:
-                    - linux/amd64
-                    - linux/arm64
+  # Build docker image for the rest of the tests
+  build-environment-arch:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
 
-        runs-on: ${{ matrix.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
-        permissions:
-            packages: write
-        steps:
-            - name: Prepare
-              run: |
-                  platform=${{ matrix.platform }}
-                  echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+    runs-on: ${{ matrix.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    permissions:
+      packages: write
+    steps:
+      - name: Prepare
+        id: prepare
+        run: |
+          platform=${{ matrix.platform }}
+          platform_pair=${platform//\//-}
+          echo "PLATFORM_PAIR=$platform_pair" >> $GITHUB_ENV
+          echo "platform_pair=$platform_pair" >> $GITHUB_OUTPUT
 
-            - name: Docker meta
-              id: meta
-              uses: docker/metadata-action@v5
-              with:
-                  images: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
 
-            - name: Set up QEMU
-              uses: docker/setup-qemu-action@v3
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-            - name: Set up Docker Buildx
-              uses: docker/setup-buildx-action@v3
-            - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@v4
 
-            - name: Login to GitHub Container Registry
-              uses: docker/login-action@v3
-              with:
-                  registry: ghcr.io
-                  username: ${{ github.actor }}
-                  password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-            - name: Build OCI test cache by digest
-              id: build
-              uses: docker/build-push-action@v6
-              with:
-                  context: .
-                  file: Dockerfile
-                  push: true
-                  tags: ${{ env.REGISTRY_IMAGE }}
-                  cache-from: type=gha
-                  cache-to: type=gha,mode=max
-                  outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+      - name: Build OCI test cache by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY_IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
 
-            - name: Export digest
-              run: |
-                  mkdir -p ${{ runner.temp }}/digests
-                  digest="${{ steps.build.outputs.digest }}"
-                  touch "${{ runner.temp }}/digests/${digest#sha256:}"
+      - name: Export digest
+        run: |
+          mkdir -p ${{ runner.temp }}/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
-            - name: Upload digest
-              uses: actions/upload-artifact@v4
-              with:
-                  name: digests-${{ env.PLATFORM_PAIR }}
-                  path: ${{ runner.temp }}/digests/*
-                  if-no-files-found: error
-                  retention-days: 1
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ steps.prepare.outputs.platform_pair }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
 
-    build-environment:
-        runs-on: ubuntu-latest
-        needs:
-            - build-environment-arch
-        steps:
-            - name: Download digests
-              uses: actions/download-artifact@v4
-              with:
-                  path: ${{ runner.temp }}/digests
-                  pattern: digests-*
-                  merge-multiple: true
+  build-environment:
+    runs-on: ubuntu-latest
+    needs:
+      - build-environment-arch
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
 
-            - name: Login to GitHub Container Registry
-              uses: docker/login-action@v3
-              with:
-                  registry: ghcr.io
-                  username: ${{ github.actor }}
-                  password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-            - name: Set up Docker Buildx
-              uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-            - name: Docker meta
-              id: meta
-              uses: docker/metadata-action@v5
-              with:
-                  images: ${{ env.REGISTRY_IMAGE }}
-                  tags: |
-                      type=raw,value=latest
-                      type=ref,event=branch,enable={{is_default_branch}}
-                      type=ref,event=pr
-                      type=semver,pattern={{version}}
-                      type=semver,pattern={{major}}.{{minor}}
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=ref,event=branch,enable={{is_default_branch}}
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
 
-            - name: Create manifest list and push
-              working-directory: ${{ runner.temp }}/digests
-              run: |
-                  docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-                      $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+      - name: Create manifest list and push
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+              $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
 
-            - name: Inspect image
-              run: |
-                  docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
 
-    image-arm:
-        needs: build-environment
-        runs-on: ubuntu-latest
-        container:
-            image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
-            # Pass /dev from host to container
-            # Very hacky, but it works
-            # Microsoft/Github, if you're reading this,
-            # I'm sorry.
-            options: --privileged -v /dev:/dev
+  image-arm:
+    needs: build-environment
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
+      # Pass /dev from host to container
+      # Very hacky, but it works
+      # Microsoft/Github, if you're reading this,
+      # I'm sorry.
+      options: --privileged -v /dev:/dev
 
-        steps:
-            - uses: actions/checkout@v4
-            - name: Set up QEMU
-              uses: docker/setup-qemu-action@v3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-            - name: Run test
-              run: |
-                  export PATH=$HOME/.cargo/bin:$PATH
-                  export KATSU_KEEP_CHROOT=1
-                  pushd tests/ng
-                  echo "COLORBT_SHOW_HIDDEN=1" >> .env
-                  echo "KATSU_LOG=trace" >> .env
-                  katsu -o disk-image katsu-arm.yaml 2>&1
-                  zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu-arm.raw.zstd
-                  popd
+      - name: Run test
+        run: |
+          export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
+          pushd tests/ng
+          echo "COLORBT_SHOW_HIDDEN=1" >> .env
+          echo "KATSU_LOG=trace" >> .env
+          katsu -o disk-image katsu-arm.yaml 2>&1
+          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu-arm.raw.zstd
+          popd
 
-            - name: Upload artifacts
-              uses: actions/upload-artifact@v4
-              with:
-                  name: image-arm
-                  path: tests/ng/katsu-work/image/*.raw.zstd
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-arm
+          path: tests/ng/katsu-work/image/*.raw.zstd
 
-    bios-x86_64:
-        needs: build-environment
-        runs-on: ubuntu-latest
-        container:
-            image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
-            # Pass /dev from host to container
-            # Very hacky, but it works
-            # Microsoft/Github, if you're reading this,
-            # I'm sorry.
-            options: --privileged -v /dev:/dev
+  bios-x86_64:
+    needs: build-environment
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
+      # Pass /dev from host to container
+      # Very hacky, but it works
+      # Microsoft/Github, if you're reading this,
+      # I'm sorry.
+      options: --privileged -v /dev:/dev
 
-        steps:
-            - uses: actions/checkout@v4
+    steps:
+      - uses: actions/checkout@v4
 
-            - name: Set up QEMU
-              uses: docker/setup-qemu-action@v3
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-            - name: Run test
-              run: |
-                  export PATH=$HOME/.cargo/bin:$PATH
-                  export KATSU_KEEP_CHROOT=1
-                  pushd tests/ng
-                  echo "COLORBT_SHOW_HIDDEN=1" >> .env
-                  echo "KATSU_LOG=trace" >> .env
-                  katsu -o disk-image katsu-bios.yaml 2>&1
-                  zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu.raw.zstd
-                  popd
+      - name: Run test
+        run: |
+          export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
+          pushd tests/ng
+          echo "COLORBT_SHOW_HIDDEN=1" >> .env
+          echo "KATSU_LOG=trace" >> .env
+          katsu -o disk-image katsu-bios.yaml 2>&1
+          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu.raw.zstd
+          popd
 
-            - name: Upload artifacts
-              uses: actions/upload-artifact@v4
-              with:
-                  name: bios-x86_64
-                  path: tests/ng/katsu-work/image/*.raw.zstd
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bios-x86_64
+          path: tests/ng/katsu-work/image/*.raw.zstd
 
-    image-x86_64:
-        needs: build-environment
-        runs-on: ubuntu-latest
-        container:
-            image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
-            # Pass /dev from host to container
-            # Very hacky, but it works
-            # Microsoft/Github, if you're reading this,
-            # I'm sorry.
-            options: --privileged -v /dev:/dev
+  image-x86_64:
+    needs: build-environment
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
+      # Pass /dev from host to container
+      # Very hacky, but it works
+      # Microsoft/Github, if you're reading this,
+      # I'm sorry.
+      options: --privileged -v /dev:/dev
 
-        steps:
-            - uses: actions/checkout@v4
+    steps:
+      - uses: actions/checkout@v4
 
-            - name: Set up QEMU
-              uses: docker/setup-qemu-action@v3
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-            - name: Run test
-              run: |
-                  export PATH=$HOME/.cargo/bin:$PATH
-                  export KATSU_KEEP_CHROOT=1
-                  pushd tests/ng
-                  echo "COLORBT_SHOW_HIDDEN=1" >> .env
-                  echo "KATSU_LOG=trace" >> .env
-                  katsu -o disk-image katsu.yaml 2>&1
-                  zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu.raw.zstd
-                  popd
+      - name: Run test
+        run: |
+          export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
+          pushd tests/ng
+          echo "COLORBT_SHOW_HIDDEN=1" >> .env
+          echo "KATSU_LOG=trace" >> .env
+          katsu -o disk-image katsu.yaml 2>&1
+          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu.raw.zstd
+          popd
 
-            - name: Upload artifacts
-              uses: actions/upload-artifact@v4
-              with:
-                  name: image-x86_64
-                  path: tests/ng/katsu-work/image/*.raw.zstd
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-x86_64
+          path: tests/ng/katsu-work/image/*.raw.zstd
 
-    iso-x86_64:
-        needs: build-environment
-        runs-on: ubuntu-latest
-        container:
-            image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
-            # Pass /dev from host to container
-            # Very hacky, but it works
-            # Microsoft/Github, if you're reading this,
-            # I'm sorry.
-            options: --privileged -v /dev:/dev
+  iso-x86_64:
+    needs: build-environment
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
+      # Pass /dev from host to container
+      # Very hacky, but it works
+      # Microsoft/Github, if you're reading this,
+      # I'm sorry.
+      options: --privileged -v /dev:/dev
 
-        steps:
-            - uses: actions/checkout@v4
+    steps:
+      - uses: actions/checkout@v4
 
-            - name: Set up QEMU
-              uses: docker/setup-qemu-action@v3
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-            - name: Run test
-              run: |
-                  export PATH=$HOME/.cargo/bin:$PATH
-                  export KATSU_KEEP_CHROOT=1
-                  pushd tests/ng
-                  echo "COLORBT_SHOW_HIDDEN=1" >> .env
-                  echo "KATSU_LOG=trace" >> .env
-                  katsu -o iso katsu-iso.yaml 2>&1
-                  mv out.iso katsu-work/image/katsu.iso
-                  popd
+      - name: Run test
+        run: |
+          export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
+          pushd tests/ng
+          echo "COLORBT_SHOW_HIDDEN=1" >> .env
+          echo "KATSU_LOG=trace" >> .env
+          katsu -o iso katsu-iso.yaml 2>&1
+          mv out.iso katsu-work/image/katsu.iso
+          popd
 
-            - name: Upload artifacts
-              uses: actions/upload-artifact@v4
-              with:
-                  name: iso-x86_64
-                  path: tests/ng/katsu-work/image/katsu.iso
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: iso-x86_64
+          path: tests/ng/katsu-work/image/katsu.iso
 
-    iso-bootc-x86_64:
-        needs: build-environment
-        runs-on: ubuntu-latest
-        container:
-            image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
-            # Pass /dev from host to container
-            # Very hacky, but it works
-            # Microsoft/Github, if you're reading this,
-            # I'm sorry.
-            options: --privileged -v /dev:/dev
+  iso-bootc-x86_64:
+    needs: build-environment
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
+      # Pass /dev from host to container
+      # Very hacky, but it works
+      # Microsoft/Github, if you're reading this,
+      # I'm sorry.
+      options: --privileged -v /dev:/dev
 
-        steps:
-            - uses: actions/checkout@v4
+    steps:
+      - uses: actions/checkout@v4
 
-            - name: Set up QEMU
-              uses: docker/setup-qemu-action@v3
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-            - name: Run test
-              run: |
-                  export PATH=$HOME/.cargo/bin:$PATH
-                  export KATSU_KEEP_CHROOT=1
-                  pushd tests/ng
-                  echo "COLORBT_SHOW_HIDDEN=1" >> .env
-                  echo "KATSU_LOG=trace" >> .env
-                  katsu -o iso bootc/katsu-iso-bootc.yaml 2>&1
-                  mv out.iso katsu-work/image/katsu.iso
-                  popd
+      - name: Run test
+        run: |
+          export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
+          pushd tests/ng
+          echo "COLORBT_SHOW_HIDDEN=1" >> .env
+          echo "KATSU_LOG=trace" >> .env
+          katsu -o iso bootc/katsu-iso-bootc.yaml 2>&1
+          mv out.iso katsu-work/image/katsu.iso
+          popd
 
-            - name: Upload artifacts
-              uses: actions/upload-artifact@v4
-              with:
-                  name: iso-bootc-x86_64
-                  path: tests/ng/katsu-work/image/katsu.iso
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: iso-bootc-x86_64
+          path: tests/ng/katsu-work/image/katsu.iso
 
-    iso-refind-x86_64:
-        needs: build-environment
-        runs-on: ubuntu-latest
-        container:
-            image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
-            # Pass /dev from host to container
-            # Very hacky, but it works
-            # Microsoft/Github, if you're reading this,
-            # I'm sorry.
-            options: --privileged -v /dev:/dev
+  iso-refind-x86_64:
+    needs: build-environment
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
+      # Pass /dev from host to container
+      # Very hacky, but it works
+      # Microsoft/Github, if you're reading this,
+      # I'm sorry.
+      options: --privileged -v /dev:/dev
 
-        steps:
-            - uses: actions/checkout@v4
+    steps:
+      - uses: actions/checkout@v4
 
-            - name: Set up QEMU
-              uses: docker/setup-qemu-action@v3
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-            - name: Run test
-              run: |
-                  export PATH=$HOME/.cargo/bin:$PATH
-                  export KATSU_KEEP_CHROOT=1
-                  pushd tests/ng
-                  echo "COLORBT_SHOW_HIDDEN=1" >> .env
-                  echo "KATSU_LOG=trace" >> .env
-                  katsu -o iso katsu-iso-refind.yaml 2>&1
-                  mv out.iso katsu-work/image/katsu.iso
-                  popd
+      - name: Run test
+        run: |
+          export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
+          pushd tests/ng
+          echo "COLORBT_SHOW_HIDDEN=1" >> .env
+          echo "KATSU_LOG=trace" >> .env
+          katsu -o iso katsu-iso-refind.yaml 2>&1
+          mv out.iso katsu-work/image/katsu.iso
+          popd
 
-            - name: Upload artifacts
-              uses: actions/upload-artifact@v4
-              with:
-                  name: iso-refind-x86_64
-                  path: tests/ng/katsu-work/image/katsu.iso
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: iso-refind-x86_64
+          path: tests/ng/katsu-work/image/katsu.iso
 
-    iso-limine-x86_64:
-        needs: build-environment
-        runs-on: ubuntu-latest
-        container:
-            image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
-            # Pass /dev from host to container
-            # Very hacky, but it works
-            # Microsoft/Github, if you're reading this,
-            # I'm sorry.
-            options: --privileged -v /dev:/dev
+  iso-limine-x86_64:
+    needs: build-environment
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
+      # Pass /dev from host to container
+      # Very hacky, but it works
+      # Microsoft/Github, if you're reading this,
+      # I'm sorry.
+      options: --privileged -v /dev:/dev
 
-        steps:
-            - uses: actions/checkout@v4
+    steps:
+      - uses: actions/checkout@v4
 
-            - name: Set up QEMU
-              uses: docker/setup-qemu-action@v3
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-            - name: Run test
-              run: |
-                  export PATH=$HOME/.cargo/bin:$PATH
-                  export KATSU_KEEP_CHROOT=1
-                  pushd tests/ng
-                  echo "COLORBT_SHOW_HIDDEN=1" >> .env
-                  echo "KATSU_LOG=trace" >> .env
-                  katsu -o iso katsu-iso-limine.yaml 2>&1
-                  mv out.iso katsu-work/image/katsu.iso
-                  popd
+      - name: Run test
+        run: |
+          export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
+          pushd tests/ng
+          echo "COLORBT_SHOW_HIDDEN=1" >> .env
+          echo "KATSU_LOG=trace" >> .env
+          katsu -o iso katsu-iso-limine.yaml 2>&1
+          mv out.iso katsu-work/image/katsu.iso
+          popd
 
-            - name: Upload artifacts
-              uses: actions/upload-artifact@v4
-              with:
-                  name: iso-limine-x86_64
-                  path: tests/ng/katsu-work/image/katsu.iso
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: iso-limine-x86_64
+          path: tests/ng/katsu-work/image/katsu.iso
 
-    fs-test-x86_64:
-        needs: build-environment
-        runs-on: ubuntu-latest
-        container:
-            image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
-            # Pass /dev from host to container
-            # Very hacky, but it works
-            # Microsoft/Github, if you're reading this,
-            # I'm sorry.
-            options: --privileged -v /dev:/dev
+  fs-test-x86_64:
+    needs: build-environment
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
+      # Pass /dev from host to container
+      # Very hacky, but it works
+      # Microsoft/Github, if you're reading this,
+      # I'm sorry.
+      options: --privileged -v /dev:/dev
 
-        steps:
-            - uses: actions/checkout@v4
+    steps:
+      - uses: actions/checkout@v4
 
-            - name: Set up QEMU
-              uses: docker/setup-qemu-action@v3
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-            - name: Run test
-              run: |
-                  export PATH=$HOME/.cargo/bin:$PATH
-                  export KATSU_KEEP_CHROOT=1
-                  pushd tests/ng
-                  echo "COLORBT_SHOW_HIDDEN=1" >> .env
-                  echo "KATSU_LOG=trace" >> .env
-                  katsu -o folder katsu-script-test.yaml 2>&1
-                  tar -cJf katsu-work/chroot.tar.xz katsu-work/chroot
-                  popd
+      - name: Run test
+        run: |
+          export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
+          pushd tests/ng
+          echo "COLORBT_SHOW_HIDDEN=1" >> .env
+          echo "KATSU_LOG=trace" >> .env
+          katsu -o folder katsu-script-test.yaml 2>&1
+          tar -cJf katsu-work/chroot.tar.xz katsu-work/chroot
+          popd
 
-            - name: Upload artifacts
-              uses: actions/upload-artifact@v4
-              with:
-                  name: fs-test-x86_64
-                  path: tests/ng/katsu-work/chroot.tar.xz
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fs-test-x86_64
+          path: tests/ng/katsu-work/chroot.tar.xz
