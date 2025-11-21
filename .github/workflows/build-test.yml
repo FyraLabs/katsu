@@ -35,7 +35,7 @@ env:
         isomd5sum
         dnf5
         podman
-    REGISTRY_IMAGE: ghcr.io/fyralabs/katsu-cache
+    REGISTRY_IMAGE: ghcr.io/fyralabs/katsu
 
 on:
     push:
@@ -63,7 +63,7 @@ jobs:
               id: meta
               uses: docker/metadata-action@v5
               with:
-                  images: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
+                  images: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
 
             - name: Set up QEMU
               uses: docker/setup-qemu-action@v3
@@ -86,7 +86,7 @@ jobs:
                   context: .
                   file: scripts/test-env.Dockerfile
                   push: true
-                  tags: ghcr.io/fyralabs/katsu-cache
+                  tags: ghcr.io/fyralabs/katsu
                   cache-from: type=gha
                   cache-to: type=gha,mode=max
                   outputs: type=image,push-by-digest=true,name-canonical=true,push=true
@@ -153,7 +153,7 @@ jobs:
         needs: build-environment
         runs-on: ubuntu-latest
         container:
-            image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
+            image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
             # Pass /dev from host to container
             # Very hacky, but it works
             # Microsoft/Github, if you're reading this,
@@ -186,7 +186,7 @@ jobs:
         needs: build-environment
         runs-on: ubuntu-latest
         container:
-            image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
+            image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
             # Pass /dev from host to container
             # Very hacky, but it works
             # Microsoft/Github, if you're reading this,
@@ -220,7 +220,7 @@ jobs:
         needs: build-environment
         runs-on: ubuntu-latest
         container:
-            image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
+            image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
             # Pass /dev from host to container
             # Very hacky, but it works
             # Microsoft/Github, if you're reading this,
@@ -254,7 +254,7 @@ jobs:
         needs: build-environment
         runs-on: ubuntu-latest
         container:
-            image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
+            image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
             # Pass /dev from host to container
             # Very hacky, but it works
             # Microsoft/Github, if you're reading this,
@@ -288,7 +288,7 @@ jobs:
         needs: build-environment
         runs-on: ubuntu-latest
         container:
-            image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
+            image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
             # Pass /dev from host to container
             # Very hacky, but it works
             # Microsoft/Github, if you're reading this,
@@ -322,7 +322,7 @@ jobs:
         needs: build-environment
         runs-on: ubuntu-latest
         container:
-            image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
+            image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
             # Pass /dev from host to container
             # Very hacky, but it works
             # Microsoft/Github, if you're reading this,
@@ -356,7 +356,7 @@ jobs:
         needs: build-environment
         runs-on: ubuntu-latest
         container:
-            image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
+            image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
             # Pass /dev from host to container
             # Very hacky, but it works
             # Microsoft/Github, if you're reading this,
@@ -390,7 +390,7 @@ jobs:
         needs: build-environment
         runs-on: ubuntu-latest
         container:
-            image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
+            image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
             # Pass /dev from host to container
             # Very hacky, but it works
             # Microsoft/Github, if you're reading this,
