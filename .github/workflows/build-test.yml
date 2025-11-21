@@ -144,7 +144,6 @@ jobs:
         with:
           images: ${{ env.REGISTRY_IMAGE }}
           tags: |
-            type=raw,value=latest
             type=ref,event=branch
             type=ref,event=tag
             type=ref,event=pr
