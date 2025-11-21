@@ -156,7 +156,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -189,7 +189,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -223,7 +223,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -257,7 +257,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -291,7 +291,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -325,7 +325,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -359,7 +359,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -393,7 +393,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ${{ env.REGISTRY_IMAGE }}:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu-cache:${{ github.ref_name || 'latest' }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
