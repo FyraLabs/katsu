@@ -147,9 +147,19 @@ impl Bootloader {
 		if !vmlinuz_src.exists() {
 			bail!("Source vmlinuz not found at {}", vmlinuz_src.display());
 		}
-		fs::copy(&vmlinuz_src, &vmlinuz_dest)?;
 
-		// Return kernel filename and dummy initramfs name (initramfs already in iso-tree)
+		let initramfs_name = self.find_initramfs(chroot)?;
+		let initramfs_src = chroot.join("boot").join(&initramfs_name);
+		let initramfs_dest = dest.join("boot").join("initramfs.img");
+		trace!(?initramfs_src, ?initramfs_dest, "Copying initramfs to destination");
+
+		if !initramfs_src.exists() {
+			bail!("Source initramfs not found at {}", initramfs_src.display());
+		}
+
+		fs::copy(&vmlinuz_src, &vmlinuz_dest)?;
+		fs::copy(&initramfs_src, &initramfs_dest)?;
+
 		Ok(("vmlinuz".to_string(), "initramfs.img".to_string()))
 	}
 
