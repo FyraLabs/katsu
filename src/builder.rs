@@ -807,6 +807,8 @@ impl RootBuilder for BootcRootBuilder {
 			podman export $container | sudo tar -xf - -C $chroot;
 		)?;
 
+		
+		// XXX: Wonder if we can use skopeo here instead of podman + tar
 		let container_store = chroot.canonicalize()?.join("var/lib/containers/storage");
 		let container_store_ovfs = container_store.join("overlay");
 		std::fs::create_dir_all(&container_store)?;
@@ -1335,8 +1337,9 @@ impl IsoBuilder {
 			.arg("--quiet")
 			// xattr tolerance to 1: attempt to solve #46
 			.arg("-x1")
-			// all fragments + dedupe inodes
-			.arg("-Eall-fragments,fragdedupe=inode")
+			// all fragments + dedupe
+			.arg("-Eall-fragments,fragdedupe=all,dedupe")
+			.arg("--incremental=data")
 			.arg("-C1048576")
 			.args(["--exclude-path", "/dev/"])
 			.args(["--exclude-path", "/proc/"])
