@@ -1,9 +1,5 @@
 use crate::{
-	bail_let,
-	cli::OutputFormat,
-	config::{Manifest, Script},
-	feature_flag_bool, feature_flag_str,
-	util::{just_write, loopdev_with_file},
+	bail_let, cli::OutputFormat, config::{Manifest, Script}, feature_flag_bool, feature_flag_str, rootimg::erofs::{erofs_mkfs, MkfsErofsOptions}, util::{just_write, loopdev_with_file}
 };
 use cmd_lib::{run_cmd, run_fun};
 use color_eyre::{eyre::bail, Result};
@@ -1331,36 +1327,17 @@ impl IsoBuilder {
 	}
 	#[allow(dead_code)]
 	pub fn erofs(&self, chroot: &Path, image: &Path) -> Result<()> {
-		let mut cmd = std::process::Command::new("mkfs.erofs");
-		let mut cmd = cmd
-			.arg("-zzstd,level=15")
-			.arg("--quiet")
-			// xattr tolerance to 1: attempt to solve #46
-			.arg("-x1")
-			// all fragments + dedupe
-			.arg("-Eall-fragments,fragdedupe=all,dedupe")
-			.arg("--incremental=data")
-			.arg("-C1048576")
-			.args(["--exclude-path", "/dev/"])
-			.args(["--exclude-path", "/proc/"])
-			.args(["--exclude-path", "/sys/"]);
-
+	    let mut opts = MkfsErofsOptions::default();
 		// selinux bs
 		let selinux_fcontexts = chroot.join("etc/selinux/targeted/contexts/files/file_contexts");
 		if selinux_fcontexts.exists() {
-			cmd = cmd.arg(format!("--file-contexts={}", selinux_fcontexts.display()));
+			opts.file_contexts = Some(selinux_fcontexts.display().to_string());
 		} else {
 			warn!("SELinux file contexts not found, skipping");
 		}
+		
+		erofs_mkfs(chroot, image, &opts)?;
 
-		cmd = cmd.arg(image).arg(chroot);
-
-		info!(cmd = ?cmd, "Creating EROFS image");
-		let status = cmd.status()?;
-
-		if !status.success() {
-			bail!("{:?} failed with exit code: {status}", cmd.get_program());
-		}
 		Ok(())
 	}
 	// TODO: add mac support

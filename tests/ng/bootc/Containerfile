@@ -1,5 +1,5 @@
 ARG DERIVE_FROM
-FROM registry.fedoraproject.org/fedora:41 AS bootloader_base
+FROM registry.fedoraproject.org/fedora:43 AS bootloader_base
 # HACK: We copy GRUB2 and shim from Fedora, because CentOS' GRUB2 is kinda wonky
 
 # todo: aarch64 hack
@@ -14,6 +14,11 @@ RUN --mount=type=cache,target=/var/cache \
 
 # install fuse-overlayfs so we can nest overlayfs inside overlayfs with FUSE magic
 # this is needed for the bootable ISO to work
+
+# password 'password' for testuser
+# 
+RUN useradd -G wheel testuser && \
+    usermod -p '$y$j9T$Ot5YNY7Q/GMEV6aWRuWUP/$oVWQ7UoTd0f518jhezB.RMhrWreChe4W3H2kES1Zx/6' testuser
 
 # This is a podman/dracut implementation detail
 

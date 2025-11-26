@@ -1,4 +1,5 @@
 mod builder;
+mod rootimg;
 mod cli;
 mod config;
 mod util;
