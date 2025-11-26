@@ -3,5 +3,5 @@ builder: bootc
 distro: Ultramarine Atomic
 
 bootc:
-  image: ghcr.io/ultramarine-linux/base-bootc:42
+  image: ghcr.io/ultramarine-linux/plasma-bootc:main
   derivation: bootc/Containerfile

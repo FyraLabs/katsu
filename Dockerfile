@@ -14,7 +14,6 @@ RUN --mount=type=cache,target=/var/cache \
     parted \
     gdisk \
     util-linux-core \
-    systemd-container \
     grub2-efi \
     uboot-images-armv8 \
     uboot-tools \
@@ -23,7 +22,6 @@ RUN --mount=type=cache,target=/var/cache \
     qemu-user-binfmt \
     qemu-img \
     cargo \
-    systemd-devel \
     mkpasswd \
     clang-devel \
     squashfs-tools \
@@ -34,11 +32,11 @@ RUN --mount=type=cache,target=/var/cache \
     rEFInd-tools \
     isomd5sum \
     dnf5 \
+    setfiles \
     podman \
     https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-43.noarch.rpm \
-    https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-43.noarch.rpm \
-    --exclude='mesa*' 
-
+    https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-43.noarch.rpm
+# TODO: Probably don't add RPMFusion repos to the image, guide users to add GPG keys and repos themselves?
 
 FROM base AS rust-builder
 

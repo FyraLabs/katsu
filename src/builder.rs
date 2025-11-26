@@ -110,11 +110,13 @@ impl Bootloader {
 			Self::REFInd => ("boot/efi/EFI/refind/refind_x64.efi", ""),
 		}
 	}
-	/// Copies vmlinuz from /usr/lib/modules to destination directory
+	/// Copies vmlinuz (and optionally initramfs) from /usr/lib/modules to destination
 	///
 	/// This helper method locates the kernel (vmlinuz) file in /usr/lib/modules
-	/// and copies it to the destination directory. The initramfs is generated
-	/// separately by dracut directly to the iso-tree.
+	/// and copies it to the destination directory. When requested, it will also
+	/// copy the initramfs image from the chroot's `/boot` into the destination,
+	/// normalising the name to `initramfs.img` so the rest of the ISO generation
+	/// pipeline can rely on a consistent filename.
 	///
 	/// # Arguments
 	///
@@ -124,7 +126,9 @@ impl Bootloader {
 	/// # Returns
 	///
 	/// * `Result<String>` - Success with kernel filename or failure with error details
-	fn cp_vmlinuz_initramfs(&self, chroot: &Path, dest: &Path) -> Result<(String, String)> {
+	fn cp_vmlinuz_initramfs(
+		&self, chroot: &Path, dest: &Path, copy_initramfs: bool,
+	) -> Result<(String, String)> {
 		trace!("Finding vmlinuz in /usr/lib/modules");
 
 		// Prepare required directories
@@ -147,13 +151,26 @@ impl Bootloader {
 		if !vmlinuz_src.exists() {
 			bail!("Source vmlinuz not found at {}", vmlinuz_src.display());
 		}
+
 		fs::copy(&vmlinuz_src, &vmlinuz_dest)?;
 
-		// Return kernel filename and dummy initramfs name (initramfs already in iso-tree)
+		if copy_initramfs {
+			let initramfs_name = self.find_initramfs(chroot)?;
+			let initramfs_src = chroot.join("boot").join(&initramfs_name);
+			let initramfs_dest = dest.join("boot").join("initramfs.img");
+			trace!(?initramfs_src, ?initramfs_dest, "Copying initramfs to destination");
+
+			if !initramfs_src.exists() {
+				bail!("Source initramfs not found at {}", initramfs_src.display());
+			}
+
+			fs::copy(&initramfs_src, &initramfs_dest)?;
+		}
+
 		Ok(("vmlinuz".to_string(), "initramfs.img".to_string()))
 	}
 
-	#[tracing::instrument]
+	#[tracing::instrument(skip(self))]
 	fn find_vmlinuz(&self, chroot: &Path) -> Result<(String, Option<String>)> {
 		let modules_dir = chroot.join("usr/lib/modules");
 
@@ -177,7 +194,7 @@ impl Bootloader {
 		Ok((vmlinuz, kernel_version))
 	}
 
-	#[tracing::instrument]
+	#[tracing::instrument(skip(self))]
 	#[allow(dead_code)]
 	fn find_initramfs(&self, chroot: &Path) -> Result<String> {
 		let bootdir = chroot.join("boot");
@@ -207,7 +224,7 @@ impl Bootloader {
 		bail!("Cannot find initramfs in {:?}", bootdir)
 	}
 
-	#[tracing::instrument]
+	#[tracing::instrument(skip(self))]
 	#[allow(dead_code)]
 	fn copy_boot_files(
 		&self, chroot: &Path, dest: &Path, vmlinuz: &str, initramfs: &str,
@@ -298,7 +315,7 @@ impl Bootloader {
 		)?;
 		std::fs::copy("/usr/share/limine/limine-bios.sys", root.join("boot/limine-bios.sys"))?;
 
-		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &root)?;
+		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &root, false)?;
 		let volid = manifest.get_volid();
 
 		// Generate limine.cfg
@@ -350,7 +367,7 @@ impl Bootloader {
 			cp -rv /usr/share/rEFInd/refind/icons/. $iso_tree/EFI/BOOT/icons/ 2>&1;
 		)?;
 
-		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &iso_tree)?;
+		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &iso_tree, false)?;
 		let volid = manifest.get_volid();
 
 		let refind_cfg = iso_tree.join("EFI/BOOT/refind.conf");
@@ -488,7 +505,7 @@ impl Bootloader {
 		&self, chroot: &Path, boot_imgs_dir: &Path, iso_tree: &Path,
 	) -> Result<(String, String)> {
 		// Copy vmlinuz and initramfs to bootimgs directory
-		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, boot_imgs_dir)?;
+		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, boot_imgs_dir, true)?;
 
 		let iso_boot = iso_tree.join("boot");
 		let chroot_boot = chroot.join("boot");
@@ -790,6 +807,8 @@ impl RootBuilder for BootcRootBuilder {
 			podman export $container | sudo tar -xf - -C $chroot;
 		)?;
 
+		
+		// XXX: Wonder if we can use skopeo here instead of podman + tar
 		let container_store = chroot.canonicalize()?.join("var/lib/containers/storage");
 		let container_store_ovfs = container_store.join("overlay");
 		std::fs::create_dir_all(&container_store)?;
@@ -1313,21 +1332,28 @@ impl IsoBuilder {
 	#[allow(dead_code)]
 	pub fn erofs(&self, chroot: &Path, image: &Path) -> Result<()> {
 		let mut cmd = std::process::Command::new("mkfs.erofs");
-		let cmd = cmd
+		let mut cmd = cmd
 			.arg("-zzstd,level=15")
-			.arg("-d1")
+			.arg("--quiet")
 			// xattr tolerance to 1: attempt to solve #46
 			.arg("-x1")
-			// selinux bs
-			.arg(format!("--file-contexts={}", chroot.join("etc/selinux/targeted/contexts/files/file_contexts").display()))
-			// all fragments + dedupe inodes
-			.arg("-Eall-fragments,fragdedupe=inode")
+			// all fragments + dedupe
+			.arg("-Eall-fragments,fragdedupe=all,dedupe")
+			.arg("--incremental=data")
 			.arg("-C1048576")
 			.args(["--exclude-path", "/dev/"])
 			.args(["--exclude-path", "/proc/"])
-			.args(["--exclude-path", "/sys/"])
-			.arg(image)
-			.arg(chroot);
+			.args(["--exclude-path", "/sys/"]);
+
+		// selinux bs
+		let selinux_fcontexts = chroot.join("etc/selinux/targeted/contexts/files/file_contexts");
+		if selinux_fcontexts.exists() {
+			cmd = cmd.arg(format!("--file-contexts={}", selinux_fcontexts.display()));
+		} else {
+			warn!("SELinux file contexts not found, skipping");
+		}
+
+		cmd = cmd.arg(image).arg(chroot);
 
 		info!(cmd = ?cmd, "Creating EROFS image");
 		let status = cmd.status()?;

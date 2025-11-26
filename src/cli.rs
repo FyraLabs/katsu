@@ -101,7 +101,6 @@ impl std::str::FromStr for OutputFormat {
 /// - Failed to load manifests (`Manifest::load_all`)
 /// - Failed to make new [`KatsuBuilder`]
 /// - Failed to build image
-#[tracing::instrument]
 pub fn parse(cli: KatsuCli) -> Result<()> {
 	// load manifest from config file
 

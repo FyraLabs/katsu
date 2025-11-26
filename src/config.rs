@@ -538,12 +538,11 @@ fn test_partlay() {
 	use tracing_subscriber::Layer;
 
 	// Partition layout test
-	let subscriber =
-		tracing_subscriber::Registry::default().with(tracing_error::ErrorLayer::default()).with(
-			tracing_subscriber::fmt::layer()
-				.pretty()
-				.with_filter(tracing_subscriber::EnvFilter::from_str("trace").expect("Failed to parse trace filter")),
-		);
+	let subscriber = tracing_subscriber::Registry::default()
+		.with(tracing_error::ErrorLayer::default())
+		.with(tracing_subscriber::fmt::layer().pretty().with_filter(
+			tracing_subscriber::EnvFilter::from_str("trace").expect("Failed to parse trace filter"),
+		));
 	tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
 	let mock_disk = PathBuf::from("/dev/sda");
@@ -585,8 +584,8 @@ fn test_partlay() {
 		println!("{part:#?}");
 
 		// get index of partition
-		let index = partlay.get_index(&part.mountpoint)
-			.expect("Partition mountpoint not found in layout");
+		let index =
+			partlay.get_index(&part.mountpoint).expect("Partition mountpoint not found in layout");
 		println!("Index: {index}");
 
 		println!("Partition name: {}", partition_name(&mock_disk.to_string_lossy(), index));
