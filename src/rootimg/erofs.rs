@@ -39,7 +39,7 @@ impl MkfsErofsOptions {
 			args.push(format!("--exclude-path={}", path));
 		}
 		if let Some(ref contexts) = self.file_contexts {
-			args.push(format!("--selinux-contexts={}", contexts));
+			args.push(format!("--file-contexts={}", contexts));
 		}
 		if !self.extra_features.is_empty() {
 			let features = self.extra_features.join(",");
@@ -52,7 +52,7 @@ impl MkfsErofsOptions {
 impl Default for MkfsErofsOptions {
 	fn default() -> Self {
 		MkfsErofsOptions {
-			compression: Some("zstd,level-15".into()),
+			compression: Some("zstd,level=15".into()),
 			chunk_size: Some(1048576),
 			xattr_level: Some(1),
 			exclude_paths: vec!["/sys/", "/proc/"].iter().map(|s| s.to_string()).collect(),
