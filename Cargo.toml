@@ -27,7 +27,7 @@ serde = { version = "1", features = ["derive"] }
 tracing-error = "0.2"
 glob = "0.3"
 cmd_lib = "2.0.0"
-serde_yaml = "0.9"
+serde_yaml = { package = "serde_yml", version = "0.0.10" }
 dotenvy = "0.15"
 tera = "1"
 merge-struct = "0.1.0"
