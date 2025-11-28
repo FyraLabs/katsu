@@ -218,10 +218,35 @@ impl Bootloader {
 		};
 
 		debug!("Generating Grub images");
-		cmd_lib::run_cmd!(
-			grub2-mkimage -O $arch_out -d $chroot/usr/lib/grub/$arch -o $iso_tree/boot/eltorito.img -p /boot/grub iso9660 $[arch_modules] 2>&1;
-			grub2-mkrescue -o $iso_tree/../efiboot.img;
-		)?;
+		{
+			use std::process::Command;
+
+			let grub_mkimage_status = Command::new("grub2-mkimage")
+				.arg("-O")
+				.arg(arch_out)
+				.arg("-d")
+				.arg(chroot.join(format!("usr/lib/grub/{}", arch)))
+				.arg("-o")
+				.arg(iso_tree.join("boot/eltorito.img"))
+				.arg("-p")
+				.arg("/boot/grub")
+				.arg("iso9660")
+				.args(&arch_modules)
+				.status()?;
+
+			if !grub_mkimage_status.success() {
+				bail!("grub2-mkimage command failed with status: {:?}", grub_mkimage_status);
+			}
+
+			let grub_mkrescue_status = Command::new("grub2-mkrescue")
+				.arg("-o")
+				.arg(iso_tree.join("../efiboot.img"))
+				.status()?;
+
+			if !grub_mkrescue_status.success() {
+				bail!("grub2-mkrescue command failed with status: {:?}", grub_mkrescue_status);
+			}
+		}
 
 		debug!("Copying EFI files from Grub rescue image");
 		let (loop_device, handle) = loopdev_with_file(&iso_tree.join("../efiboot.img"))?;
