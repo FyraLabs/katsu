@@ -1,4 +1,11 @@
-use crate::{backends::{bootloader::Bootloader, fs_tree::{dnf::DnfRootBuilder, oci::BootcRootBuilder}}, cli::OutputFormat, util::enter_chroot_run};
+use crate::{
+	backends::{
+		bootloader::Bootloader,
+		fs_tree::{dnf::DnfRootBuilder, oci::BootcRootBuilder},
+	},
+	cli::OutputFormat,
+	util::enter_chroot_run,
+};
 use bytesize::ByteSize;
 use color_eyre::Result;
 use serde::{Deserialize, Serialize};
@@ -20,11 +27,7 @@ pub struct IsoConfig {
 
 impl IsoConfig {
 	pub fn get_volid(&self) -> String {
-		if let Some(volid) = &self.volume_id {
-			volid.clone()
-		} else {
-			DEFAULT_VOLID.to_string()
-		}
+		if let Some(volid) = &self.volume_id { volid.clone() } else { DEFAULT_VOLID.to_string() }
 	}
 }
 
@@ -87,11 +90,7 @@ where
 
 impl Manifest {
 	pub fn get_volid(&self) -> String {
-		if let Some(iso) = &self.iso {
-			iso.get_volid()
-		} else {
-			DEFAULT_VOLID.to_string()
-		}
+		if let Some(iso) = &self.iso { iso.get_volid() } else { DEFAULT_VOLID.to_string() }
 	}
 	/// Loads a single manifest from a file
 	pub fn load(path: &Path) -> Result<Self> {
@@ -374,7 +373,10 @@ impl PartitionLayout {
 				|| part.mountpoint == "-"
 			{
 				// skip empty mountpoints
-				warn!(?part, "This partition is not supposed to be mounted! Skipping... If you want this partition to be mounted, please specify a mountpoint starting with /");
+				warn!(
+					?part,
+					"This partition is not supposed to be mounted! Skipping... If you want this partition to be mounted, please specify a mountpoint starting with /"
+				);
 				continue;
 			}
 			let devname = partition_name(&disk.to_string_lossy(), *index);
@@ -533,8 +535,8 @@ impl PartitionLayout {
 #[test]
 fn test_partlay() {
 	use std::str::FromStr;
-	use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
 	use tracing_subscriber::Layer;
+	use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
 
 	// Partition layout test
 	let subscriber = tracing_subscriber::Registry::default()
@@ -689,7 +691,7 @@ impl PartitionType {
 					"x86_64" => PartitionType::RootX86_64.uuid(target_arch),
 					"aarch64" => PartitionType::RootArm64.uuid(target_arch),
 					_ => unimplemented!(),
-				}
+				};
 			},
 			PartitionType::RootArm64 => "b921b045-1df0-41c3-af44-4c6f280d3fae",
 			PartitionType::RootX86_64 => "4f68bce3-e8cd-4db1-96e7-fbcaf984b709",

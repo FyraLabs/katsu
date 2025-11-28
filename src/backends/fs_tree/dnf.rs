@@ -1,10 +1,17 @@
 //! Use DNF to build an OS root tree from a list of packages.
 
-use std::{collections::BTreeMap, path::{Path, PathBuf}};
-use color_eyre::{eyre::bail, Result};
+use crate::{
+	backends::{bootloader::Bootloader, fs_tree::RootBuilder},
+	builder::run_all_scripts,
+	config::Manifest,
+};
+use color_eyre::{Result, eyre::bail};
 use serde::{Deserialize, Serialize};
+use std::{
+	collections::BTreeMap,
+	path::{Path, PathBuf},
+};
 use tracing::{debug, info, warn};
-use crate::{backends::{bootloader::Bootloader, fs_tree::RootBuilder}, builder::run_all_scripts, config::Manifest};
 
 const DNF_TRANS_COMMENT: &str = "Initial transaction from building with Katsu";
 

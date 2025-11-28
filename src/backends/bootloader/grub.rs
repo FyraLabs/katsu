@@ -4,7 +4,7 @@ use crate::{
 	config::Manifest,
 	util::loopdev_with_file,
 };
-use color_eyre::{eyre::bail, Result};
+use color_eyre::{Result, eyre::bail};
 use std::{fs, os::unix::fs::symlink, path::Path};
 use tracing::{debug, info, trace, warn};
 

@@ -1,4 +1,4 @@
-use color_eyre::{eyre::bail, Result};
+use color_eyre::{Result, eyre::bail};
 use serde::{Deserialize, Serialize};
 use std::{
 	fs,
@@ -74,7 +74,9 @@ impl Bootloader {
 			Self::GrubBios => {
 				cmd_lib::run_cmd!(grub-install --target=i386-pc --boot-directory=$image/boot 2>&1)?
 			},
-			Self::REFInd => info!("rEFInd doesn't need installation to ISO image, files already copied during ISO creation"),
+			Self::REFInd => info!(
+				"rEFInd doesn't need installation to ISO image, files already copied during ISO creation"
+			),
 		}
 		Ok(())
 	}
@@ -251,11 +253,7 @@ impl Bootloader {
 		let rescue_initramfs = bootdir.read_dir()?.find_map(|f| {
 			let f = f.ok()?;
 			let name = f.file_name().to_string_lossy().to_string();
-			if name.contains("-rescue-") {
-				Some(f.path())
-			} else {
-				None
-			}
+			if name.contains("-rescue-") { Some(f.path()) } else { None }
 		});
 
 		if let Some(rescue_initramfs) = rescue_initramfs {
@@ -267,11 +265,7 @@ impl Bootloader {
 		let rescue_vmlinuz = bootdir.read_dir()?.find_map(|f| {
 			let f = f.ok()?;
 			let name = f.file_name().to_string_lossy().to_string();
-			if name.contains("-rescue-") {
-				Some(f.path())
-			} else {
-				None
-			}
+			if name.contains("-rescue-") { Some(f.path()) } else { None }
 		});
 
 		if let Some(rescue_vmlinuz) = rescue_vmlinuz {

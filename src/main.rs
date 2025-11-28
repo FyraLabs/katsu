@@ -6,7 +6,7 @@ mod rootimg;
 mod util;
 
 use clap::Parser;
-use tracing_subscriber::{fmt, prelude::*, EnvFilter, Registry};
+use tracing_subscriber::{EnvFilter, Registry, fmt, prelude::*};
 
 fn main() -> color_eyre::Result<()> {
 	if let Err(e) = dotenvy::dotenv() {
