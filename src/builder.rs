@@ -4,10 +4,10 @@ use crate::{
 	cli::OutputFormat,
 	config::{Manifest, Script},
 	feature_flag_bool, feature_flag_str,
-	rootimg::erofs::{erofs_mkfs, MkfsErofsOptions},
+	rootimg::erofs::{MkfsErofsOptions, erofs_mkfs},
 	util::{just_write, loopdev_with_file},
 };
-use color_eyre::{eyre::bail, Result};
+use color_eyre::{Result, eyre::bail};
 use indexmap::IndexMap;
 use std::{
 	fs,
@@ -33,7 +33,9 @@ pub fn run_script(script: Script, chroot: &Path, is_post: bool) -> Result<()> {
 	let name = format!("script-{}", script.id.as_ref().map_or("untitled", |s| s));
 	// check if data has shebang
 	if !data.starts_with("#!") {
-		warn!("Script does not have shebang, #!/bin/sh will be added. It is recommended to add a shebang to your script.");
+		warn!(
+			"Script does not have shebang, #!/bin/sh will be added. It is recommended to add a shebang to your script."
+		);
 		data.insert_str(0, "#!/bin/sh\n");
 	}
 
@@ -55,7 +57,6 @@ pub fn run_script(script: Script, chroot: &Path, is_post: bool) -> Result<()> {
 	} else {
 		just_write(PathBuf::from(format!("katsu-work/{name}")), data)?;
 		// export envar
-		std::env::set_var("CHROOT", chroot);
 		cmd_lib::run_cmd!(
 			chmod +x katsu-work/$name;
 			/usr/bin/env CHROOT=$chroot katsu-work/$name 2>&1;
@@ -473,7 +474,11 @@ impl IsoBuilder {
 					.status()?;
 			},
 			_ => {
-				debug!("xorriso -as mkisofs --efi-boot {uefi_bin} -b {bios_bin} -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot {uefi_bin} -efi-boot-part --efi-boot-image --protective-msdos-label {root} -volid KATSU-LIVEOS -o {image}", root = tree.display(), image = image.display());
+				debug!(
+					"xorriso -as mkisofs --efi-boot {uefi_bin} -b {bios_bin} -no-emul-boot -boot-load-size 4 -boot-info-table --efi-boot {uefi_bin} -efi-boot-part --efi-boot-image --protective-msdos-label {root} -volid KATSU-LIVEOS -o {image}",
+					root = tree.display(),
+					image = image.display()
+				);
 				std::process::Command::new("xorriso")
 					.args(["-iso-level", "3"])
 					.arg("-as")

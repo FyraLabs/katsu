@@ -1,7 +1,7 @@
 [package]
 name = "katsu"
-version = "0.10.3"
-edition = "2021"
+version = "0.11.0"
+edition = "2024"
 authors = [
     "Fyra Labs",
     "Pornpipat Popum <cappy@fyralabs.com>",
