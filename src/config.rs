@@ -1,4 +1,4 @@
-use crate::{builder::Bootloader, cli::OutputFormat, util::enter_chroot_run};
+use crate::{backends::bootloader::Bootloader, cli::OutputFormat, util::enter_chroot_run};
 use bytesize::ByteSize;
 use color_eyre::Result;
 use serde::Deserialize;

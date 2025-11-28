@@ -19,6 +19,7 @@ pub struct MkfsErofsOptions {
 	// #[default = "0"]
 	pub log_level: u32,
 	pub extra_features: Vec<String>,
+	pub tar_mode: bool,
 }
 
 impl MkfsErofsOptions {
@@ -45,6 +46,10 @@ impl MkfsErofsOptions {
 			let features = self.extra_features.join(",");
 			args.push(format!("-E{features}"));
 		}
+		
+		if self.tar_mode {
+            args.push("--tar=f".to_string());
+        }
 		args
 	}
 }
@@ -52,6 +57,7 @@ impl MkfsErofsOptions {
 impl Default for MkfsErofsOptions {
 	fn default() -> Self {
 		MkfsErofsOptions {
+		    tar_mode: false,
 			compression: Some("zstd,level=15".into()),
 			chunk_size: Some(1048576),
 			xattr_level: Some(1),
