@@ -257,9 +257,10 @@ impl Bootloader {
 		});
 
 		if let Some(rescue_initramfs) = rescue_initramfs
-			&& let Err(err) = fs::remove_file(&rescue_initramfs) {
-				warn!(?err, path = %rescue_initramfs.display(), "Failed to remove rescue initramfs after copying");
-			}
+			&& let Err(err) = fs::remove_file(&rescue_initramfs)
+		{
+			warn!(?err, path = %rescue_initramfs.display(), "Failed to remove rescue initramfs after copying");
+		}
 
 		let rescue_vmlinuz = bootdir.read_dir()?.find_map(|f| {
 			let f = f.ok()?;
@@ -268,9 +269,10 @@ impl Bootloader {
 		});
 
 		if let Some(rescue_vmlinuz) = rescue_vmlinuz
-			&& let Err(err) = fs::remove_file(&rescue_vmlinuz) {
-				warn!(?err, path = %rescue_vmlinuz.display(), "Failed to remove rescue vmlinuz after copying");
-			}
+			&& let Err(err) = fs::remove_file(&rescue_vmlinuz)
+		{
+			warn!(?err, path = %rescue_vmlinuz.display(), "Failed to remove rescue vmlinuz after copying");
+		}
 
 		// === end /boot cleanup ===
 

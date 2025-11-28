@@ -10,9 +10,10 @@ use tracing_subscriber::{EnvFilter, Registry, fmt, prelude::*};
 
 fn main() -> color_eyre::Result<()> {
 	if let Err(e) = dotenvy::dotenv()
-		&& !e.not_found() {
-			return Err(e.into());
-		}
+		&& !e.not_found()
+	{
+		return Err(e.into());
+	}
 
 	color_eyre::install()?;
 	// default to info level logging, override with KATSU_LOG env var
