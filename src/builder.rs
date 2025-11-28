@@ -13,13 +13,9 @@ use serde_derive::{Deserialize, Serialize};
 use std::{
 	collections::BTreeMap,
 	fs,
-	io::Write,
 	path::{Path, PathBuf},
 };
 use tracing::{debug, info, trace, warn};
-
-#[cfg(unix)]
-use std::os::unix::fs::symlink;
 
 pub const WORKDIR: &str = "katsu-work";
 pub const BOOTIMGS: &str = "boot_imgs";

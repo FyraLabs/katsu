@@ -46,10 +46,10 @@ impl MkfsErofsOptions {
 			let features = self.extra_features.join(",");
 			args.push(format!("-E{features}"));
 		}
-		
+
 		if self.tar_mode {
-            args.push("--tar=f".to_string());
-        }
+			args.push("--tar=f".to_string());
+		}
 		args
 	}
 }
@@ -57,7 +57,7 @@ impl MkfsErofsOptions {
 impl Default for MkfsErofsOptions {
 	fn default() -> Self {
 		MkfsErofsOptions {
-		    tar_mode: false,
+			tar_mode: false,
 			compression: Some("zstd,level=15".into()),
 			chunk_size: Some(1048576),
 			xattr_level: Some(1),
@@ -73,22 +73,21 @@ impl Default for MkfsErofsOptions {
 }
 
 pub fn erofs_mkfs(
-    source: &Path,
-    target: &Path,
-    options: &MkfsErofsOptions,
+	source: &Path, target: &Path, options: &MkfsErofsOptions,
 ) -> color_eyre::Result<PathBuf> {
-    let mut cmd = std::process::Command::new("mkfs.erofs");
-    let args = options.build_args();
-    cmd.args(&args);
-    cmd.arg(target);
-    cmd.arg(source);
+	let mut cmd = std::process::Command::new("mkfs.erofs");
+	let args = options.build_args();
+	cmd.args(&args);
+	cmd.arg(target);
+	cmd.arg(source);
 
-    tracing::info!("Creating EROFS image: {:?}", cmd);
-    let output = cmd.status()?;
-    if !output.success() {
-        return Err(color_eyre::eyre::eyre!(
-            "mkfs.erofs failed with exit code: {}", output.code().unwrap_or(-1)
-        ));
-    }
-    Ok(target.to_path_buf())
+	tracing::info!("Creating EROFS image: {:?}", cmd);
+	let output = cmd.status()?;
+	if !output.success() {
+		return Err(color_eyre::eyre::eyre!(
+			"mkfs.erofs failed with exit code: {}",
+			output.code().unwrap_or(-1)
+		));
+	}
+	Ok(target.to_path_buf())
 }

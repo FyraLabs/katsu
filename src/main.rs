@@ -1,8 +1,8 @@
-mod builder;
 mod backends;
-mod rootimg;
+mod builder;
 mod cli;
 mod config;
+mod rootimg;
 mod util;
 
 use clap::Parser;
