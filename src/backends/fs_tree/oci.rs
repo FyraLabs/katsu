@@ -1,3 +1,4 @@
+use crate::backends::fs_tree::TreeOutput;
 use crate::builder::default_true;
 use crate::{backends::fs_tree::RootBuilder, config::Manifest};
 use color_eyre::Result;
@@ -40,7 +41,7 @@ pub struct BootcRootBuilder {
 }
 
 impl RootBuilder for BootcRootBuilder {
-	fn build(&self, chroot: &Path, _manifest: &Manifest) -> Result<()> {
+	fn build(&self, chroot: &Path, _manifest: &Manifest) -> Result<TreeOutput> {
 		let image = &self.image;
 
 		// Pull the image for us
@@ -101,6 +102,6 @@ impl RootBuilder for BootcRootBuilder {
 			.ok();
 		}
 
-		Ok(())
+		Ok(TreeOutput::Directory(chroot.to_path_buf()))
 	}
 }
