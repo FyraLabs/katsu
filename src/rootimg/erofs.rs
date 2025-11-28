@@ -61,10 +61,10 @@ impl Default for MkfsErofsOptions {
 			compression: Some("zstd,level=15".into()),
 			chunk_size: Some(1048576),
 			xattr_level: Some(1),
-			exclude_paths: vec!["/sys/", "/proc/"].iter().map(|s| s.to_string()).collect(),
+			exclude_paths: ["/sys/", "/proc/"].iter().map(|s| s.to_string()).collect(),
 			file_contexts: None,
 			log_level: 0,
-			extra_features: vec!["all-fragments", "fragdedupe=all"]
+			extra_features: ["all-fragments", "fragdedupe=all"]
 				.iter()
 				.map(|s| s.to_string())
 				.collect(),
