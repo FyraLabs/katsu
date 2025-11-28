@@ -2,7 +2,7 @@ use std::{path::PathBuf, sync::Mutex};
 
 use clap::{Parser, ValueEnum};
 use color_eyre::Result;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use tracing::trace;
 
 use crate::{builder::KatsuBuilder, config::Manifest};

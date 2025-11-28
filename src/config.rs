@@ -1,8 +1,7 @@
-use crate::{backends::bootloader::Bootloader, cli::OutputFormat, util::enter_chroot_run};
+use crate::{backends::{bootloader::Bootloader, fs_tree::{dnf::DnfRootBuilder, oci::BootcRootBuilder}}, cli::OutputFormat, util::enter_chroot_run};
 use bytesize::ByteSize;
 use color_eyre::Result;
-use serde::Deserialize;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::{
 	collections::BTreeMap,
 	fs,
@@ -50,10 +49,10 @@ pub struct Manifest {
 	/// DNF configuration
 	// todo: dynamically load this?
 	#[serde(default)]
-	pub dnf: crate::builder::DnfRootBuilder,
+	pub dnf: DnfRootBuilder,
 
 	#[serde(default)]
-	pub bootc: crate::builder::BootcRootBuilder,
+	pub bootc: BootcRootBuilder,
 
 	/// Scripts to run before and after the build
 	#[serde(default)]
