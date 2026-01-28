@@ -6,6 +6,15 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tracing::info;
 
+/// Metadata for the current image, embedded into derived live images for `bootc install` and debugging
+#[derive(Deserialize, Debug, Clone, Serialize, Default)]
+pub struct BootcImageMetadata {
+	/// The original image this was derived from
+	pub tag: String,
+	/// Image's digest
+	pub digest: String,
+}
+
 // credits to the Universal Blue people for figuring out how to build a bootc-based image :3
 /// A bootc-based image. This is the second implementation of the RootBuilder trait.
 /// This takes an OCI image and builds a rootfs out of it, optionally with a containerfile
@@ -38,6 +47,10 @@ pub struct BootcRootBuilder {
 
 	#[serde(default = "default_true")]
 	pub embed_image: bool,
+
+	// Embed image metadata on derived images
+	#[serde(default = "default_true")]
+	pub embed_image_metadata: bool,
 }
 
 impl RootBuilder for BootcRootBuilder {
@@ -100,6 +113,24 @@ impl RootBuilder for BootcRootBuilder {
 				umount -f $container_store_ovfs 2>&1;
 			)
 			.ok();
+		}
+
+		if self.embed_image_metadata {
+			let digest = cmd_lib::run_fun!(
+				podman inspect --format="{{index .Digest}}" $image
+			)?
+			.trim()
+			.to_string();
+			
+			let metadata = BootcImageMetadata {
+                tag: image.to_string(),
+                digest,
+            };
+			
+			// serialize to yaml
+			let serialized = serde_yaml::to_string(&metadata)?;
+			tracing::info!(?serialized, "Embedding image metadata into derived image");
+			std::fs::write(chroot.join("/.bootc_meta.yaml"), serialized)?;
 		}
 
 		Ok(TreeOutput::Directory(chroot.to_path_buf()))
