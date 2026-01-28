@@ -6,6 +6,7 @@ RUN --mount=type=cache,target=/var/cache \
     rpm \
     limine \
     systemd \
+    skopeo \
     btrfs-progs \
     e2fsprogs \
     xfsprogs \
