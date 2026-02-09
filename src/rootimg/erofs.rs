@@ -67,7 +67,7 @@ impl Default for MkfsErofsOptions {
 			exclude_paths: ["/sys/", "/proc/"].iter().map(|s| s.to_string()).collect(),
 			file_contexts: None,
 			log_level: 0,
-			extra_features: ["all-fragments", "fragdedupe=all"]
+			extra_features: ["fragments", "fragdedupe=all"]
 				.iter()
 				.map(|s| s.to_string())
 				.collect(),

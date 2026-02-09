@@ -58,7 +58,11 @@ impl Bootloader {
 		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, boot_imgs_dir, true)?;
 
 		let iso_boot = iso_tree.join("boot");
-		let chroot_boot = chroot.join("boot");
+		let chroot_boot = if chroot.join("usr/lib/ostree-boot").exists() {
+			chroot.join("usr/lib/ostree-boot/boot")
+		} else {
+			chroot.join("boot")
+		};
 
 		let _ = fs::remove_dir_all(&iso_boot);
 		fs::create_dir_all(&iso_boot)?;
