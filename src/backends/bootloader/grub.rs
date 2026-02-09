@@ -71,11 +71,15 @@ impl Bootloader {
 		let grub_dest = iso_boot.join("grub");
 		let grub2_src = chroot_boot.join("grub2");
 		let grub_src = chroot_boot.join("grub");
+		let grub_lib_dir = chroot.join("usr/lib/grub");
 		let _ = fs::remove_dir_all(&grub_dest);
 		if grub2_src.exists() {
 			Self::copy_dir(&grub2_src, &grub_dest)?;
 		} else if grub_src.exists() {
 			Self::copy_dir(&grub_src, &grub_dest)?;
+		} else if grub_lib_dir.exists() {
+			warn!("Grub directory not found in boot directory, but usr/lib/grub exists. Copying from there.");
+			Self::copy_dir(&grub_lib_dir, &grub_dest)?;
 		} else {
 			bail!("Missing grub directory in {}", chroot_boot.display());
 		}
