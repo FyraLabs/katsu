@@ -2,6 +2,7 @@ use crate::backends::fs_tree::TreeOutput;
 use crate::builder::default_true;
 use crate::{backends::fs_tree::RootBuilder, config::Manifest};
 use color_eyre::Result;
+use nix::mount;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tracing::info;
@@ -81,27 +82,30 @@ impl RootBuilder for BootcRootBuilder {
 			image.to_string()
 		};
 
-		info!(?d_image, "Exporting OCI image");
+		info!(?d_image, "Creating ephemeral container to extract rootfs");
 		std::fs::create_dir_all(chroot)?;
 
 		let container = cmd_lib::run_fun!(
 			podman create --rm $d_image /bin/bash
 		)?;
 
-		cmd_lib::run_cmd!(
-			podman export $container | sudo tar -xf - -C $chroot;
+		// experiment: mount container's root fs directly
+		let mountpoint = cmd_lib::run_fun!(
+			podman mount $container
 		)?;
+		let mountpoint = Path::new(mountpoint.trim());
+		info!(?mountpoint, "Mountpoint for container's rootfs");
 
 		// XXX: Wonder if we can use skopeo here instead of podman + tar
-		let container_store = chroot.canonicalize()?.join("var/lib/containers/storage");
-		let container_store_ovfs = container_store.join("overlay");
+		let container_store = mountpoint.canonicalize()?.join("var/lib/containers/storage");
+		// let container_store_ovfs = container_store.join("overlay");
 		std::fs::create_dir_all(&container_store)?;
 
 		if self.embed_image {
 			// redeclare container_store as string, so cmd_lib doesn't complain
 			let container_store = container_store.display();
-			let container_store_ovfs = container_store_ovfs.display();
-			info!(?chroot, ?image, "Copying OCI image to chroot's container store");
+			// let container_store_ovfs = container_store_ovfs.display();
+			info!(?mountpoint, ?image, "Copying OCI image to chroot's container store");
 
 			// Push the original image to the chroot's container store, not the derived one
 			// If the source reference includes a digest, strip it from the destination reference
@@ -112,10 +116,10 @@ impl RootBuilder for BootcRootBuilder {
 			)?;
 			// Then we also unmount the thing so it doesn't get in the way
 			// but we don't wanna fail entirely if this fails
-			cmd_lib::run_cmd!(
-				umount -f $container_store_ovfs 2>&1;
-			)
-			.ok();
+			// cmd_lib::run_cmd!(
+			// 	umount -f $container_store_ovfs 2>&1;
+			// )
+			// .ok();
 		}
 
 		if self.embed_image_metadata {
@@ -130,8 +134,13 @@ impl RootBuilder for BootcRootBuilder {
 			// serialize to yaml
 			let serialized = serde_yaml::to_string(&metadata)?;
 			tracing::info!(?serialized, "Embedding image metadata into derived image");
-			std::fs::write(chroot.join(".bootc_meta.yaml"), serialized)?;
+			std::fs::write(mountpoint.join(".bootc_meta.yaml"), serialized)?;
 		}
+
+		info!("Exporting container filesystem to chroot");
+		cmd_lib::run_cmd!(
+			podman export $container | sudo tar -xf - -C $chroot;
+		)?;
 
 		Ok(TreeOutput::Directory(chroot.to_path_buf()))
 	}
