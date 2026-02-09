@@ -27,6 +27,9 @@ impl MkfsErofsOptions {
 		let mut args = Vec::new();
 
 		args.push(format!("-d{}", self.log_level));
+		if self.log_level == 0 {
+			args.push("--quiet".to_string());
+		}
 		if let Some(ref compression) = self.compression {
 			args.push(format!("-z{compression}"));
 		}
