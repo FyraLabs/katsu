@@ -59,7 +59,8 @@ impl Bootloader {
 
 		let iso_boot = iso_tree.join("boot");
 		let chroot_boot = if chroot.join("usr/lib/ostree-boot").exists() {
-			chroot.join("usr/lib/ostree-boot/boot")
+			info!("Detected ostree-boot structure");
+			chroot.join("usr/lib/ostree-boot")
 		} else {
 			chroot.join("boot")
 		};
