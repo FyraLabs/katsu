@@ -93,7 +93,7 @@ impl RootBuilder for BootcRootBuilder {
 		let mountpoint = cmd_lib::run_fun!(
 			podman mount $container
 		)?;
-		let mountpoint = Path::new(mountpoint.trim());
+		let mut mountpoint = Path::new(mountpoint.trim()).to_path_buf();
 		info!(?mountpoint, "Mountpoint for container's rootfs");
 
 		// XXX: Wonder if we can use skopeo here instead of podman + tar
@@ -122,21 +122,18 @@ mount_program = "/usr/bin/fuse-overlayfs"
 			std::fs::write(&storage_conf_path, storage_conf)?;
 			info!(?storage_conf_path, "Created storage.conf with fuse-overlayfs mount_program");
 
-			// Push the original image to the chroot's container store, not the derived one
-			// If the source reference includes a digest, strip it from the destination reference
-			// to avoid digest mismatch errors when writing into containers-storage.
-			// Use overlay with fuse-overlayfs to support nested overlayfs scenarios
+			// Use skopeo to copy the image from containers-storage to the destination
+			// skopeo handles copying layers properly between different storage configurations
 			let dest_image = image.split('@').next().unwrap_or(image);
 			let storage_conf_env = storage_conf_path.display();
 			cmd_lib::run_cmd!(
-				CONTAINERS_STORAGE_CONF=${storage_conf_env} podman push ${image} "containers-storage:[${container_store}]${dest_image}" --remove-signatures;
+				CONTAINERS_STORAGE_CONF=${storage_conf_env} skopeo copy --dest-compress --remove-signatures "containers-storage:${image}" "containers-storage:[${container_store}]${dest_image}";
 			)?;
-			// Then we also unmount the thing so it doesn't get in the way
-			// but we don't wanna fail entirely if this fails
-			// cmd_lib::run_cmd!(
-			// 	umount -f $container_store_ovfs 2>&1;
-			// )
-			// .ok();
+			// quirk: After we push the image, podman will unmount the entire container store, so we have to remount it
+			let new_mountpoint = cmd_lib::run_fun!(
+				podman mount $container
+			)?;
+			mountpoint = Path::new(new_mountpoint.trim()).to_path_buf();
 		}
 
 		if self.embed_image_metadata {
