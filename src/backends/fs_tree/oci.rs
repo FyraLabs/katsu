@@ -104,8 +104,11 @@ impl RootBuilder for BootcRootBuilder {
 			info!(?chroot, ?image, "Copying OCI image to chroot's container store");
 
 			// Push the original image to the chroot's container store, not the derived one
+			// If the source reference includes a digest, strip it from the destination reference
+			// to avoid digest mismatch errors when writing into containers-storage.
+			let dest_image = image.split('@').next().unwrap_or(image);
 			cmd_lib::run_cmd!(
-				podman push ${image} "containers-storage:[overlay@${container_store}]$image" --remove-signatures;
+				podman push ${image} "containers-storage:[overlay@${container_store}]${dest_image}" --remove-signatures;
 			)?;
 			// Then we also unmount the thing so it doesn't get in the way
 			// but we don't wanna fail entirely if this fails
@@ -121,16 +124,13 @@ impl RootBuilder for BootcRootBuilder {
 			)?
 			.trim()
 			.to_string();
-			
-			let metadata = BootcImageMetadata {
-                tag: image.to_string(),
-                digest,
-            };
-			
+
+			let metadata = BootcImageMetadata { tag: image.to_string(), digest };
+
 			// serialize to yaml
 			let serialized = serde_yaml::to_string(&metadata)?;
 			tracing::info!(?serialized, "Embedding image metadata into derived image");
-			std::fs::write(chroot.join("/.bootc_meta.yaml"), serialized)?;
+			std::fs::write(chroot.join(".bootc_meta.yaml"), serialized)?;
 		}
 
 		Ok(TreeOutput::Directory(chroot.to_path_buf()))
