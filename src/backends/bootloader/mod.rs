@@ -289,18 +289,19 @@ impl Bootloader {
 	///
 	/// * `manifest` - The manifest containing configuration information
 	/// * `chroot` - The path to the chroot directory
+	/// * `workspace` - The path to the workspace directory
 	///
 	/// # Returns
 	///
 	/// * `Result<()>` - Success or failure with error details
-	pub fn copy_liveos(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
+	pub fn copy_liveos(&self, manifest: &Manifest, chroot: &Path, workspace: &Path) -> Result<()> {
 		info!("Copying bootloader files");
 		match *self {
-			Self::Grub => self.cp_grub(manifest, chroot)?,
-			Self::Limine => self.cp_limine(manifest, chroot)?,
+			Self::Grub => self.cp_grub(manifest, chroot, workspace)?,
+			Self::Limine => self.cp_limine(manifest, chroot, workspace)?,
 			Self::SystemdBoot => todo!(),
-			Self::GrubBios => self.cp_grub_bios(chroot)?,
-			Self::REFInd => self.cp_refind(manifest, chroot)?,
+			Self::GrubBios => self.cp_grub_bios(workspace)?,
+			Self::REFInd => self.cp_refind(manifest, chroot, workspace)?,
 		}
 		Ok(())
 	}
@@ -312,12 +313,12 @@ impl Bootloader {
 	///
 	/// # Arguments
 	///
-	/// * `_chroot` - The path to the chroot directory
+	/// * `_workspace` - The path to the workspace directory
 	///
 	/// # Returns
 	///
 	/// * `Result<()>` - Success or failure with error details
-	pub fn cp_grub_bios(&self, _chroot: &Path) -> Result<()> {
+	pub fn cp_grub_bios(&self, _workspace: &Path) -> Result<()> {
 		todo!()
 	}
 }

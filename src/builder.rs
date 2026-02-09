@@ -364,27 +364,27 @@ impl IsoBuilder {
 		Ok(())
 	}
 	#[allow(dead_code)]
-	pub fn erofs(&self, chroot: &Path, image: &Path) -> Result<()> {
+	pub fn erofs(&self, root: &Path, image: &Path) -> Result<()> {
 		let mut opts = MkfsErofsOptions::default();
 		// selinux bs
-		let selinux_fcontexts = chroot.join("etc/selinux/targeted/contexts/files/file_contexts");
+		let selinux_fcontexts = root.join("etc/selinux/targeted/contexts/files/file_contexts");
 		if selinux_fcontexts.exists() {
 			opts.file_contexts = Some(selinux_fcontexts.display().to_string());
 		} else {
 			warn!("SELinux file contexts not found, skipping");
 		}
 
-		erofs_mkfs(chroot, image, &opts)?;
+		erofs_mkfs(root, image, &opts)?;
 
 		Ok(())
 	}
 	// TODO: add mac support
-	pub fn xorriso(&self, chroot: &Path, image: &Path, manifest: &Manifest) -> Result<()> {
+	pub fn xorriso(&self, image: &Path, manifest: &Manifest, workspace: &Path) -> Result<()> {
 		info!("Generating ISO image");
 		let volid = manifest.get_volid();
 		let (uefi_bin, bios_bin) = self.bootloader.get_bins();
-		let tree = chroot.parent().unwrap().join(ISO_TREE);
-		let boot_imgs_dir = chroot.parent().unwrap().join(BOOTIMGS);
+		let tree = workspace.join(ISO_TREE);
+		let boot_imgs_dir = workspace.join(BOOTIMGS);
 
 		let grub2_mbr_hybrid = boot_imgs_dir.join("boot_hybrid.img");
 		let efiboot = tree.join("boot/efiboot.img");
@@ -532,15 +532,24 @@ impl ImageBuilder for IsoBuilder {
 		debug!("Workspace: {workspace:#?}");
 		fs::create_dir_all(&workspace)?;
 
-		phase!("root": self.root_builder.build(chroot, manifest));
+		let tree_output = phase!("root": self.root_builder.build(chroot, manifest));
+
+		let tree_root = match tree_output {
+			crate::backends::fs_tree::TreeOutput::Directory(path) => path,
+			crate::backends::fs_tree::TreeOutput::Tarball(_) => {
+				bail!(
+					"RootBuilder returned an image, but ISOBuilder requires a directory as rootfs - Unimplemented code path."
+				);
+			},
+		};
 		// self.root_builder.build(chroot.canonicalize()?.as_path(), manifest)?;
 
-		phase!("dracut": self.dracut(chroot));
+		let _initramfs_path = phase!("dracut": self.dracut(&tree_root));
 
 		// Clean up kernel artifacts from /boot before squashing
 		// kernel-install will regenerate them on target system
 		info!("Cleaning up kernel artifacts from chroot /boot before creating root image");
-		let boot_dir = chroot.join("boot");
+		let boot_dir = tree_root.join("boot");
 		if boot_dir.exists() {
 			// Remove vmlinuz* and initramfs* files, but keep grub/, efi/, etc.
 			if let Ok(entries) = fs::read_dir(&boot_dir) {
@@ -574,12 +583,13 @@ impl ImageBuilder for IsoBuilder {
 		fs::create_dir_all(&image_dir)?;
 
 		if feature_flag_bool!("no-erofs") {
-			phase!("rootimg": self.squashfs(chroot, &image_dir.join("squashfs.img")));
+			phase!("rootimg": self.squashfs(&tree_root, &image_dir.join("squashfs.img")));
 		} else {
-			phase!("rootimg": self.erofs(chroot, &image_dir.join("squashfs.img")));
+			phase!("rootimg": self.erofs(&tree_root, &image_dir.join("squashfs.img")));
 		}
 
-		phase!("copy-live": self.bootloader.copy_liveos(manifest, chroot));
+
+		phase!("copy-live": self.bootloader.copy_liveos(manifest, &tree_root, &workspace));
 		// Reduce storage overhead by removing the original chroot
 		// However, we'll keep an env flag to keep the chroot for debugging purposes
 		if !feature_flag_bool!("keep-chroot")
@@ -594,7 +604,7 @@ impl ImageBuilder for IsoBuilder {
 			fs::remove_dir_all(chroot)?;
 		}
 
-		phase!("iso": self.xorriso(chroot, &image, manifest));
+		phase!("iso": self.xorriso(&image, manifest, &workspace));
 
 		phase!("bootloader": self.bootloader.install(&image));
 

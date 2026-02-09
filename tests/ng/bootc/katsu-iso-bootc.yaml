@@ -4,4 +4,4 @@ distro: Ultramarine Atomic
 
 bootc:
   image: ghcr.io/ultramarine-linux/plasma-bootc:main
-  derivation: bootc/Containerfile
+  # derivation: bootc/Containerfile

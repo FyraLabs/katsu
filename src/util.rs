@@ -193,20 +193,21 @@ macro_rules! tpl {
 macro_rules! gen_phase {
 	($skip_phases: ident) => {
 		macro_rules! phase {
-			($key:literal: $run:expr) => {
+			($key:literal: $run:expr) => {{
 				if !$skip_phases.contains(&$key.to_string()) {
 					tracing::info_span!(concat!("phase$", $key)).in_scope(
-						|| -> color_eyre::Result<()> {
+						|| -> color_eyre::Result<_> {
 							tracing::info!("Starting phase `{}`", $key);
-							$run?;
+							let result = $run?;
 							tracing::info!("Finished phase `{}`", $key);
-							Ok(())
+							Ok(result)
 						},
-					)?;
+					)?
 				} else {
 					tracing::info!("Skipping phase `{}`", $key);
+					return Err(color_eyre::eyre::eyre!("Phase `{}` was skipped", $key));
 				}
-			};
+			}};
 		}
 	};
 }

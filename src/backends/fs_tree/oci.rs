@@ -103,16 +103,33 @@ impl RootBuilder for BootcRootBuilder {
 
 		if self.embed_image {
 			// redeclare container_store as string, so cmd_lib doesn't complain
+			// let container_store_path = container_store.clone();
 			let container_store = container_store.display();
 			// let container_store_ovfs = container_store_ovfs.display();
 			info!(?mountpoint, ?image, "Copying OCI image to chroot's container store");
+			// Create a temporary storage.conf in /run that uses fuse-overlayfs for nested overlay support
+			let storage_conf_path = Path::new("/run").join("katsu-storage.conf");
+			let storage_conf = r#"[storage]
+driver = "overlay"
+
+[storage.options]
+mount_program = "/usr/bin/fuse-overlayfs"
+
+[storage.options.overlay]
+mount_program = "/usr/bin/fuse-overlayfs"
+"#
+			.to_string();
+			std::fs::write(&storage_conf_path, storage_conf)?;
+			info!(?storage_conf_path, "Created storage.conf with fuse-overlayfs mount_program");
 
 			// Push the original image to the chroot's container store, not the derived one
 			// If the source reference includes a digest, strip it from the destination reference
 			// to avoid digest mismatch errors when writing into containers-storage.
+			// Use overlay with fuse-overlayfs to support nested overlayfs scenarios
 			let dest_image = image.split('@').next().unwrap_or(image);
+			let storage_conf_env = storage_conf_path.display();
 			cmd_lib::run_cmd!(
-				podman push ${image} "containers-storage:[overlay@${container_store}]${dest_image}" --remove-signatures;
+				CONTAINERS_STORAGE_CONF=${storage_conf_env} podman push ${image} "containers-storage:[${container_store}]${dest_image}" --remove-signatures;
 			)?;
 			// Then we also unmount the thing so it doesn't get in the way
 			// but we don't wanna fail entirely if this fails
@@ -137,11 +154,11 @@ impl RootBuilder for BootcRootBuilder {
 			std::fs::write(mountpoint.join(".bootc_meta.yaml"), serialized)?;
 		}
 
-		info!("Exporting container filesystem to chroot");
-		cmd_lib::run_cmd!(
-			podman export $container | sudo tar -xf - -C $chroot;
-		)?;
+		// info!("Exporting container filesystem to chroot");
+		// cmd_lib::run_cmd!(
+		// 	podman export $container | sudo tar -xf - -C $chroot;
+		// )?;
 
-		Ok(TreeOutput::Directory(chroot.to_path_buf()))
+		Ok(TreeOutput::Directory(mountpoint.to_path_buf()))
 	}
 }

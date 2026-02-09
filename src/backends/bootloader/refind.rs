@@ -5,11 +5,13 @@ use std::{fs, io::Write, path::Path};
 use tracing::info;
 
 impl Bootloader {
-	pub(super) fn cp_refind(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
+	pub(super) fn cp_refind(
+		&self, manifest: &Manifest, chroot: &Path, workspace: &Path,
+	) -> Result<()> {
 		info!("Copying rEFInd files");
 		let distro = manifest.distro.as_deref().unwrap_or("Linux");
 		let cmd = manifest.kernel_cmdline.as_deref().unwrap_or("");
-		let iso_tree = chroot.parent().unwrap().join(ISO_TREE);
+		let iso_tree = workspace.join(ISO_TREE);
 
 		fs::create_dir_all(iso_tree.join("EFI/BOOT"))?;
 

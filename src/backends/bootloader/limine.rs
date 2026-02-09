@@ -5,11 +5,13 @@ use std::path::Path;
 use tracing::info;
 
 impl Bootloader {
-	pub(super) fn cp_limine(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
+	pub(super) fn cp_limine(
+		&self, manifest: &Manifest, chroot: &Path, workspace: &Path,
+	) -> Result<()> {
 		info!("Copying Limine files");
 		let distro = manifest.distro.as_deref().unwrap_or("Linux");
 		let cmd = manifest.kernel_cmdline.as_deref().unwrap_or("");
-		let root = chroot.parent().unwrap().join(ISO_TREE);
+		let root = workspace.join(ISO_TREE);
 
 		std::fs::create_dir_all(root.join("boot"))?;
 		std::fs::copy(

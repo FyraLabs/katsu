@@ -9,9 +9,11 @@ use std::{fs, os::unix::fs::symlink, path::Path};
 use tracing::{debug, info, trace, warn};
 
 impl Bootloader {
-	pub(super) fn cp_grub(&self, manifest: &Manifest, chroot: &Path) -> Result<()> {
-		let iso_tree = chroot.parent().unwrap().join(ISO_TREE);
-		let boot_imgs_dir = chroot.parent().unwrap().join(BOOTIMGS);
+	pub(super) fn cp_grub(
+		&self, manifest: &Manifest, chroot: &Path, workspace: &Path,
+	) -> Result<()> {
+		let iso_tree = workspace.join(ISO_TREE);
+		let boot_imgs_dir = workspace.join(BOOTIMGS);
 
 		fs::create_dir_all(&boot_imgs_dir)?;
 		if self.get_arch(manifest) == "x86_64" {
