@@ -78,8 +78,18 @@ impl Bootloader {
 		} else if grub_src.exists() {
 			Self::copy_dir(&grub_src, &grub_dest)?;
 		} else if grub_lib_dir.exists() {
-			warn!("Grub directory not found in boot directory, but usr/lib/grub exists. Copying from there.");
+			warn!(
+				"Grub directory not found in boot directory, but usr/lib/grub exists. Copying from there."
+			);
 			Self::copy_dir(&grub_lib_dir, &grub_dest)?;
+			// Copy fonts to proper font directory
+			let fonts_src = chroot.join("usr/share/grub");
+			if fonts_src.exists() {
+				let fonts_dest = grub_dest.join("fonts");
+				Self::copy_dir(&fonts_src, &fonts_dest)?;
+			} else {
+				warn!("No grub fonts directory found in {}", fonts_src.display());
+			}
 		} else {
 			bail!("Missing grub directory in {}", chroot_boot.display());
 		}
