@@ -168,7 +168,8 @@ impl Bootloader {
 			bail!("Source directory {} does not exist", src.display());
 		}
 		if dest.exists() {
-			fs::remove_dir_all(dest)?;
+			// Actually just append files instead of removing existing directory
+			// fs::remove_dir_all(dest)?;
 		}
 		fs::create_dir_all(dest)?;
 

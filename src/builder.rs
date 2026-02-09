@@ -232,7 +232,7 @@ pub struct IsoBuilder {
 }
 
 const DR_MODS: &str =
-	"livenet dmsquash-live dmsquash-live-autooverlay convertfs pollcdrom qemu qemu-net";
+	"livenet dmsquash-live dmsquash-live-autooverlay convertfs pollcdrom qemu qemu-net systemd";
 const DR_OMIT: &str = "";
 const DR_ARGS: &str = "-vv --xz --reproducible";
 
@@ -284,6 +284,14 @@ impl IsoBuilder {
 
 		let current_dir = std::env::current_dir()?;
 		info!(?current_dir, "Current directory");
+		// https://github.com/dracut-ng/dracut-ng/issues/443
+		// fixes a weird quirk in bootc builds, may need a check for bootc though since it kinda breaks SELinux
+		let is_bootc_image =
+			{ feature_flag_bool!("dracut-bootc") || root.join("sysroot").exists() };
+		if is_bootc_image {
+			info!("Detected bootc image, setting DRACUT_NO_XATTR=1");
+			cmd.env("DRACUT_NO_XATTR", "1");
+		}
 		info!(?cmd, "Running dracut command");
 
 		// Prepare iso-tree path for later
