@@ -195,17 +195,17 @@ macro_rules! gen_phase {
 		macro_rules! phase {
 			($key:literal: $run:expr) => {{
 				if !$skip_phases.contains(&$key.to_string()) {
-					tracing::info_span!(concat!("phase$", $key)).in_scope(
+					Some(tracing::info_span!(concat!("phase$", $key)).in_scope(
 						|| -> color_eyre::Result<_> {
 							tracing::info!("Starting phase `{}`", $key);
 							let result = $run?;
 							tracing::info!("Finished phase `{}`", $key);
 							Ok(result)
 						},
-					)?
+					)?)
 				} else {
 					tracing::info!("Skipping phase `{}`", $key);
-					return Err(color_eyre::eyre::eyre!("Phase `{}` was skipped", $key));
+					None
 				}
 			}};
 		}

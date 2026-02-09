@@ -6,7 +6,7 @@ use crate::{
 };
 use color_eyre::{Result, eyre::bail};
 use std::{fs, os::unix::fs::symlink, path::Path};
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, info, info_span, trace, warn};
 
 impl Bootloader {
 	pub(super) fn cp_grub(
@@ -41,7 +41,7 @@ impl Bootloader {
 		self.generate_grub_config(&iso_tree, volid, distro, &vmlinuz, &initramfs, kernel_cmdline)?;
 		self.setup_efi_boot_files(manifest, &iso_tree)?;
 		self.generate_grub_images(chroot, &iso_tree, manifest)?;
-		self.mkefiboot(chroot, manifest)?;
+		self.mkefiboot(workspace, manifest)?;
 
 		Ok(())
 	}
@@ -64,6 +64,8 @@ impl Bootloader {
 		} else {
 			chroot.join("boot")
 		};
+		// HACK: detect ostree-boot to avoid copying wrong files
+		let ostree_boot = chroot_boot.ends_with("ostree-boot");
 
 		let _ = fs::remove_dir_all(&iso_boot);
 		fs::create_dir_all(&iso_boot)?;
@@ -97,11 +99,63 @@ impl Bootloader {
 		let efi_src = chroot_boot.join("efi");
 		let efi_dest = iso_boot.join("efi");
 		let _ = fs::remove_dir_all(&efi_dest);
-		if efi_src.exists() {
-			Self::copy_dir(&efi_src, &efi_dest)?;
-		} else {
-			warn!("No EFI directory found in {}", chroot_boot.display());
-		}
+		info_span!("Copying EFI boot files").in_scope(|| {
+			info!(?efi_src, ?efi_dest, "Copying EFI boot files");
+			// funny legacy boot path in case no one has cleaned out /boot/efi
+			if chroot.join("boot/efi").exists() {
+				Self::copy_dir(&efi_src, &efi_dest)?;
+			}
+			else if ostree_boot {
+				warn!("bootupd detected, attempting to copying files from /usr/lib/efi");
+
+				let libefi = chroot.join("usr/lib/efi");
+				if libefi.exists() {
+					for entry in fs::read_dir(&libefi)? {
+						// /usr/lib/efi will contain <package_name>/<version> directories
+						// which then contains the EFI files relative to /boot
+						// so something like `shim/1.0/EFI/BOOT/fbx64.efi`
+						// we would copy into the ISO tree's /boot/efi as /boot/efi/EFI/BOOT/fbx64.efi
+						let entry = entry?;
+						let entry_path = entry.path();
+						info!(?entry_path, "Processing entry in /usr/lib/efi");
+						if entry_path.is_dir() {
+							// Read version directory
+							for version_entry in fs::read_dir(&entry_path)? {
+								info!(
+									?version_entry,
+									"Processing version directory in /usr/lib/efi"
+								);
+								let version_entry = version_entry?;
+								let version_path = version_entry.path();
+
+								if version_path.is_dir() {
+									let efi_subsrc = version_path.join("EFI");
+									let efi_dest_subdir = efi_dest.join("EFI");
+									if efi_subsrc.exists() {
+										debug!(
+											?efi_subsrc,
+											?efi_dest_subdir,
+											"Copying EFI subdirectory from versioned path"
+										);
+										Self::copy_dir(&efi_subsrc, &efi_dest_subdir)?;
+									} else {
+										warn!(
+											?efi_subsrc,
+											"No EFI directory found in subdirectory of /usr/lib/efi"
+										);
+									}
+								}
+							}
+						}
+					}
+				} else {
+					bail!("No /usr/lib/efi directory found");
+				}
+			} else {
+				warn!("No EFI directory found in {}", chroot_boot.display());
+			}
+			Ok(())
+		})?;
 
 		fs::copy(boot_imgs_dir.join("boot").join(&vmlinuz), iso_boot.join(&vmlinuz))?;
 		fs::copy(boot_imgs_dir.join("boot").join(&initramfs), iso_boot.join("initramfs.img"))?;
@@ -193,8 +247,8 @@ impl Bootloader {
 		}
 	}
 
-	fn mkefiboot(&self, chroot: &Path, _: &Manifest) -> Result<()> {
-		let tree = chroot.parent().unwrap().join(ISO_TREE);
+	fn mkefiboot(&self, workspace: &Path, _: &Manifest) -> Result<()> {
+		let tree = workspace.join(ISO_TREE);
 
 		let sparse_path = &tree.join("boot/efiboot.img");
 		crate::util::create_sparse(sparse_path, 25 * 1024 * 1024)?;

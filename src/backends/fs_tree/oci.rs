@@ -64,6 +64,11 @@ impl RootBuilder for BootcRootBuilder {
 			podman pull $image 2>&1;
 		)?;
 		info!("Current working directory: {}", std::env::current_dir()?.display());
+		let digest = cmd_lib::run_fun!(
+			podman inspect --format="{{index .Digest}}" $image
+		)?
+		.trim()
+		.to_string();
 
 		let context = self.context.as_deref().unwrap_or(".");
 
@@ -84,10 +89,26 @@ impl RootBuilder for BootcRootBuilder {
 
 		info!(?d_image, "Creating ephemeral container to extract rootfs");
 		std::fs::create_dir_all(chroot)?;
+		let digest_trimmed = digest.trim_start_matches("sha256:").get(0..7).unwrap_or("unknown");
+		let container_name = format!("katsu-{}", digest_trimmed);
 
-		let container = cmd_lib::run_fun!(
-			podman create --rm $d_image /bin/bash
-		)?;
+		// Check if container with this name already exists
+		let existing_container = cmd_lib::run_fun!(
+			podman ps -a --filter name=^${container_name} --format="{{.ID}}"
+		)
+		.unwrap_or_default();
+
+		let container = if !existing_container.trim().is_empty() {
+			info!(?container_name, "Reusing existing container");
+			existing_container.trim().to_string()
+		} else {
+			info!(?container_name, "Creating new container");
+			cmd_lib::run_fun!(
+				podman create --rm --name ${container_name} $d_image /bin/bash
+			)?
+			.trim()
+			.to_string()
+		};
 
 		// experiment: mount container's root fs directly
 		let mountpoint = cmd_lib::run_fun!(
@@ -137,12 +158,6 @@ mount_program = "/usr/bin/fuse-overlayfs"
 		}
 
 		if self.embed_image_metadata {
-			let digest = cmd_lib::run_fun!(
-				podman inspect --format="{{index .Digest}}" $image
-			)?
-			.trim()
-			.to_string();
-
 			let metadata = BootcImageMetadata { tag: image.to_string(), digest };
 
 			// serialize to yaml

@@ -532,7 +532,8 @@ impl ImageBuilder for IsoBuilder {
 		debug!("Workspace: {workspace:#?}");
 		fs::create_dir_all(&workspace)?;
 
-		let tree_output = phase!("root": self.root_builder.build(chroot, manifest));
+		let tree_output = phase!("root": self.root_builder.build(chroot, manifest))
+			.ok_or_else(|| color_eyre::eyre::eyre!("Cannot skip 'root' phase - it is required"))?;
 
 		let tree_root = match tree_output {
 			crate::backends::fs_tree::TreeOutput::Directory(path) => path,
@@ -544,7 +545,7 @@ impl ImageBuilder for IsoBuilder {
 		};
 		// self.root_builder.build(chroot.canonicalize()?.as_path(), manifest)?;
 
-		let _initramfs_path = phase!("dracut": self.dracut(&tree_root));
+		let _ = phase!("dracut": self.dracut(&tree_root));
 
 		// Clean up kernel artifacts from /boot before squashing
 		// kernel-install will regenerate them on target system
@@ -583,13 +584,12 @@ impl ImageBuilder for IsoBuilder {
 		fs::create_dir_all(&image_dir)?;
 
 		if feature_flag_bool!("no-erofs") {
-			phase!("rootimg": self.squashfs(&tree_root, &image_dir.join("squashfs.img")));
+			let _ = phase!("rootimg": self.squashfs(&tree_root, &image_dir.join("squashfs.img")));
 		} else {
-			phase!("rootimg": self.erofs(&tree_root, &image_dir.join("squashfs.img")));
+			let _ = phase!("rootimg": self.erofs(&tree_root, &image_dir.join("squashfs.img")));
 		}
 
-
-		phase!("copy-live": self.bootloader.copy_liveos(manifest, &tree_root, &workspace));
+		let _ = phase!("copy-live": self.bootloader.copy_liveos(manifest, &tree_root, &workspace));
 		// Reduce storage overhead by removing the original chroot
 		// However, we'll keep an env flag to keep the chroot for debugging purposes
 		if !feature_flag_bool!("keep-chroot")
@@ -604,9 +604,9 @@ impl ImageBuilder for IsoBuilder {
 			fs::remove_dir_all(chroot)?;
 		}
 
-		phase!("iso": self.xorriso(&image, manifest, &workspace));
+		let _ = phase!("iso": self.xorriso(&image, manifest, &workspace));
 
-		phase!("bootloader": self.bootloader.install(&image));
+		let _ = phase!("bootloader": self.bootloader.install(&image));
 
 		Ok(())
 	}
