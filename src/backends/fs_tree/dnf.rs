@@ -1,7 +1,10 @@
 //! Use DNF to build an OS root tree from a list of packages.
 
 use crate::{
-	backends::{bootloader::Bootloader, fs_tree::{RootBuilder, TreeOutput}},
+	backends::{
+		bootloader::Bootloader,
+		fs_tree::{RootBuilder, TreeOutput},
+	},
 	builder::run_all_scripts,
 	config::Manifest,
 };
@@ -174,7 +177,7 @@ impl RootBuilder for DnfRootBuilder {
 
 		info!("Running post-install scripts");
 
-		run_all_scripts(&manifest.scripts.post, &chroot, true);
+		let _ = run_all_scripts(&manifest.scripts.post, &chroot, true);
 
 		Ok(TreeOutput::Directory(chroot))
 	}

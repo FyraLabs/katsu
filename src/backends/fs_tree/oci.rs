@@ -2,7 +2,6 @@ use crate::backends::fs_tree::TreeOutput;
 use crate::builder::default_true;
 use crate::{backends::fs_tree::RootBuilder, config::Manifest};
 use color_eyre::Result;
-use nix::mount;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tracing::info;
