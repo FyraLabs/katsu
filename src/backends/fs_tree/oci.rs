@@ -52,6 +52,47 @@ pub struct BootcRootBuilder {
 	// Embed image metadata on derived images
 	#[serde(default = "default_true")]
 	pub embed_image_metadata: bool,
+
+	#[serde(default)]
+	pub embed_extra_images: Vec<String>,
+}
+
+impl BootcRootBuilder {
+	/// Embeds an OCI image into the container store
+	fn embed_image_to_store(
+		image: &str, container_store: &Path, container: &str,
+	) -> Result<std::path::PathBuf> {
+		let container_store_display = container_store.display();
+		info!(?image, "Copying OCI image to chroot's container store");
+
+		// Create a temporary storage.conf in /run that uses fuse-overlayfs for nested overlay support
+		let storage_conf_path = Path::new("/run").join("katsu-storage.conf");
+		let storage_conf = r#"[storage]
+driver = "overlay"
+
+[storage.options]
+mount_program = "/usr/bin/fuse-overlayfs"
+
+[storage.options.overlay]
+mount_program = "/usr/bin/fuse-overlayfs"
+"#
+		.to_string();
+		std::fs::write(&storage_conf_path, storage_conf)?;
+
+		// Use skopeo to copy the image from containers-storage to the destination
+		// skopeo handles copying layers properly between different storage configurations
+		let dest_image = image.split('@').next().unwrap_or(image);
+		let storage_conf_env = storage_conf_path.display();
+		cmd_lib::run_cmd!(
+			CONTAINERS_STORAGE_CONF=${storage_conf_env} skopeo copy --dest-compress --remove-signatures "containers-storage:${image}" "containers-storage:[${container_store_display}]${dest_image}";
+		)?;
+
+		// quirk: After we push the image, podman will unmount the entire container store, so we have to remount it
+		let new_mountpoint = cmd_lib::run_fun!(
+			podman mount $container
+		)?;
+		Ok(Path::new(new_mountpoint.trim()).to_path_buf())
+	}
 }
 
 impl RootBuilder for BootcRootBuilder {
@@ -59,10 +100,17 @@ impl RootBuilder for BootcRootBuilder {
 		let image = &self.image;
 
 		// Pull the image for us
-		info!("Loading OCI image");
+		info!("Loading OCI images");
 		cmd_lib::run_cmd!(
 			podman pull $image 2>&1;
 		)?;
+		for extra_image in &self.embed_extra_images {
+			info!(?extra_image, "Pulling extra image to embed");
+			cmd_lib::run_cmd!(
+				podman pull $extra_image 2>&1;
+			)?;
+		}
+
 		info!("Current working directory: {}", std::env::current_dir()?.display());
 		let digest = cmd_lib::run_fun!(
 			podman inspect --format="{{index .Digest}}" $image
@@ -122,39 +170,16 @@ impl RootBuilder for BootcRootBuilder {
 		// let container_store_ovfs = container_store.join("overlay");
 		std::fs::create_dir_all(&container_store)?;
 
+		// Build list of images to embed
+		let mut images_to_embed: Vec<String> = self.embed_extra_images.clone();
 		if self.embed_image {
-			// redeclare container_store as string, so cmd_lib doesn't complain
-			// let container_store_path = container_store.clone();
-			let container_store = container_store.display();
-			// let container_store_ovfs = container_store_ovfs.display();
-			info!(?mountpoint, ?image, "Copying OCI image to chroot's container store");
-			// Create a temporary storage.conf in /run that uses fuse-overlayfs for nested overlay support
-			let storage_conf_path = Path::new("/run").join("katsu-storage.conf");
-			let storage_conf = r#"[storage]
-driver = "overlay"
+			// Prepend the main image to the list
+			images_to_embed.insert(0, image.to_string());
+		}
 
-[storage.options]
-mount_program = "/usr/bin/fuse-overlayfs"
-
-[storage.options.overlay]
-mount_program = "/usr/bin/fuse-overlayfs"
-"#
-			.to_string();
-			std::fs::write(&storage_conf_path, storage_conf)?;
-			info!(?storage_conf_path, "Created storage.conf with fuse-overlayfs mount_program");
-
-			// Use skopeo to copy the image from containers-storage to the destination
-			// skopeo handles copying layers properly between different storage configurations
-			let dest_image = image.split('@').next().unwrap_or(image);
-			let storage_conf_env = storage_conf_path.display();
-			cmd_lib::run_cmd!(
-				CONTAINERS_STORAGE_CONF=${storage_conf_env} skopeo copy --dest-compress --remove-signatures "containers-storage:${image}" "containers-storage:[${container_store}]${dest_image}";
-			)?;
-			// quirk: After we push the image, podman will unmount the entire container store, so we have to remount it
-			let new_mountpoint = cmd_lib::run_fun!(
-				podman mount $container
-			)?;
-			mountpoint = Path::new(new_mountpoint.trim()).to_path_buf();
+		// Embed all images in the list
+		for image_to_embed in &images_to_embed {
+			mountpoint = Self::embed_image_to_store(image_to_embed, &container_store, &container)?;
 		}
 
 		if self.embed_image_metadata {
