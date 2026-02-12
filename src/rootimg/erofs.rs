@@ -61,7 +61,7 @@ impl Default for MkfsErofsOptions {
 	fn default() -> Self {
 		MkfsErofsOptions {
 			tar_mode: false,
-			compression: Some("lzma,level=6".into()),
+			compression: Some("zstd,level=6".into()),
 			chunk_size: Some(1048576),
 			xattr_level: Some(1),
 			exclude_paths: ["/sys/", "/proc/"].iter().map(|s| s.to_string()).collect(),
