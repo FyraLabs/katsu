@@ -21,13 +21,13 @@ env:
 jobs:
   check:
     container:
-      image: ghcr.io/terrapkg/builder:f42
+      image: ghcr.io/terrapkg/builder:f43
     name: Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
       - name: Cache DNF packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /var/cache/dnf
           key: dnf-${{ runner.os }}
@@ -36,24 +36,24 @@ jobs:
       - name: Install dependencies
         run: |
           dnf install -y $DNF_PACKAGES
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
           profile: minimal
           toolchain: stable
           override: true
-      - uses: actions-rs/cargo@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
           command: check
 
   clippy:
     name: Clippy
     container:
-      image: ghcr.io/terrapkg/builder:f42
+      image: ghcr.io/terrapkg/builder:f43
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
       - name: Cache DNF packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /var/cache/dnf
           key: dnf-${{ runner.os }}
@@ -62,13 +62,13 @@ jobs:
       - name: Install dependencies
         run: |
           dnf install -y $DNF_PACKAGES
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
           profile: minimal
           toolchain: stable
           override: true
       - run: rustup component add clippy
-      - uses: actions-rs/cargo@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
           command: clippy
           args: -- -D warnings
@@ -76,12 +76,12 @@ jobs:
   unit-test:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/terrapkg/builder:f42
+      image: ghcr.io/terrapkg/builder:f43
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Cache DNF packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /var/cache/dnf
           key: dnf-${{ runner.os }}
@@ -91,7 +91,7 @@ jobs:
       - name: Install dependencies
         run: |
           dnf install -y $DNF_PACKAGES
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
           profile: minimal
           toolchain: stable
@@ -99,6 +99,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Test
-        uses: actions-rs/cargo@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
           command: test
