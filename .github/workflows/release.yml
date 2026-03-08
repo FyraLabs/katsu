@@ -9,7 +9,7 @@ on:
     tags: ["v*.*.*"]
 
 env:
-  REGISTRY_IMAGE: ghcr.io/fyralabs/katsu:main
+  REGISTRY_IMAGE: ghcr.io/fyralabs/katsu
 
 jobs:
   # Build docker image for the rest of the tests
