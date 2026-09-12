@@ -104,8 +104,7 @@ impl Bootloader {
 			// funny legacy boot path in case no one has cleaned out /boot/efi
 			if chroot.join("boot/efi").exists() {
 				Self::copy_dir(&efi_src, &efi_dest)?;
-			}
-			else if ostree_boot {
+			} else if ostree_boot {
 				warn!("bootupd detected, attempting to copying files from /usr/lib/efi");
 
 				let libefi = chroot.join("usr/lib/efi");
