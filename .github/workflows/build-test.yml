@@ -96,6 +96,7 @@ jobs:
           context: .
           file: Dockerfile
           platforms: ${{ matrix.platform }}
+          build-args: BASE_IMAGE=${{ matrix.platform == 'linux/riscv64' && 'fedorariscv/base:43' || 'ghcr.io/terrapkg/builder:f43' }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

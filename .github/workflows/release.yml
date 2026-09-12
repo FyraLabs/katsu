@@ -57,6 +57,7 @@ jobs:
         with:
           context: .
           platforms: ${{ matrix.platform }}
+          build-args: BASE_IMAGE=${{ matrix.platform == 'linux/riscv64' && 'fedorariscv/base:43' || 'ghcr.io/terrapkg/builder:f43' }}
           push: true
           tags: ${{ env.REGISTRY_IMAGE }}
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
