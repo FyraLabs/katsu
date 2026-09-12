@@ -194,7 +194,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-24.04-riscv
     container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu:sha-${{ github.sha }}
       options: --privileged -v /dev:/dev
 
     steps:
