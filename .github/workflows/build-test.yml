@@ -71,6 +71,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=pr
+            type=sha,format=long
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
@@ -144,6 +145,7 @@ jobs:
             type=ref,event=branch
             type=ref,event=tag
             type=ref,event=pr
+            type=sha,format=long
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
@@ -161,7 +163,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-24.04-arm
     container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu:sha-${{ github.sha }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -219,7 +221,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu:sha-${{ github.sha }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -251,7 +253,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu:sha-${{ github.sha }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -282,7 +284,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu:sha-${{ github.sha }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -313,7 +315,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu:sha-${{ github.sha }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -358,7 +360,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu:sha-${{ github.sha }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -390,7 +392,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu:sha-${{ github.sha }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -422,7 +424,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu:sha-${{ github.sha }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
