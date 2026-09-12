@@ -188,6 +188,33 @@ jobs:
           name: image-arm
           path: tests/ng/katsu-work/image/*.raw.zstd
 
+  image-riscv64:
+    needs: build-environment
+    runs-on: ubuntu-24.04-riscv
+    container:
+      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+      options: --privileged -v /dev:/dev
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run test
+        run: |
+          export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
+          pushd tests/ng
+          echo "COLORBT_SHOW_HIDDEN=1" >> .env
+          echo "KATSU_LOG=trace" >> .env
+          katsu -o disk-image katsu-riscv.yaml 2>&1
+          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu-riscv64.raw.zstd
+          popd
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-riscv64
+          path: tests/ng/katsu-work/image/*.raw.zstd
+
   bios-x86_64:
     needs: build-environment
     runs-on: ubuntu-latest

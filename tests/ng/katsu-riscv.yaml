@@ -1,0 +1,31 @@
+import:
+  - katsu.yaml
+
+builder: dnf
+distro: Katsu Ultramarine RISC-V
+
+disk:
+  size: 8GiB
+  partitions:
+    - label: EFI
+      type: esp
+      size: 512MiB
+      filesystem: efi
+      mountpoint: /boot/efi
+
+    - label: boot
+      type: xbootldr
+      size: 1GiB
+      filesystem: ext4
+      mountpoint: /boot
+
+    - label: root
+      type: root-riscv64
+      flags:
+        - grow-fs
+      filesystem: ext4
+      mountpoint: /
+
+dnf:
+  arch: riscv64
+  releasever: 43
