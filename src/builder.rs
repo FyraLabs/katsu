@@ -314,7 +314,7 @@ impl IsoBuilder {
 			// tracked in https://github.com/FyraLabs/katsu/issues/43. Remove when upstream
 			// fixes or we implement an alternative generation path.
 			crate::util::enter_chroot_run(root, || -> Result<()> {
-				cmd.arg(format!("/boot/initramfs-{}.img", &kver));
+				cmd.arg(format!("/boot/initramfs-{}.img", kver));
 
 				let status = cmd.status()?;
 				debug!(?status, "Dracut command finished");
