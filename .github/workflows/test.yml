@@ -21,7 +21,7 @@ env:
 jobs:
   check:
     container:
-      image: ghcr.io/terrapkg/builder:f43
+      image: ghcr.io/terrapkg/builder:f44
     name: Check
     runs-on: ubuntu-latest
     steps:
