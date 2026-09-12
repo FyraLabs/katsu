@@ -209,6 +209,18 @@ impl Bootloader {
 	}
 
 	fn setup_efi_boot_files(&self, manifest: &Manifest, iso_tree: &Path) -> Result<()> {
+		if self.get_arch(manifest) == "riscv64" {
+			fs::create_dir_all(iso_tree.join("EFI/BOOT/fonts"))?;
+			cmd_lib::run_cmd!(
+				cp -av $iso_tree/boot/efi/EFI/fedora/. $iso_tree/EFI/BOOT;
+				cp -av $iso_tree/boot/grub/grub.cfg $iso_tree/EFI/BOOT/BOOT.conf 2>&1;
+				cp -av $iso_tree/boot/grub/grub.cfg $iso_tree/EFI/BOOT/grub.cfg 2>&1;
+				cp -av $iso_tree/boot/grub/fonts/unicode.pf2 $iso_tree/EFI/BOOT/fonts;
+				cp -av $iso_tree/EFI/BOOT/grub.efi $iso_tree/EFI/BOOT/BOOTRISCV64.EFI;
+			)?;
+			return Ok(());
+		}
+
 		let arch_short = self.get_arch_short(manifest);
 		let arch_short_upper = arch_short.to_uppercase();
 		let arch_32 = self.get_arch_32bit(manifest).to_uppercase();
@@ -277,18 +289,20 @@ impl Bootloader {
 		let arch = match target_arch {
 			"x86_64" => "i386-pc",
 			"aarch64" => "arm64-efi",
+			"riscv64" => "riscv64-efi",
 			_ => unimplemented!(),
 		};
 
 		let arch_out = match target_arch {
 			"x86_64" => "i386-pc-eltorito",
 			"aarch64" => "arm64-efi",
+			"riscv64" => "riscv64-efi",
 			_ => unimplemented!(),
 		};
 
 		let arch_modules = match target_arch {
 			"x86_64" => vec!["biosdisk"],
-			"aarch64" => vec!["efi_gop"],
+			"aarch64" | "riscv64" => vec!["efi_gop"],
 			_ => unimplemented!(),
 		};
 
