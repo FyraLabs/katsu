@@ -262,15 +262,72 @@ mount_program = "/usr/bin/fuse-overlayfs"
 		std::fs::create_dir_all(&usr_etc)?;
 
 		// Move entry-by-entry so we do not have to create a then-delete dir tree.
+
 		for entry in std::fs::read_dir(&etc)? {
 			let entry = entry?;
+			let src = entry.path();
 			let dest = usr_etc.join(entry.file_name());
-			std::fs::rename(entry.path(), &dest)?;
+			Self::move_path(&src, &dest)?;
 		}
 
 		// `ostree admin deploy` requires an (empty) /etc in the commit.
 		std::fs::create_dir_all(&etc)?;
 
+		Ok(())
+	}
+
+	/// Move `src` to `dest`, falling back to a recursive copy when a rename is not
+	/// possible (for example across overlayfs layers).
+	fn move_path(src: &Path, dest: &Path) -> Result<()> {
+		match std::fs::rename(src, dest) {
+			Ok(()) => Ok(()),
+			Err(err) => {
+				// EXDEV (cross-device) is expected on overlayfs; anything else we
+				// still attempt the copy, which gives a more accurate error if it
+				// fails for a real reason (e.g. permissions).
+				debug!(?err, ?src, ?dest, "rename failed, falling back to copy");
+				Self::copy_path(src, dest)?;
+				Self::remove_path(src)
+			},
+		}
+	}
+
+	/// Recursively copy a file, directory or symlink, preserving symlinks.
+	fn copy_path(src: &Path, dest: &Path) -> Result<()> {
+		let meta = std::fs::symlink_metadata(src)?;
+
+		if meta.file_type().is_symlink() {
+			use std::os::unix::fs::symlink;
+			let target = std::fs::read_link(src)?;
+			let _ = std::fs::remove_file(dest);
+			symlink(target, dest)?;
+			return Ok(());
+		}
+
+		if meta.is_dir() {
+			std::fs::create_dir_all(dest)?;
+			// Preserve the directory's own permissions; content is copied below.
+			let _ = std::fs::set_permissions(dest, meta.permissions());
+			for entry in std::fs::read_dir(src)? {
+				let entry = entry?;
+				Self::copy_path(&entry.path(), &dest.join(entry.file_name()))?;
+			}
+			return Ok(());
+		}
+
+		std::fs::copy(src, dest)?;
+		std::fs::set_permissions(dest, meta.permissions())?;
+		Ok(())
+	}
+
+	/// Remove a file, symlink or directory tree.
+	fn remove_path(path: &Path) -> Result<()> {
+		let meta = std::fs::symlink_metadata(path)?;
+		if meta.is_dir() {
+			std::fs::remove_dir_all(path)?;
+		} else {
+			std::fs::remove_file(path)?;
+		}
 		Ok(())
 	}
 
@@ -614,6 +671,48 @@ mod tests {
 		BootcRootBuilder::remove_sysroot(&sysroot).unwrap();
 
 		assert!(!sysroot.exists());
+	}
+
+	#[test]
+	fn relocates_etc_preserving_structure_and_symlinks() {
+		let root = scratch("katsu-bootc-etc-relocate");
+		let etc = root.join("etc");
+
+		// Nested directory with a file.
+		fs::create_dir_all(etc.join("ssh")).unwrap();
+		fs::write(etc.join("ssh/sshd_config"), b"x").unwrap();
+		// A plain file at the top level.
+		fs::write(etc.join("os-release"), b"x").unwrap();
+		// A symlink, as images commonly have for e.g. /etc/localtime.
+		std::os::unix::fs::symlink("/usr/share/zoneinfo/UTC", etc.join("localtime")).unwrap();
+
+		BootcRootBuilder::prepare_etc_for_commit(&root).unwrap();
+
+		assert!(root.join("usr/etc/ssh/sshd_config").is_file());
+		assert!(root.join("usr/etc/os-release").is_file());
+
+		let localtime = root.join("usr/etc/localtime");
+		assert!(localtime.is_symlink(), "symlink should stay a symlink");
+		assert_eq!(fs::read_link(&localtime).unwrap().to_string_lossy(), "/usr/share/zoneinfo/UTC");
+
+		// /etc must remain, but be empty.
+		assert_eq!(fs::read_dir(root.join("etc")).unwrap().count(), 0);
+	}
+
+	/// The `move_path` fallback must produce the same result as a rename.
+	#[test]
+	fn move_path_moves_directories_recursively() {
+		let root = scratch("katsu-bootc-move-path");
+		let src = root.join("src/nested");
+		fs::create_dir_all(&src).unwrap();
+		fs::write(src.join("file"), b"content").unwrap();
+
+		let dest = root.join("dest");
+		BootcRootBuilder::move_path(&root.join("src"), &dest).unwrap();
+
+		assert!(dest.join("nested/file").is_file());
+		assert_eq!(fs::read(dest.join("nested/file")).unwrap(), b"content");
+		assert!(!root.join("src").exists(), "source should be removed after a move");
 	}
 
 	#[test]
