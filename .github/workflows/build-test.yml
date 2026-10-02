@@ -281,6 +281,10 @@ jobs:
           name: iso-x86_64
           path: tests/ng/katsu-work/image/katsu.iso
 
+  # Native composefs unified storage. The payload holds a bootc-owned
+  # containers-storage next to the composefs objects, the system boots via
+  # `composefs=`, and that store doubles as an offline install source for
+  # `bootc install --source-imgref containers-storage:<image>`.
   iso-bootc-x86_64:
     needs: build-environment
     runs-on: ubuntu-latest

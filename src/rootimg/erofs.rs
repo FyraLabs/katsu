@@ -23,6 +23,8 @@ pub struct MkfsErofsOptions {
 	/// --workers=<n>: number of worker threads. Defaults to the CPU count when
 	/// unset, matching mkfs.erofs' own default.
 	pub workers: Option<u32>,
+	/// Default number of worker threads when dedup is enabled.
+	pub(crate) dedupe_workers: u32,
 }
 
 impl MkfsErofsOptions {
@@ -53,6 +55,12 @@ impl MkfsErofsOptions {
 			args.push(format!("-E{features}"));
 		}
 
+		// Dedup memory use scales with the number of workers, and it is the setting
+		// that previously exhausted RAM. Cap it unless the caller asked explicitly.
+		if self.dedupe_enabled() && self.workers.is_none() {
+			args.push(format!("--workers={}", self.dedupe_workers));
+		}
+
 		if let Some(workers) = self.workers {
 			args.push(format!("--workers={workers}"));
 		}
@@ -61,6 +69,11 @@ impl MkfsErofsOptions {
 			args.push("--tar=f".to_string());
 		}
 		args
+	}
+
+	/// Whether global full-file deduplication is on.
+	pub fn dedupe_enabled(&self) -> bool {
+		self.extra_features.iter().any(|f| f == "dedupe")
 	}
 }
 
@@ -75,13 +88,17 @@ impl Default for MkfsErofsOptions {
 			file_contexts: None,
 			log_level: 0,
 			workers: None,
-			// NOTE: `dedupe` is deliberately not enabled by default. It performs
-			// global full-file comparison, which is effectively single-threaded and
-			// holds large amounts of state in memory - on a ~10G bootc tree it can
-			// run for many minutes on one core and exhaust RAM. It also largely
-			// duplicates work ostree has already done: the repo is content-addressed,
-			// so the same object appears once. Set `KATSU_EROFS_DEDUPE=1` to opt in.
-			extra_features: ["all-fragments", "fragdedupe=inode"]
+			// Dedup is on by default: it is what keeps repeated content from being
+			// stored twice, and the ISO is the artifact users actually download.
+			// `--workers` is capped for it because memory scales with worker count;
+			// an uncapped run previously exhausted RAM on a ~10G tree. Set
+			// `KATSU_EROFS_WORKERS` to raise it deliberately, or
+			// `KATSU_EROFS_DEDUPE=0` to disable dedup for a faster build.
+			dedupe_workers: 2,
+			// `fragdedupe=full` always dedupes fragments by content, whereas `inode`
+			// only dedupes when inode data is identical (faster, less effective).
+			// Size is the priority for shipped media, so pay the build cost.
+			extra_features: ["all-fragments", "fragdedupe=full", "dedupe"]
 				.iter()
 				.map(|s| s.to_string())
 				.collect(),
@@ -115,4 +132,44 @@ pub fn erofs_mkfs(
 		));
 	}
 	Ok(target.to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn features(args: &[String]) -> String {
+		args.iter().find(|a| a.starts_with("-E")).expect("expected an -E feature argument").clone()
+	}
+
+	#[test]
+	fn dedupe_is_enabled_by_default_with_a_capped_worker_count() {
+		// Dedup is expensive and its memory use scales with workers, so the
+		// default must bound parallelism instead of letting mkfs.erofs pick.
+		let opts = MkfsErofsOptions::default();
+		assert!(opts.dedupe_enabled());
+		let args = opts.build_args();
+		assert!(features(&args).contains("dedupe"));
+		assert!(features(&args).contains("fragdedupe=full"));
+		let expected = format!("--workers={}", opts.dedupe_workers);
+		assert!(args.contains(&expected));
+	}
+
+	#[test]
+	fn explicit_workers_overrides_the_dedupe_cap() {
+		// A caller that picked a worker count must not be silently second-guessed.
+		let opts = MkfsErofsOptions { workers: Some(7), ..Default::default() };
+		let args = opts.build_args();
+		assert!(args.contains(&"--workers=7".to_string()));
+		assert_eq!(args.iter().filter(|a| a.starts_with("--workers")).count(), 1);
+	}
+
+	#[test]
+	fn dedupe_can_be_disabled() {
+		let mut opts = MkfsErofsOptions::default();
+		opts.extra_features.retain(|f| f != "dedupe");
+		assert!(!opts.dedupe_enabled());
+		let args = opts.build_args();
+		assert!(!args.iter().any(|a| a.starts_with("--workers")));
+	}
 }

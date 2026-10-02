@@ -1,4 +1,4 @@
-use super::{Bootloader, LIMINE_PREPEND_COMMENT, OstreeDeployment};
+use super::{BootPayload, Bootloader, LIMINE_PREPEND_COMMENT};
 use crate::{builder::ISO_TREE, config::Manifest};
 use color_eyre::Result;
 use std::path::Path;
@@ -6,8 +6,7 @@ use tracing::info;
 
 impl Bootloader {
 	pub(super) fn cp_limine(
-		&self, manifest: &Manifest, chroot: &Path, workspace: &Path,
-		ostree: Option<&OstreeDeployment>,
+		&self, manifest: &Manifest, chroot: &Path, workspace: &Path, ostree: &BootPayload,
 	) -> Result<()> {
 		info!("Copying Limine files");
 		let distro = manifest.distro.as_deref().unwrap_or("Linux");
@@ -29,7 +28,7 @@ impl Bootloader {
 		let volid = manifest.get_volid();
 
 		let limine_cfg = root.join("boot/limine.cfg");
-		let ostree_karg = ostree.map(|o| o.karg.clone()).unwrap_or_default();
+		let ostree_karg = ostree.karg.clone();
 		crate::tpl!(
 			"limine.cfg.tera" => { LIMINE_PREPEND_COMMENT, distro, vmlinuz, initramfs, cmd, volid, ostree: ostree_karg } => &limine_cfg
 		);

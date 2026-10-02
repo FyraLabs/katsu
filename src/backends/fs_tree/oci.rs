@@ -1,6 +1,7 @@
 use crate::backends::fs_tree::TreeOutput;
 use crate::builder::default_true;
-use crate::{backends::fs_tree::RootBuilder, config::Manifest};
+use crate::{backends::fs_tree::RootBuilder, config::Manifest, feature_flag_str};
+use bytesize::ByteSize;
 use color_eyre::{Result, eyre::bail};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -26,6 +27,11 @@ pub enum BootcLayout {
 	/// Embed the OCI image into the chroot's own containers-storage so the live
 	/// environment can `bootc install` from it.
 	Nested,
+	/// Native composefs unified storage: the ISO payload is bootc's composefs
+	/// layout, whose `composefs/bootc/storage` is a real read-only image store.
+	/// Booting uses `composefs=<D>` and installation uses that local store, both
+	/// offline. Unlike `Ostree`, no `ostree=` deployment is created.
+	Unified,
 }
 
 /// A bootc-based image. This is the second implementation of the RootBuilder trait.
@@ -81,6 +87,21 @@ pub struct BootcRootBuilder {
 
 	#[serde(default)]
 	pub embed_extra_images: Vec<String>,
+
+	/// Size of the staging disk image used by the `unified` layout.
+	///
+	/// The unified install writes the composefs objects and the imported image
+	/// store separately before dedup, so the staging filesystem must hold both.
+	/// Size this from the image rather than assuming a constant; the file is
+	/// sparse, but it must fit once populated.
+	#[serde(default = "default_staging_disk_size")]
+	pub staging_disk_size: ByteSize,
+}
+
+fn default_staging_disk_size() -> ByteSize {
+	// Use decimal GB so the default matches what a user writes with the `24G`
+	// shorthand; `ByteSize::gib` would silently be ~7% larger than `24G`.
+	ByteSize::gb(24)
 }
 
 fn default_stateroot() -> String {
@@ -516,6 +537,164 @@ mount_program = "/usr/bin/fuse-overlayfs"
 	}
 }
 
+impl BootcRootBuilder {
+	/// Build the native composefs unified-storage layout.
+	///
+	/// bootc's installer is the only supported producer of this layout: it creates
+	/// the composefs repository, imports the image zero-copy into a bootc-owned
+	/// containers-storage on the **target** filesystem, and generates the BLS
+	/// entry selecting `composefs=<D>`.
+	///
+	/// Install runs against a fresh sparse disk image, then the populated root
+	/// filesystem is extracted for the ISO. That avoids needing a real block device
+	/// and keeps the composefs object/store sharing intact (both live in one
+	/// filesystem).
+	/// Build the native composefs unified-storage layout.
+	///
+	/// bootc's installer is the only supported producer of this layout: it creates
+	/// the composefs repository, imports the image zero-copy into a bootc-owned
+	/// containers-storage on the **target** filesystem, and generates the BLS entry
+	/// selecting `composefs=<D>`.
+	///
+	/// Install runs against a fresh sparse disk image via `to-disk --via-loopback`,
+	/// then the populated root filesystem is copied out for the ISO. The sparse file
+	/// lives in the workspace so its size is bounded and it is cleaned up with the
+	/// rest of the build.
+	fn build_unified(&self, image: &str, workspace: &Path) -> Result<TreeOutput> {
+		let sysroot = workspace.join("bootc-sysroot");
+		if sysroot.exists() {
+			info!(?sysroot, "Clearing existing sysroot before rebuild");
+			Self::remove_sysroot(&sysroot)?;
+		}
+		std::fs::create_dir_all(&sysroot)?;
+
+		// bootc's own tooling expects to find the image in a containers-storage it
+		// can read; the build host already has it in the rootful podman store.
+		let disk = workspace.join("unified.raw");
+		if disk.exists() {
+			std::fs::remove_file(&disk)?;
+		}
+		// A freshly formatted btrfs root needs room for both the composefs objects
+		// and the imported image store, which share extents but are written
+		// separately before dedup.
+		// The staging filesystem must hold the composefs objects and the imported
+		// image store, which are written separately before dedup. Defaults to 24G;
+		// override per-image with `bootc.staging_disk_size` or for a one-off build
+		// with `KATSU_FEATURE_FLAGS=staging-disk-size=32G`.
+		let disk_size = feature_flag_str!("staging-disk-size")
+			.unwrap_or_else(|| self.staging_disk_size.to_string());
+		// `fallocate` accepts SI suffixes like `24G`, which is what `ByteSize`
+		// renders, but a malformed value must fail here rather than at mkfs time.
+		if disk_size.trim().is_empty() {
+			bail!("staging disk size must not be empty");
+		}
+		info!(%disk_size, ?disk, "Creating staging disk image");
+		cmd_lib::run_cmd!(fallocate -l $disk_size $disk;)?;
+
+		info!(?disk, ?image, "Installing bootc unified storage onto a staging disk image");
+		// bootc must not run directly on the build host: `SourceInfo` shells out to
+		// `ostree --repo=/ostree/repo rev-parse --single` to detect SELinux labels,
+		// which fails with "Multiple commit objects found" on an ostree-booted host
+		// that has more than one commit. Running inside the source image with
+		// --pid=host avoids that path entirely, and bootc then detects its own image
+		// without needing `--source-imgref`.
+		//
+		// The disk is passed as a real host path (`/proc/1/root/...`) because bootc
+		// re-execs into the host mount namespace, where a container bind mount would
+		// no longer exist. The path must be absolute: `/proc/1/root` is a prefix, so
+		// a relative path would concatenate into `/proc/1/rootkatsu-work/...`.
+		let abs_disk = disk.canonicalize()?;
+		let host_disk = format!("/proc/1/root{}", abs_disk.display());
+		let status = std::process::Command::new("podman")
+			.args(["run", "--rm", "--privileged", "--pid=host"])
+			.args(["--security-opt", "label=type:unconfined_t"])
+			.args(["-v", "/dev:/dev"])
+			.args(["--memory=8g"])
+			.arg(image)
+			.args(["bootc", "install", "to-disk", "--via-loopback"])
+			.args(["--composefs-backend", "--experimental-unified-storage"])
+			.args(["--filesystem=btrfs", "--generic-image", "--skip-fetch-check"])
+			.arg(format!("--target-imgref={image}"))
+			.arg(&host_disk)
+			.status()?;
+		if !status.success() {
+			bail!("bootc unified-storage install failed ({status})");
+		}
+
+		// Copy the written root filesystem into place. The installer mounts and
+		// unmounts the target itself, so re-attach the image's root partition just
+		// long enough to copy the tree out, then release everything.
+		let loop_dev = cmd_lib::run_fun!(losetup -Pf --show $disk)?;
+		let loop_dev = loop_dev.trim().to_string();
+		if loop_dev.is_empty() {
+			bail!("losetup returned no device for {}", disk.display());
+		}
+		let guard = LoopDevice { path: loop_dev.clone() };
+		let part = format!("{loop_dev}p3");
+
+		// `to-disk` finishes by unmounting what it wrote, but the loop device and its
+		// partitions can need a moment before they are usable again.
+		cmd_lib::run_cmd!(udevadm settle;)?;
+
+		let staging = workspace.join("unified-root");
+		if staging.exists() {
+			std::fs::remove_dir_all(&staging)?;
+		}
+		std::fs::create_dir_all(&staging)?;
+		cmd_lib::run_cmd!(mount -o ro $part $staging;)?;
+		let mounted = StagedRoot { mount: staging.clone() };
+
+		// Verify the layout is what we expect before handing it to the ISO phases,
+		// so a partial install fails here rather than during squash.
+		if !staging.join("composefs").is_dir() {
+			bail!("Unified install produced no composefs in {}", staging.display());
+		}
+
+		// The tree must be a plain directory: the EROFS phase walks it, and the
+		// workspace is removed during teardown. Reflink sharing from the staging
+		// filesystem is not preserved, which is expected and measured separately.
+		cmd_lib::run_cmd!(cp -a --reflink=auto ${staging}/. ${sysroot}/;)?;
+		drop(mounted);
+		drop(guard);
+		let _ = std::fs::remove_dir_all(&staging);
+		if disk.exists() {
+			std::fs::remove_file(&disk)?;
+		}
+
+		info!(?sysroot, "Unified composefs layout ready");
+		Ok(TreeOutput::UnifiedSysroot { sysroot })
+	}
+}
+
+/// Detaches a loop device on drop.
+struct LoopDevice {
+	path: String,
+}
+
+impl Drop for LoopDevice {
+	fn drop(&mut self) {
+		// Bind first: cmd_lib expands `$self.path` as a whole expression.
+		let path = self.path.clone();
+		if let Err(err) = cmd_lib::run_cmd!(losetup -d $path 2>/dev/null;) {
+			debug!(?err, device = %path, "Detaching loop device failed");
+		}
+	}
+}
+
+/// Keeps a staging root unmounted until its tree has been extracted.
+struct StagedRoot {
+	mount: PathBuf,
+}
+
+impl Drop for StagedRoot {
+	fn drop(&mut self) {
+		let mount = self.mount.clone();
+		if let Err(err) = cmd_lib::run_cmd!(umount -R $mount 2>/dev/null;) {
+			debug!(?err, mount = %mount.display(), "Unmounting staged root failed");
+		}
+	}
+}
+
 impl RootBuilder for BootcRootBuilder {
 	fn build(&self, chroot: &Path, manifest: &Manifest) -> Result<TreeOutput> {
 		let image = &self.image;
@@ -528,6 +707,7 @@ impl RootBuilder for BootcRootBuilder {
 				self.build_ostree_sysroot(&d_image, &digest, workspace, manifest)
 			},
 			BootcLayout::Nested => self.build_nested(chroot, image, &d_image, &digest),
+			BootcLayout::Unified => self.build_unified(&d_image, workspace),
 		}
 	}
 }
@@ -619,6 +799,21 @@ mod tests {
 	}
 
 	/// An already-composed tree must be left untouched.
+	#[test]
+	fn staging_disk_size_is_configurable_and_defaults_to_24gib() {
+		use bytesize::ByteSize;
+
+		let default: BootcRootBuilder = serde_yaml::from_str("image: example.com/os:1").unwrap();
+		assert_eq!(default.staging_disk_size, ByteSize::gb(24));
+
+		// A typo would silently keep the default, so assert an explicit value lands.
+		// Note `48G` is decimal gigabytes, matching the default's scale rather than
+		// the binary `ByteSize::gib` form.
+		let configured: BootcRootBuilder =
+			serde_yaml::from_str("image: example.com/os:1\nstaging_disk_size: 48G").unwrap();
+		assert_eq!(configured.staging_disk_size, ByteSize::gb(48));
+	}
+
 	#[test]
 	fn image_origin_uses_container_reference_without_plain_refspec() {
 		let origin =

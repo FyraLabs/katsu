@@ -237,6 +237,18 @@ const DR_OMIT: &str = "";
 const DR_ARGS: &str = "-vv --xz --reproducible";
 
 impl IsoBuilder {
+	/// Switch fragment deduplication to the inode-only mode.
+	///
+	/// `mkfs.erofs` accepts only `inode` and `full`: `inode` dedupes solely when
+	/// inode data is identical, which builds faster but yields a larger image.
+	fn set_fragdedupe_inode(extra_features: &mut [String]) {
+		for feature in extra_features.iter_mut() {
+			if feature == "fragdedupe=full" {
+				*feature = "fragdedupe=inode".to_string();
+			}
+		}
+	}
+
 	fn live_root_image(image_dir: &Path, ostree_sysroot: bool) -> Result<PathBuf> {
 		let squash_image = image_dir.join("squashfs.img");
 		if !ostree_sysroot {
@@ -472,11 +484,22 @@ impl IsoBuilder {
 			}
 		}
 
-		// Opt-in: global full-file deduplication. See the note on
-		// `MkfsErofsOptions::default` for why this is off by default.
-		if feature_flag_bool!("erofs-dedupe") {
-			info!("Enabling EROFS global deduplication (slow, memory hungry)");
-			opts.extra_features.push("dedupe".to_string());
+		// Dedup is on by default (see `MkfsErofsOptions::default`). Allow explicit
+		// opt-out for a faster build, and treat an explicit workers value as
+		// authoritative rather than the memory-capped default.
+		if feature_flag_bool!("no-erofs-dedupe") {
+			info!("Disabling EROFS global deduplication");
+			opts.extra_features.retain(|f| f != "dedupe");
+		} else {
+			info!("EROFS global deduplication enabled");
+		}
+
+		// Fragment dedup defaults to the size-optimized `full` mode. `inode` is
+		// cheaper to build but dedupes only identical inodes, so allow opting into
+		// it when iterating rather than shipping.
+		if feature_flag_bool!("erofs-fast-fragdedupe") {
+			info!("Using inode-only fragment deduplication (faster, larger output)");
+			Self::set_fragdedupe_inode(&mut opts.extra_features);
 		}
 
 		erofs_mkfs(root, image, &opts)?;
@@ -863,6 +886,22 @@ mod test {
 				}
 			}
 		}
+	}
+
+	#[test]
+	fn fragdedupe_full_is_the_default_and_inode_is_opt_in() {
+		use crate::rootimg::erofs::MkfsErofsOptions;
+		// Shipping media favors size, so the aggressive content-based mode is the
+		// default and `erofs-fast-fragdedupe` trades it for build speed.
+		let mut features = MkfsErofsOptions::default().extra_features;
+		assert!(features.iter().any(|f| f == "fragdedupe=full"));
+
+		IsoBuilder::set_fragdedupe_inode(&mut features);
+		assert!(features.iter().any(|f| f == "fragdedupe=inode"));
+		assert!(!features.iter().any(|f| f == "fragdedupe=full"));
+		// The neighbouring features must survive the rewrite.
+		assert!(features.iter().any(|f| f == "dedupe"));
+		assert!(features.iter().any(|f| f == "all-fragments"));
 	}
 
 	#[test]

@@ -33,6 +33,16 @@ pub enum TreeOutput {
 		/// The stateroot (ostree `--os`) the deployment lives under.
 		stateroot: String,
 	},
+	/// A native composefs unified-storage root (bootc composefs layout).
+	///
+	/// The tree is the *physical* filesystem root: `composefs/` holds the object
+	/// store and the read-only image store, `state/` holds deployment state, and
+	/// `boot/` holds the kernel, initramfs and BLS entry. It is not an OSTree
+	/// sysroot: there is no `ostree=` deployment, and root selection uses
+	/// `composefs=<verity digest>` from the generated BLS entry.
+	UnifiedSysroot {
+		sysroot: PathBuf,
+	},
 }
 
 impl TreeOutput {
@@ -53,6 +63,9 @@ impl TreeOutput {
 			Self::Tarball(_) => {
 				bail!("Tarball output has no root filesystem; this code path is unimplemented")
 			},
+			// Unlike OSTree, the composefs root *is* the tree: there is no
+			// deployment subdirectory to descend into.
+			Self::UnifiedSysroot { sysroot } => Ok(sysroot.clone()),
 		}
 	}
 
@@ -65,13 +78,14 @@ impl TreeOutput {
 		match self {
 			Self::Directory(path) => path.clone(),
 			Self::OstreeSysroot { sysroot, .. } => sysroot.clone(),
+			Self::UnifiedSysroot { sysroot } => sysroot.clone(),
 			Self::Tarball(path) => path.clone(),
 		}
 	}
 
 	/// Whether this output is an OSTree sysroot.
 	pub fn is_sysroot(&self) -> bool {
-		matches!(self, Self::OstreeSysroot { .. })
+		matches!(self, Self::OstreeSysroot { .. } | Self::UnifiedSysroot { .. })
 	}
 
 	/// Reconstruct a `TreeOutput` from a workspace left by a previous build, so the
@@ -87,6 +101,22 @@ impl TreeOutput {
 			return Ok(None);
 		}
 
+		// A native composefs root is recognised by its BLS entry plus repository,
+		// and is not an OSTree sysroot: it has no `ostree/deploy` stateroot. Reuse
+		// the bootloader's resolver so BLS parsing lives in exactly one place.
+		if sysroot.join("composefs").is_dir() {
+			if crate::backends::bootloader::ComposefsDeployment::resolve(&sysroot)?.is_some() {
+				info!(?sysroot, "Reusing existing composefs sysroot");
+				return Ok(Some(Self::UnifiedSysroot { sysroot }));
+			}
+			warn!(?sysroot, "Existing composefs tree has no boot entry; treating as incomplete");
+			return Ok(None);
+		}
+
+		Self::reuse_ostree_sysroot(&sysroot)
+	}
+
+	fn reuse_ostree_sysroot(sysroot: &Path) -> Result<Option<Self>> {
 		let deploy_base = sysroot.join("ostree/deploy");
 		let Ok(stateroot_entries) = std::fs::read_dir(&deploy_base) else {
 			debug!(?deploy_base, "Existing sysroot has no stateroot; not reusing");
@@ -112,13 +142,13 @@ impl TreeOutput {
 			}
 
 			// BLS entries only exist after a successful deploy.
-			if !Self::has_boot_entries(&sysroot)? {
+			if !Self::has_boot_entries(sysroot)? {
 				warn!(?sysroot, "Existing sysroot has no boot entries; treating as incomplete");
 				continue;
 			}
 
 			info!(?sysroot, ?stateroot, "Reusing existing OSTree sysroot");
-			return Ok(Some(Self::OstreeSysroot { sysroot, stateroot }));
+			return Ok(Some(Self::OstreeSysroot { sysroot: sysroot.to_path_buf(), stateroot }));
 		}
 
 		Ok(None)
@@ -193,6 +223,16 @@ mod tests {
 		let entries = sysroot.join("boot/loader.1/entries");
 		fs::create_dir_all(&entries).unwrap();
 		fs::write(entries.join("ostree-1.conf"), b"title test\n").unwrap();
+	}
+
+	#[test]
+	fn unified_sysroot_is_its_own_rootfs_and_squash_root() {
+		// A composefs root has no deployment subdirectory, and the whole physical
+		// tree (including the image store) is what ships on the media.
+		let output = TreeOutput::UnifiedSysroot { sysroot: PathBuf::from("/tmp/unified") };
+		assert!(output.is_sysroot());
+		assert_eq!(output.rootfs().unwrap(), PathBuf::from("/tmp/unified"));
+		assert_eq!(output.squash_root(), PathBuf::from("/tmp/unified"));
 	}
 
 	#[test]

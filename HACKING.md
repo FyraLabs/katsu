@@ -50,38 +50,92 @@ podman machine start
 
 This also means you can now hack on Katsu directly from unsupported platforms like macOS and Windows by using Podman Machines as your development environment!
 
-## Iterating on OSTree live boot
+## Image layouts
 
-For `bootc.layout: ostree`, the ISO contains one `LiveOS/rootfs.img` holding the
-physical OSTree sysroot. The ISO initramfs mounts the media and root image
-read-only, then places a tmpfs-backed OverlayFS over the sysroot before running
-the image's `ostree-prepare-root`. The deployment's `/usr` remains read-only;
-`/etc` and stateroot `/var` are writable and all live-session changes are lost
-on shutdown. This path disables composefs in the initramfs only, without
-changing the source image.
+`bootc.layout` selects how the image is placed on the media:
 
-The integration lives in `src/initramfs/`. Katsu appends it as a small `newc`
-CPIO archive after dracut's compressed initramfs; `cpio` must be installed on
-the build host. OSTree live menu entries use `rd.katsu.ostree`,
-`rd.katsu.label=<ISO label>`, and the deployment's BLS `ostree=` argument,
-rather than the generic `root=live:` path.
+| Layout | Boot mechanism | Offline install |
+|---|---|---|
+| `ostree` (default) | `ostree=` + `ostree-prepare-root` | No local source |
+| `nested` (legacy) | image embedded in the chroot's own store | via that store |
+| `unified` | `composefs=` + `bootc-root-setup` | Yes, read-only image store |
 
-After a complete root build, regenerate the initramfs and ISO without rebuilding
-the OSTree repository or root image:
+`ostree` imports the image through `ostree container image pull` into an OSTree
+sysroot the media boots directly, so no podman or skopeo is needed at runtime.
+The import preserves the manifest, image configuration, digest and layer refs
+that `bootc status` reads, and deploys with an `origin.container-image-reference`
+using the unverified policy (no signature verification is claimed).
+
+`unified` builds bootc's native composefs layout. The ISO carries one read-only
+`LiveOS/rootfs.img`; at boot the media is mounted read-only and a tmpfs-backed
+OverlayFS provides writable state before `bootc-root-setup` selects the OS. The
+payload contains a read-only containers-storage as well, so the live system can
+install itself offline:
+
+```sh
+bootc install to-disk \
+  --source-imgref containers-storage:<image> \
+  --target-imgref <registry image> /dev/vdb
+```
+
+**Image requirement:** `additionalimagestores` must include
+`/usr/lib/bootc/storage` in the image's full `/etc/containers/storage.conf`. The
+shipped `/usr/share/containers/storage.conf` points only at the empty
+`/usr/lib/containers/storage`, and `storage.conf.d` drop-ins are not honoured for
+this setting.
+
+The `unified` layout stages a disk image because bootc's composefs installer
+requires a real backing device with an ESP. Set its size with
+`bootc.staging_disk_size` (default `24G`) when an image is larger than that; the
+file is sparse, but it must fit the composefs objects and the imported image
+store, which are written separately before dedup.
+
+### Building
 
 ```sh
 cargo build
+sudo env KATSU_LOG=info target/debug/katsu -o iso tests/ng/bootc/katsu-iso-bootc.yaml
+```
+
+After a complete root build, iterate on later phases without rebuilding the
+repository or root image:
+
+```sh
 sudo env KATSU_LOG=info target/debug/katsu -o iso \
   --skip-phases=root,rootimg tests/ng/bootc/katsu-iso-bootc.yaml
 ```
 
-The existing payload is renamed from `squashfs.img` to `rootfs.img` if necessary,
-without copying it. Do not skip `dracut` when changing the initramfs integration.
-For serial debugging, use `console=ttyS0,115200 rd.debug rd.shell panic=0` and
-capture output from `katsu-ostree-live.service`, `sysroot.mount`, and
-`ostree-prepare-root.service`. Tests cover staging, CPIO extraction, shell syntax,
-and bootloader command lines; a privileged ISO build and VM boot are still
-required to validate the full mount and switch-root sequence.
+The existing payload is renamed from `squashfs.img` to `rootfs.img` if needed,
+without copying it. Do not skip `dracut` when changing the initramfs integration;
+`cpio` must be installed on the build host.
+
+Boot the result under UEFI/OVMF with `-serial mon:stdio -no-reboot`. For serial
+debugging use `console=ttyS0,115200 rd.debug rd.shell panic=0`; do not use
+`rd.emergency=reboot`, which reboots instead of giving a shell.
+
+### EROFS sizing
+
+Shipped media favor size over build time:
+
+```text
+-E all-fragments,fragdedupe=full,dedupe   --workers=2
+```
+
+`fragdedupe` accepts only `inode` or `full` (`full` dedupes fragment data by
+content; `inode` only when inode data is identical, and is faster). `dedupe`
+dedupes compressed data globally. The worker count is capped because dedupe
+memory scales with it. Override for faster local iteration:
+
+```sh
+KATSU_FEATURE_FLAGS=erofs-fast-fragdedupe   # inode mode: faster, larger image
+KATSU_FEATURE_FLAGS=no-erofs-dedupe         # disable global dedupe
+KATSU_FEATURE_FLAGS=erofs-workers=8         # override the worker cap
+```
+
+Unified storage shares data between the composefs object store and the image
+store via reflinks, which EROFS cannot see: content dedup recovers what is
+byte-identical, but not the extent sharing itself. Measured, the unified tree
+still compresses to less than the OSTree layout's ISO.
 
 ## Contributing
 

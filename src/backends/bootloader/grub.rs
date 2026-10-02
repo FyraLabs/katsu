@@ -1,4 +1,4 @@
-use super::{Bootloader, GRUB_PREPEND_COMMENT, OstreeDeployment};
+use super::{BootPayload, Bootloader, GRUB_PREPEND_COMMENT};
 use crate::{
 	builder::{BOOTIMGS, ISO_TREE},
 	config::Manifest,
@@ -20,8 +20,7 @@ struct GrubBootParams<'a> {
 
 impl Bootloader {
 	pub(super) fn cp_grub(
-		&self, manifest: &Manifest, chroot: &Path, workspace: &Path,
-		ostree: Option<&OstreeDeployment>,
+		&self, manifest: &Manifest, chroot: &Path, workspace: &Path, ostree: &BootPayload,
 	) -> Result<()> {
 		let iso_tree = workspace.join(ISO_TREE);
 		let boot_imgs_dir = workspace.join(BOOTIMGS);
@@ -47,7 +46,7 @@ impl Bootloader {
 		let distro = manifest.distro.as_deref().unwrap_or("Linux");
 
 		let (vmlinuz, initramfs) =
-			self.copy_kernel_and_initramfs(chroot, &boot_imgs_dir, &iso_tree)?;
+			self.copy_kernel_and_initramfs(chroot, &boot_imgs_dir, &iso_tree, ostree)?;
 
 		self.generate_grub_config(
 			&iso_tree,
@@ -74,9 +73,24 @@ impl Bootloader {
 	}
 
 	fn copy_kernel_and_initramfs(
-		&self, chroot: &Path, boot_imgs_dir: &Path, iso_tree: &Path,
+		&self, chroot: &Path, boot_imgs_dir: &Path, iso_tree: &Path, payload: &BootPayload,
 	) -> Result<(String, String)> {
-		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, boot_imgs_dir, true)?;
+		// A composefs layout keeps its kernel and initramfs under
+		// `boot/bootc_composefs-<D>/` rather than `/boot` or `/usr/lib/modules`,
+		// and the BLS entry is the authoritative source for those paths.
+		let vmlinuz = match payload.vmlinuz.as_deref() {
+			Some(path) => {
+				debug!(?path, "Staging composefs kernel from the BLS entry");
+				let dest = boot_imgs_dir.join("boot").join("vmlinuz");
+				fs::create_dir_all(dest.parent().unwrap())?;
+				fs::copy(path, &dest)?;
+				"vmlinuz".to_string()
+			},
+			None => {
+				let (vmlinuz, _) = self.cp_vmlinuz_initramfs(chroot, boot_imgs_dir, true)?;
+				vmlinuz
+			},
+		};
 
 		let iso_boot = iso_tree.join("boot");
 		let chroot_boot = if chroot.join("usr/lib/ostree-boot").exists() {
@@ -131,7 +145,21 @@ impl Bootloader {
 		if iso_boot.join("initramfs.img").exists() {
 			debug!("Keeping the initramfs produced by the dracut phase");
 		} else {
-			fs::copy(boot_imgs_dir.join("boot").join(&initramfs), iso_boot.join("initramfs.img"))?;
+			// Prefer the BLS-declared initramfs for a composefs layout; otherwise use
+			// whatever the standard discovery found.
+			let staged = match payload.initramfs.as_deref() {
+				Some(path) => {
+					debug!(?path, "Staging composefs initramfs from the BLS entry");
+					let dest = boot_imgs_dir.join("boot").join("initramfs.img");
+					fs::copy(path, &dest)?;
+					dest
+				},
+				None => {
+					let (_, initramfs) = self.cp_vmlinuz_initramfs(chroot, boot_imgs_dir, true)?;
+					boot_imgs_dir.join("boot").join(initramfs)
+				},
+			};
+			fs::copy(staged, iso_boot.join("initramfs.img"))?;
 		}
 
 		Ok((vmlinuz, "initramfs.img".to_string()))
@@ -256,13 +284,13 @@ impl Bootloader {
 	}
 
 	fn generate_grub_config(
-		&self, iso_tree: &Path, boot: &GrubBootParams<'_>, ostree: Option<&OstreeDeployment>,
+		&self, iso_tree: &Path, boot: &GrubBootParams<'_>, payload: &BootPayload,
 	) -> Result<()> {
-		// When booting an OSTree deployment the initramfs needs to be told where
-		// the deployment lives; without this it cannot find the root filesystem.
-		let ostree_karg = ostree.map(|o| o.karg.clone()).unwrap_or_default();
+		// When booting a deployment the initramfs needs to be told where the root
+		// lives; without this it cannot find the root filesystem.
+		let ostree_karg = payload.karg.clone();
 		if !ostree_karg.is_empty() {
-			info!(karg = %ostree_karg, "Booting an OSTree deployment");
+			info!(karg = %ostree_karg, "Booting a deployment");
 		}
 
 		crate::tpl!(
@@ -559,7 +587,12 @@ mod tests {
 		fs::create_dir_all(iso_tree.join("boot")).unwrap();
 		fs::write(iso_tree.join("boot/initramfs.img"), b"live initramfs").unwrap();
 		Bootloader::Grub
-			.copy_kernel_and_initramfs(&chroot, &tmp.join("boot_imgs"), &iso_tree)
+			.copy_kernel_and_initramfs(
+				&chroot,
+				&tmp.join("boot_imgs"),
+				&iso_tree,
+				&BootPayload::default(),
+			)
 			.unwrap();
 
 		assert_eq!(fs::read(iso_tree.join("boot/initramfs.img")).unwrap(), b"live initramfs");
