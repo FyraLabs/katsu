@@ -96,70 +96,107 @@ impl Bootloader {
 			bail!("Missing grub directory in {}", chroot_boot.display());
 		}
 
-		let efi_src = chroot_boot.join("efi");
 		let efi_dest = iso_boot.join("efi");
 		let _ = fs::remove_dir_all(&efi_dest);
-		info_span!("Copying EFI boot files").in_scope(|| {
-			info!(?efi_src, ?efi_dest, "Copying EFI boot files");
-			// funny legacy boot path in case no one has cleaned out /boot/efi
-			if chroot.join("boot/efi").exists() {
-				Self::copy_dir(&efi_src, &efi_dest)?;
-			} else if ostree_boot {
-				warn!("bootupd detected, attempting to copying files from /usr/lib/efi");
-
-				let libefi = chroot.join("usr/lib/efi");
-				if libefi.exists() {
-					for entry in fs::read_dir(&libefi)? {
-						// /usr/lib/efi will contain <package_name>/<version> directories
-						// which then contains the EFI files relative to /boot
-						// so something like `shim/1.0/EFI/BOOT/fbx64.efi`
-						// we would copy into the ISO tree's /boot/efi as /boot/efi/EFI/BOOT/fbx64.efi
-						let entry = entry?;
-						let entry_path = entry.path();
-						info!(?entry_path, "Processing entry in /usr/lib/efi");
-						if entry_path.is_dir() {
-							// Read version directory
-							for version_entry in fs::read_dir(&entry_path)? {
-								info!(
-									?version_entry,
-									"Processing version directory in /usr/lib/efi"
-								);
-								let version_entry = version_entry?;
-								let version_path = version_entry.path();
-
-								if version_path.is_dir() {
-									let efi_subsrc = version_path.join("EFI");
-									let efi_dest_subdir = efi_dest.join("EFI");
-									if efi_subsrc.exists() {
-										debug!(
-											?efi_subsrc,
-											?efi_dest_subdir,
-											"Copying EFI subdirectory from versioned path"
-										);
-										Self::copy_dir(&efi_subsrc, &efi_dest_subdir)?;
-									} else {
-										warn!(
-											?efi_subsrc,
-											"No EFI directory found in subdirectory of /usr/lib/efi"
-										);
-									}
-								}
-							}
-						}
-					}
-				} else {
-					bail!("No /usr/lib/efi directory found");
-				}
-			} else {
-				warn!("No EFI directory found in {}", chroot_boot.display());
-			}
-			Ok(())
+		info_span!("Copying EFI boot files").in_scope(|| -> Result<()> {
+			info!(?efi_dest, "Copying EFI boot files");
+			Self::copy_efi_payload(chroot, &chroot_boot, &efi_dest, ostree_boot)
 		})?;
 
 		fs::copy(boot_imgs_dir.join("boot").join(&vmlinuz), iso_boot.join(&vmlinuz))?;
 		fs::copy(boot_imgs_dir.join("boot").join(&initramfs), iso_boot.join("initramfs.img"))?;
 
 		Ok((vmlinuz, "initramfs.img".to_string()))
+	}
+
+	/// Locates and copies the EFI payload into the ISO tree's `/boot/efi`.
+	fn copy_efi_payload(
+		chroot: &Path, chroot_boot: &Path, efi_dest: &Path, ostree_boot: bool,
+	) -> Result<()> {
+		// bootupd path
+		let usr_lib_efi = chroot.join("usr/lib/efi");
+		if usr_lib_efi.join("EFI").exists() || Self::usr_efi_has_components(&usr_lib_efi) {
+			info!(?usr_lib_efi, "Copying EFI boot files from usr/lib/efi");
+			return Self::copy_usr_lib_efi(&usr_lib_efi, &efi_dest.join("EFI"));
+		}
+
+		// Legacy `<boot>/efi` tree, when it still has content.
+		let efi_src = chroot_boot.join("efi");
+		let efi_src_efi = efi_src.join("EFI");
+		if Self::dir_has_entries(&efi_src_efi)? {
+			info!(?efi_src, "Copying EFI boot files from boot tree");
+			return Self::copy_dir(&efi_src, efi_dest);
+		}
+
+		// Some images keep a populated /boot/efi (vfat ESP mounted during build).
+		let boot_efi = chroot.join("boot/efi");
+		if Self::dir_has_entries(&boot_efi.join("EFI"))? {
+			info!(?boot_efi, "Copying EFI boot files from /boot/efi");
+			return Self::copy_dir(&boot_efi, efi_dest);
+		}
+
+		if ostree_boot {
+			bail!(
+				"No EFI payload found: {} has no EFI directory and {} is empty",
+				usr_lib_efi.display(),
+				efi_src.display()
+			);
+		}
+		warn!("No EFI directory found in {}", chroot_boot.display());
+		Ok(())
+	}
+
+	/// Copies every `EFI` directory found at `usr/lib/efi/<name>/<version>/EFI`,
+	/// mirroring bootupd's `get_efi_component_from_usr()` walk.
+	fn copy_usr_lib_efi(usr_lib_efi: &Path, efi_dest: &Path) -> Result<()> {
+		fs::create_dir_all(efi_dest)?;
+
+		for entry in fs::read_dir(usr_lib_efi)? {
+			let entry = entry?;
+			let entry_path = entry.path();
+			if !entry_path.is_dir() {
+				continue;
+			}
+			for version_entry in fs::read_dir(&entry_path)? {
+				let version_path = version_entry?.path();
+				// `usr/lib/efi/<name>/<version>/EFI`; ignore anything else.
+				let efi_subsrc = version_path.join("EFI");
+				if !efi_subsrc.exists() {
+					continue;
+				}
+				debug!(?efi_subsrc, ?efi_dest, "Copying EFI subdirectory from usr/lib/efi");
+				Self::copy_dir(&efi_subsrc, efi_dest)?;
+			}
+		}
+
+		if !Self::dir_has_entries(efi_dest)? {
+			bail!("No EFI components found under {}", usr_lib_efi.display());
+		}
+		Ok(())
+	}
+
+	/// True when any `usr/lib/efi/<name>/<version>/EFI` directory exists.
+	fn usr_efi_has_components(usr_lib_efi: &Path) -> bool {
+		let Ok(entries) = fs::read_dir(usr_lib_efi) else {
+			return false;
+		};
+		entries.flatten().any(|entry| {
+			let path = entry.path();
+			if !path.is_dir() {
+				return false;
+			}
+			fs::read_dir(&path)
+				.map(|versions| versions.flatten().any(|v| v.path().join("EFI").exists()))
+				.unwrap_or(false)
+		})
+	}
+
+	/// True when the directory exists and contains at least one entry.
+	fn dir_has_entries(dir: &Path) -> Result<bool> {
+		if !dir.is_dir() {
+			return Ok(false);
+		}
+		Ok(fs::read_dir(dir)?.next().is_some())
 	}
 
 	fn copy_dir(src: &Path, dest: &Path) -> Result<()> {
@@ -213,16 +250,45 @@ impl Bootloader {
 		let arch_short_upper = arch_short.to_uppercase();
 		let arch_32 = self.get_arch_32bit(manifest).to_uppercase();
 
-		fs::create_dir_all(iso_tree.join("EFI/BOOT/fonts"))?;
+		let efi_root = iso_tree.join("boot/efi/EFI");
+		let boot_out = iso_tree.join("EFI/BOOT");
+		fs::create_dir_all(boot_out.join("fonts"))?;
+
+		let mut copied_any = false;
+		for vendor in ["fedora", "BOOT", "centos", "redhat"] {
+			let src = efi_root.join(vendor);
+			if Self::dir_has_entries(&src)? {
+				debug!(?src, ?boot_out, "Merging EFI vendor directory into EFI/BOOT");
+				Self::copy_dir(&src, &boot_out)?;
+				copied_any = true;
+			}
+		}
+		if !copied_any {
+			bail!(
+				"No EFI vendor directory (fedora/BOOT) found under {}; the image's EFI payload is missing",
+				efi_root.display()
+			);
+		}
 
 		cmd_lib::run_cmd!(
-			cp -av $iso_tree/boot/efi/EFI/fedora/. $iso_tree/EFI/BOOT;
-			cp -av $iso_tree/boot/grub/grub.cfg $iso_tree/EFI/BOOT/BOOT.conf 2>&1;
-			cp -av $iso_tree/boot/grub/grub.cfg $iso_tree/EFI/BOOT/grub.cfg 2>&1;
-			cp -av $iso_tree/boot/grub/fonts/unicode.pf2 $iso_tree/EFI/BOOT/fonts;
-			cp -av $iso_tree/EFI/BOOT/shim${arch_short}.efi $iso_tree/EFI/BOOT/BOOT${arch_short_upper}.efi;
-			cp -av $iso_tree/EFI/BOOT/shim.efi $iso_tree/EFI/BOOT/BOOT${arch_32}.efi;
+			cp -av $iso_tree/boot/grub/grub.cfg $boot_out/BOOT.conf 2>&1;
+			cp -av $iso_tree/boot/grub/grub.cfg $boot_out/grub.cfg 2>&1;
+			cp -av $iso_tree/boot/grub/fonts/unicode.pf2 $boot_out/fonts;
 		)?;
+
+		// try and get shims
+		for (shim, alias) in [
+			(format!("shim{arch_short}.efi"), format!("BOOT{arch_short_upper}.EFI")),
+			("shim.efi".to_string(), format!("BOOT{arch_32}.EFI")),
+		] {
+			let src = boot_out.join(&shim);
+			if src.exists() {
+				fs::copy(&src, boot_out.join(&alias))?;
+				debug!(?src, alias, "Created EFI boot alias");
+			} else {
+				warn!(?src, "Shim binary not found, skipping EFI alias");
+			}
+		}
 
 		Ok(())
 	}
@@ -336,5 +402,80 @@ impl Bootloader {
 		drop(handle);
 
 		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use std::fs;
+
+	/// Reproduces the layout shipped by Fedora 44 bootc/ostree images built with
+	/// bootupd's `usr/lib/efi` component layout: `ostree-boot/efi` is an empty
+	/// shell while the real payload lives under `usr/lib/efi/<name>/<version>/EFI`.
+	fn make_usr_lib_efi(root: &Path) {
+		let write = |rel: &str| {
+			let p = root.join(rel);
+			fs::create_dir_all(p.parent().unwrap()).unwrap();
+			fs::write(p, b"x").unwrap();
+		};
+
+		// shim ships both the fallback BOOT dir and the vendor dir.
+		write("usr/lib/efi/shim/15.8-3/EFI/BOOT/BOOTX64.EFI");
+		write("usr/lib/efi/shim/15.8-3/EFI/BOOT/fbx64.efi");
+		write("usr/lib/efi/shim/15.8-3/EFI/fedora/shim.efi");
+		write("usr/lib/efi/shim/15.8-3/EFI/fedora/shimx64.efi");
+		// grub2 ships the vendor dir only, with a colon in the version.
+		write("usr/lib/efi/grub2/1:2.12-43.fc43/EFI/fedora/grubx64.efi");
+	}
+
+	fn empty_ostree_boot_efi(root: &Path) {
+		fs::create_dir_all(root.join("usr/lib/ostree-boot/efi/EFI")).unwrap();
+	}
+
+	#[test]
+	fn collects_payload_from_usr_lib_efi_when_ostree_boot_is_empty() {
+		let tmp = std::env::temp_dir().join("katsu-grub-efi-f44");
+		let _ = fs::remove_dir_all(&tmp);
+		make_usr_lib_efi(&tmp);
+		empty_ostree_boot_efi(&tmp);
+
+		let efi_dest = tmp.join("iso/boot/efi");
+		let chroot_boot = tmp.join("usr/lib/ostree-boot");
+		Bootloader::copy_efi_payload(&tmp, &chroot_boot, &efi_dest, true).unwrap();
+
+		assert!(efi_dest.join("EFI/fedora/shimx64.efi").is_file());
+		assert!(efi_dest.join("EFI/fedora/grubx64.efi").is_file());
+		assert!(efi_dest.join("EFI/BOOT/BOOTX64.EFI").is_file());
+	}
+
+	#[test]
+	fn prefers_populated_boot_efi_over_empty_usr_lib_efi() {
+		let tmp = std::env::temp_dir().join("katsu-grub-efi-legacy");
+		let _ = fs::remove_dir_all(&tmp);
+		fs::create_dir_all(&tmp).unwrap();
+
+		let vendor = tmp.join("usr/lib/ostree-boot/efi/EFI/fedora");
+		fs::create_dir_all(&vendor).unwrap();
+		fs::write(vendor.join("shimx64.efi"), b"x").unwrap();
+
+		let efi_dest = tmp.join("iso/boot/efi");
+		let chroot_boot = tmp.join("usr/lib/ostree-boot");
+		Bootloader::copy_efi_payload(&tmp, &chroot_boot, &efi_dest, true).unwrap();
+
+		assert!(efi_dest.join("EFI/fedora/shimx64.efi").is_file());
+	}
+
+	#[test]
+	fn errors_when_no_efi_payload_exists_on_ostree_boot_image() {
+		let tmp = std::env::temp_dir().join("katsu-grub-efi-missing");
+		let _ = fs::remove_dir_all(&tmp);
+		empty_ostree_boot_efi(&tmp);
+
+		let efi_dest = tmp.join("iso/boot/efi");
+		let chroot_boot = tmp.join("usr/lib/ostree-boot");
+		let res = Bootloader::copy_efi_payload(&tmp, &chroot_boot, &efi_dest, true);
+
+		assert!(res.is_err(), "expected a hard error instead of an empty EFI tree");
 	}
 }
