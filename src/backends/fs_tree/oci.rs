@@ -193,16 +193,9 @@ mount_program = "/usr/bin/fuse-overlayfs"
 
 	/// Materialize the image's rootfs as a writable directory tree.
 	///
-	/// We mount the image's merged view directly rather than streaming it through
-	/// `podman export | tar -x`. Export serializes the whole filesystem to a tar
-	/// stream (several GB for a bootc image) purely to deserialize it straight
-	/// back onto disk, whereas the mount gives us the tree as-is.
-	///
-	/// The returned guard must be kept alive for as long as the tree is needed,
-	/// and dropped to unmount. The mount is writable, which we require: the tree
-	/// is mutated in place to prepare `/etc` for `ostree commit`. Because these
-	/// writes dirty the container's overlay upper layer, the container is
-	/// ephemeral and never reused.
+	/// Mounts the merged view directly; exporting through a tar stream would copy
+	/// the whole filesystem (several GB) only to unpack it again. The mount is
+	/// writable because the tree is mutated in place to prepare `/etc` for commit.
 	fn mount_rootfs(image: &str) -> Result<MountedRootfs> {
 		let container = cmd_lib::run_fun!(podman create $image /bin/true)?;
 		let container = container.trim().to_string();
@@ -230,15 +223,10 @@ mount_program = "/usr/bin/fuse-overlayfs"
 
 	/// Prepare a rootfs for `ostree commit`.
 	///
-	/// OSTree deployments want the vendor configuration split from machine-local
-	/// configuration: `/usr/etc` is the immutable vendor default and `/etc` is the
-	/// mutable, 3-way-merged location generated at deploy time.
-	///
-	/// bootc/OCI images ship everything directly in `/etc` and have no `/usr/etc`
-	/// at all, so we relocate `/etc` into `/usr/etc` and leave an *empty* `/etc`
-	/// placeholder. A tree containing both a populated `/etc` and `/usr/etc` is
-	/// rejected by `ostree admin deploy` with
-	/// "Tree contains both /etc and /usr/etc", so the placeholder must stay empty.
+	/// OSTree wants vendor config in `/usr/etc` and the machine-local merge point
+	/// in `/etc`; bootc images ship everything in `/etc` and have no `/usr/etc`,
+	/// so relocate and leave an empty placeholder. Both populated is rejected by
+	/// `ostree admin deploy`.
 	fn prepare_etc_for_commit(rootfs: &Path) -> Result<()> {
 		let etc = rootfs.join("etc");
 		let usr_etc = rootfs.join("usr/etc");

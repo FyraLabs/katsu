@@ -273,7 +273,16 @@ impl IsoBuilder {
 		}
 		let mut cmd = std::process::Command::new("dracut");
 
-		let dracut_outside_chroot = feature_flag_bool!("dracut-outside-chroot");
+		// bootc/ostree deployments have no /boot of their own: ostree keeps the
+		// kernel at the sysroot level. Chrooting into the deployment and letting
+		// dracut write to /boot therefore produces nothing, so generate outside the
+		// chroot and write straight to the ISO tree instead.
+		let ostree_layout = root.join("usr/lib/ostree-boot").exists()
+			|| root.join("usr/lib/ostree/prepare-root.conf").exists();
+		let dracut_outside_chroot = feature_flag_bool!("dracut-outside-chroot") || ostree_layout;
+		if ostree_layout && !feature_flag_bool!("dracut-inside-chroot") {
+			info!("OSTree deployment detected, generating initramfs outside the chroot");
+		}
 
 		if dracut_outside_chroot {
 			cmd.arg("-r");
@@ -588,8 +597,20 @@ impl ImageBuilder for IsoBuilder {
 		debug!("Workspace: {workspace:#?}");
 		fs::create_dir_all(&workspace)?;
 
-		let tree_output = phase!("root": self.root_builder.build(chroot, manifest))
-			.ok_or_else(|| color_eyre::eyre::eyre!("Cannot skip 'root' phase - it is required"))?;
+		// A skipped `root` phase yields `None` rather than a result. Instead of
+		// failing outright, fall back to a tree left by a previous build so later
+		// phases (bootloader config, ISO assembly) can be iterated on cheaply.
+		let tree_output = match phase!("root": self.root_builder.build(chroot, manifest)) {
+			Some(output) => output,
+			None => crate::backends::fs_tree::TreeOutput::from_existing(&workspace)?.ok_or_else(
+				|| {
+					color_eyre::eyre::eyre!(
+						"'root' phase was skipped but no complete tree exists in {} to reuse",
+						workspace.display()
+					)
+				},
+			)?,
+		};
 
 		let tree_root = match &tree_output {
 			crate::backends::fs_tree::TreeOutput::Tarball(_) => {

@@ -125,7 +125,14 @@ impl Bootloader {
 		})?;
 
 		fs::copy(boot_imgs_dir.join("boot").join(&vmlinuz), iso_boot.join(&vmlinuz))?;
-		fs::copy(boot_imgs_dir.join("boot").join(&initramfs), iso_boot.join("initramfs.img"))?;
+
+		// The dracut phase writes the live-capable initramfs straight into the ISO
+		// tree, so only fall back to the staged copy when nothing is there yet.
+		if iso_boot.join("initramfs.img").exists() {
+			debug!("Keeping the initramfs produced by the dracut phase");
+		} else {
+			fs::copy(boot_imgs_dir.join("boot").join(&initramfs), iso_boot.join("initramfs.img"))?;
+		}
 
 		Ok((vmlinuz, "initramfs.img".to_string()))
 	}
@@ -273,52 +280,101 @@ impl Bootloader {
 		Ok(())
 	}
 
+	/// Lay out `<iso_tree>/EFI`, mirroring Fedora's ESP layout.
+	///
+	/// `EFI/BOOT` (shim's removable-media loader + fallback.efi) and `EFI/<vendor>`
+	/// (CSV, shim, second stage) are kept separate: the CSV names `shimx64.efi`
+	/// relative to itself, so flattening the two into one directory makes that
+	/// resolve back to the running shim and the firmware resets in a loop.
 	fn setup_efi_boot_files(&self, manifest: &Manifest, iso_tree: &Path) -> Result<()> {
-		let arch_short = self.get_arch_short(manifest);
-		let arch_short_upper = arch_short.to_uppercase();
-		let arch_32 = self.get_arch_32bit(manifest).to_uppercase();
+		let arch_short_upper = self.get_arch_short(manifest).to_uppercase();
 
 		let efi_root = iso_tree.join("boot/efi/EFI");
 		let boot_out = iso_tree.join("EFI/BOOT");
-		fs::create_dir_all(boot_out.join("fonts"))?;
+		fs::create_dir_all(&boot_out)?;
 
-		let mut copied_any = false;
-		for vendor in ["fedora", "BOOT", "centos", "redhat"] {
-			let src = efi_root.join(vendor);
-			if Self::dir_has_entries(&src)? {
-				debug!(?src, ?boot_out, "Merging EFI vendor directory into EFI/BOOT");
-				Self::copy_dir(&src, &boot_out)?;
-				copied_any = true;
-			}
-		}
-		if !copied_any {
+		let boot_src = efi_root.join("BOOT");
+		if !Self::dir_has_entries(&boot_src)? {
 			bail!(
-				"No EFI vendor directory (fedora/BOOT) found under {}; the image's EFI payload is missing",
+				"No EFI boot payload found at {}; the image is missing shim's removable-media loader",
+				boot_src.display()
+			);
+		}
+		debug!(?boot_src, ?boot_out, "Copying shim removable-media payload");
+		Self::copy_dir(&boot_src, &boot_out)?;
+
+		let mut vendor_copied = false;
+		for vendor in ["fedora", "centos", "redhat"] {
+			let src = efi_root.join(vendor);
+			if !Self::dir_has_entries(&src)? {
+				continue;
+			}
+			let dest = iso_tree.join("EFI").join(vendor);
+			debug!(?src, ?dest, "Copying EFI vendor directory");
+			Self::copy_dir(&src, &dest)?;
+			vendor_copied = true;
+		}
+		if !vendor_copied {
+			bail!(
+				"No EFI vendor directory (fedora/centos/redhat) found under {}; \
+				 grub's second stage would be missing",
 				efi_root.display()
 			);
 		}
 
-		cmd_lib::run_cmd!(
-			cp -av $iso_tree/boot/grub/grub.cfg $boot_out/BOOT.conf 2>&1;
-			cp -av $iso_tree/boot/grub/grub.cfg $boot_out/grub.cfg 2>&1;
-			cp -av $iso_tree/boot/grub/fonts/unicode.pf2 $boot_out/fonts;
-		)?;
+		// shim's DEFAULT_LOADER, which it resolves next to itself.
+		let expected_second_stage = match arch_short_upper.as_str() {
+			"X64" => "grubx64.efi",
+			"AA64" => "grubaa64.efi",
+			other => bail!("Unsupported EFI architecture {other}"),
+		};
+		if !Self::find_file_recursive(&iso_tree.join("EFI"), expected_second_stage)? {
+			bail!(
+				"No {expected_second_stage} in the EFI tree; shim has nothing to chainload, \
+				 which the firmware will report as a failed boot"
+			);
+		}
 
-		// try and get shims
-		for (shim, alias) in [
-			(format!("shim{arch_short}.efi"), format!("BOOT{arch_short_upper}.EFI")),
-			("shim.efi".to_string(), format!("BOOT{arch_32}.EFI")),
-		] {
-			let src = boot_out.join(&shim);
-			if src.exists() {
-				fs::copy(&src, boot_out.join(&alias))?;
-				debug!(?src, alias, "Created EFI boot alias");
+		// Conventional for removable media; shim's package already provides one.
+		let boot_alias = boot_out.join(format!("BOOT{arch_short_upper}.EFI"));
+		if !boot_alias.exists() {
+			let shim = efi_root.join(format!("fedora/shim{}.efi", self.get_arch_short(manifest)));
+			if shim.is_file() {
+				debug!(?shim, ?boot_alias, "Aliasing shim as the removable-media loader");
+				fs::copy(&shim, &boot_alias)?;
 			} else {
-				warn!(?src, "Shim binary not found, skipping EFI alias");
+				bail!("No removable-media loader (BOOTX64.EFI) and no shim at {}", shim.display());
 			}
 		}
 
+		// GRUB's own config and fonts, next to the second stage.
+		fs::create_dir_all(boot_out.join("fonts"))?;
+		cmd_lib::run_cmd!(
+			cp -av $iso_tree/boot/grub/grub.cfg $boot_out/BOOT.conf 2>&1;
+			cp -av $iso_tree/boot/grub/grub.cfg $boot_out/grub.cfg 2>&1;
+			cp -av $iso_tree/boot/grub/fonts/unicode.pf2 $boot_out/fonts 2>&1;
+		)?;
+
 		Ok(())
+	}
+
+	/// Whether any file with this name exists anywhere under `dir`.
+	fn find_file_recursive(dir: &Path, name: &str) -> Result<bool> {
+		if !dir.is_dir() {
+			return Ok(false);
+		}
+		for entry in fs::read_dir(dir)? {
+			let entry = entry?;
+			let path = entry.path();
+			if path.is_dir() {
+				if Self::find_file_recursive(&path, name)? {
+					return Ok(true);
+				}
+			} else if path.file_name().is_some_and(|n| n == name) {
+				return Ok(true);
+			}
+		}
+		Ok(false)
 	}
 
 	fn get_arch<'a>(&self, manifest: &'a Manifest) -> &'a str {
@@ -333,14 +389,6 @@ impl Bootloader {
 		}
 	}
 
-	fn get_arch_32bit(&self, manifest: &Manifest) -> &'static str {
-		match self.get_arch(manifest) {
-			"x86_64" => "ia32",
-			"aarch64" => "arm",
-			_ => unimplemented!(),
-		}
-	}
-
 	fn mkefiboot(&self, workspace: &Path, _: &Manifest) -> Result<()> {
 		let tree = workspace.join(ISO_TREE);
 
@@ -349,12 +397,13 @@ impl Bootloader {
 
 		let (ldp, hdl) = loopdev_with_file(sparse_path)?;
 
+		// The whole EFI tree, since the CSV's chainload target lives in the vendor dir.
 		cmd_lib::run_cmd!(
 			mkfs.msdos $ldp -v -n EFI 2>&1;
 			mkdir -p /tmp/katsu.efiboot;
 			mount $ldp /tmp/katsu.efiboot;
-			mkdir -p /tmp/katsu.efiboot/EFI/BOOT;
-			cp -avr $tree/EFI/BOOT/. /tmp/katsu.efiboot/EFI/BOOT 2>&1;
+			mkdir -p /tmp/katsu.efiboot/EFI;
+			cp -avr $tree/EFI/. /tmp/katsu.efiboot/EFI/ 2>&1;
 			umount /tmp/katsu.efiboot;
 		)?;
 

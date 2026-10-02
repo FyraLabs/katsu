@@ -310,15 +310,26 @@ impl Bootloader {
 		fs::copy(&vmlinuz_src, &vmlinuz_dest)?;
 
 		if copy_initramfs {
-			let initramfs_src = self.find_initramfs(chroot)?;
 			let initramfs_dest = dest.join("boot").join("initramfs.img");
-			trace!(?initramfs_src, ?initramfs_dest, "Copying initramfs to destination");
 
-			if !initramfs_src.exists() {
-				bail!("Source initramfs not found at {}", initramfs_src.display());
+			// The `dracut` phase writes a live-capable initramfs directly into the
+			// ISO tree. The image's own initramfs is built for a disk install and
+			// cannot mount `root=live:`, so never let it clobber the generated one.
+			if initramfs_dest.exists() {
+				info!(
+					?initramfs_dest,
+					"Initramfs already present (from the dracut phase), not overwriting"
+				);
+			} else {
+				let initramfs_src = self.find_initramfs(chroot)?;
+				trace!(?initramfs_src, ?initramfs_dest, "Copying initramfs to destination");
+
+				if !initramfs_src.exists() {
+					bail!("Source initramfs not found at {}", initramfs_src.display());
+				}
+
+				fs::copy(&initramfs_src, &initramfs_dest)?;
 			}
-
-			fs::copy(&initramfs_src, &initramfs_dest)?;
 		}
 
 		Ok(("vmlinuz".to_string(), "initramfs.img".to_string()))
@@ -613,6 +624,28 @@ mod tests {
 		.unwrap();
 
 		let deployment = OstreeDeployment::resolve(&sysroot).unwrap().expect("should resolve");
+
+		assert_eq!(deployment.karg, format!("ostree=/ostree/boot.1/um/{BOOTCSUM}/0"));
+	}
+
+	/// Simulates the real call path end to end: `TreeOutput::rootfs()` returns the
+	/// deployment root, which is then handed to `copy_liveos` and resolved.
+	///
+	/// The deployment directory sits under a populated `deploy/` containing a
+	/// non-deployment sibling, mirroring what a build actually leaves behind.
+	#[test]
+	fn resolve_works_on_the_rootfs_returned_by_tree_output() {
+		let sysroot = make_sysroot("katsu-ostree-karg-rootfs-path");
+		// A stray directory in the same parent, as a stale build would leave.
+		fs::create_dir_all(sysroot.join("ostree/deploy/um/deploy/iso-tree")).unwrap();
+
+		let output = crate::backends::fs_tree::TreeOutput::OstreeSysroot {
+			sysroot: sysroot.clone(),
+			stateroot: "um".to_string(),
+		};
+		let rootfs = output.rootfs().unwrap();
+
+		let deployment = OstreeDeployment::resolve(&rootfs).unwrap().expect("should resolve");
 
 		assert_eq!(deployment.karg, format!("ostree=/ostree/boot.1/um/{BOOTCSUM}/0"));
 	}
