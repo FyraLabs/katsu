@@ -50,6 +50,39 @@ podman machine start
 
 This also means you can now hack on Katsu directly from unsupported platforms like macOS and Windows by using Podman Machines as your development environment!
 
+## Iterating on OSTree live boot
+
+For `bootc.layout: ostree`, the ISO contains one `LiveOS/rootfs.img` holding the
+physical OSTree sysroot. The ISO initramfs mounts the media and root image
+read-only, then places a tmpfs-backed OverlayFS over the sysroot before running
+the image's `ostree-prepare-root`. The deployment's `/usr` remains read-only;
+`/etc` and stateroot `/var` are writable and all live-session changes are lost
+on shutdown. This path disables composefs in the initramfs only, without
+changing the source image.
+
+The integration lives in `src/initramfs/`. Katsu appends it as a small `newc`
+CPIO archive after dracut's compressed initramfs; `cpio` must be installed on
+the build host. OSTree live menu entries use `rd.katsu.ostree`,
+`rd.katsu.label=<ISO label>`, and the deployment's BLS `ostree=` argument,
+rather than the generic `root=live:` path.
+
+After a complete root build, regenerate the initramfs and ISO without rebuilding
+the OSTree repository or root image:
+
+```sh
+cargo build
+sudo env KATSU_LOG=info target/debug/katsu -o iso \
+  --skip-phases=root,rootimg tests/ng/bootc/katsu-iso-bootc.yaml
+```
+
+The existing payload is renamed from `squashfs.img` to `rootfs.img` if necessary,
+without copying it. Do not skip `dracut` when changing the initramfs integration.
+For serial debugging, use `console=ttyS0,115200 rd.debug rd.shell panic=0` and
+capture output from `katsu-ostree-live.service`, `sysroot.mount`, and
+`ostree-prepare-root.service`. Tests cover staging, CPIO extraction, shell syntax,
+and bootloader command lines; a privileged ISO build and VM boot are still
+required to validate the full mount and switch-root sequence.
+
 ## Contributing
 
 We welcome contributions to Katsu! Whether you're fixing bugs, adding features, improving documentation, or reporting issues, your help is appreciated.

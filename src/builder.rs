@@ -237,7 +237,28 @@ const DR_OMIT: &str = "";
 const DR_ARGS: &str = "-vv --xz --reproducible";
 
 impl IsoBuilder {
-	fn dracut(&self, root: &Path, workspace: &Path) -> Result<PathBuf> {
+	fn live_root_image(image_dir: &Path, ostree_sysroot: bool) -> Result<PathBuf> {
+		let squash_image = image_dir.join("squashfs.img");
+		if !ostree_sysroot {
+			return Ok(squash_image);
+		}
+
+		// dmsquash-live only accepts /usr or nested LiveOS images inside
+		// squashfs.img. Its direct rootfs.img path also accepts OSTree sysroots.
+		let root_image = image_dir.join("rootfs.img");
+		if squash_image.exists() {
+			// Reuse images from earlier builds when rootimg is skipped, without
+			// retaining a second payload that dracut would select first.
+			if root_image.exists() {
+				fs::remove_file(&squash_image)?;
+			} else {
+				fs::rename(&squash_image, &root_image)?;
+			}
+		}
+		Ok(root_image)
+	}
+
+	fn dracut(&self, root: &Path, workspace: &Path, ostree_live: bool) -> Result<PathBuf> {
 		bail_let!(
 			Some(kver) = fs::read_dir(root.join("usr/lib/modules"))?.find_map(|f| {
 				// find any directory
@@ -252,24 +273,30 @@ impl IsoBuilder {
 		// set dracut options
 		// this is kind of a hack, but uhh it works maybe
 
-		let dr_mods = feature_flag_str!("dracut-mods").unwrap_or(DR_MODS.to_string());
-		let dr_omit = feature_flag_str!("dracut-omit").unwrap_or(DR_OMIT.to_string());
+		let default_modules = if ostree_live { "ostree systemd qemu qemu-net" } else { DR_MODS };
+		let mut dr_mods = feature_flag_str!("dracut-mods").unwrap_or(default_modules.to_string());
+		let mut dr_omit = feature_flag_str!("dracut-omit").unwrap_or(DR_OMIT.to_string());
+		if ostree_live {
+			dr_mods.push_str(" ostree systemd");
+			// Do not let generic live or composefs generators race our sysroot mount.
+			dr_omit.push_str(" dmsquash-live dmsquash-live-autooverlay livenet bootc");
+		}
 
-		let dr_extra_args = feature_flag_str!("dracut-args").unwrap_or("".to_string());
 		let binding = feature_flag_str!("dracut-args").unwrap_or(DR_ARGS.to_string());
-		let dr_basic_args = binding.split(' ').collect::<Vec<_>>();
-
-		// combine them all into one string
-
-		let dr_args2 = vec!["--nomdadmconf", "--nolvmconf", "-fN", "-a", &dr_mods, &dr_extra_args];
-		let mut dr_args = vec![];
-
-		dr_args.extend(dr_basic_args);
-
-		dr_args.extend(dr_args2);
+		let mut dr_args = shellish_parse::parse(&binding, false)
+			.map_err(|e| color_eyre::eyre::eyre!("Invalid dracut arguments: {e}"))?;
+		// Empty positional arguments make dracut select its default output path.
+		dr_args.retain(|arg| !arg.is_empty());
+		dr_args.extend([
+			"--nomdadmconf".to_string(),
+			"--nolvmconf".to_string(),
+			"-fN".to_string(),
+			"-a".to_string(),
+			dr_mods,
+		]);
 		if !dr_omit.is_empty() {
-			dr_args.push("--omit");
-			dr_args.push(&dr_omit);
+			dr_args.push("--omit".to_string());
+			dr_args.push(dr_omit);
 		}
 		let mut cmd = std::process::Command::new("dracut");
 
@@ -289,7 +316,12 @@ impl IsoBuilder {
 			cmd.arg(root.canonicalize()?);
 		}
 
-		let cmd = cmd.env("DRACUT_SYSTEMD", "0").args(&dr_args).arg("--kver").arg(&kver);
+		if ostree_live {
+			cmd.arg("--install").arg("mount mkdir realpath touch ln systemd-escape checkisomd5");
+			cmd.arg("--add-drivers").arg("erofs squashfs overlay loop iso9660");
+			cmd.arg("--no-hostonly-cmdline");
+		}
+		let cmd = cmd.args(&dr_args).arg("--kver").arg(&kver);
 
 		let current_dir = std::env::current_dir()?;
 		info!(?current_dir, "Current directory");
@@ -308,15 +340,23 @@ impl IsoBuilder {
 		let iso_tree_path = workspace.join(ISO_TREE);
 		std::fs::create_dir_all(iso_tree_path.join("boot"))?;
 		let final_initramfs_path = iso_tree_path.join("boot").join("initramfs.img");
+		let pending_initramfs_path = iso_tree_path.join("boot").join("initramfs.img.pending");
 
 		if dracut_outside_chroot {
 			info!("Dracut run outside chroot, generating to iso-tree");
-			cmd.arg(&final_initramfs_path);
+			cmd.arg(&pending_initramfs_path);
 			let status = cmd.status()?;
 			debug!(?status, "Dracut command finished");
 			if !status.success() {
 				bail!("Dracut failed with exit code: {}", status);
 			}
+			if !pending_initramfs_path.is_file() {
+				bail!("Dracut succeeded but did not write {}", pending_initramfs_path.display());
+			}
+			if ostree_live {
+				crate::initramfs::append_ostree_live(&pending_initramfs_path, workspace)?;
+			}
+			fs::rename(&pending_initramfs_path, &final_initramfs_path)?;
 		} else {
 			// FIXME(dracut): @korewaChino #43 - dracut ignores CLI initramfs path and writes to /boot.
 			// Workaround: allow dracut to write to /boot then move the initramfs into place.
@@ -625,7 +665,7 @@ impl ImageBuilder for IsoBuilder {
 		let squash_root = tree_output.squash_root();
 		debug!(?tree_root, ?squash_root, sysroot = tree_output.is_sysroot(), "Resolved tree roots");
 
-		let _ = phase!("dracut": self.dracut(&tree_root, &workspace));
+		let _ = phase!("dracut": self.dracut(&tree_root, &workspace, tree_output.is_sysroot()));
 
 		// Clean up kernel artifacts from /boot before squashing
 		// kernel-install will regenerate them on target system
@@ -662,6 +702,7 @@ impl ImageBuilder for IsoBuilder {
 		// temporarily store content of iso
 		let image_dir = workspace.join(ISO_TREE).join("LiveOS");
 		fs::create_dir_all(&image_dir)?;
+		let root_image = Self::live_root_image(&image_dir, tree_output.is_sysroot())?;
 
 		// For a plain rootfs this is the tree itself; for an OSTree sysroot it is
 		// the whole sysroot, so that `/ostree/repo` and therefore the deployment
@@ -670,12 +711,12 @@ impl ImageBuilder for IsoBuilder {
 		// SELinux contexts are read from the deployment root (`tree_root`), which
 		// for a sysroot is *inside* the squashed tree rather than at its top.
 		if feature_flag_bool!("no-erofs") {
-			let _ = phase!("rootimg": self.squashfs(&squash_root, &image_dir.join("squashfs.img")));
+			let _ = phase!("rootimg": self.squashfs(&squash_root, &root_image));
 		} else {
 			let _ = phase!("rootimg": self.erofs_with_selinux_root(
 				&squash_root,
 				&tree_root,
-				&image_dir.join("squashfs.img")
+				&root_image
 			));
 		}
 
@@ -755,6 +796,75 @@ impl KatsuBuilder {
 
 #[cfg(test)]
 mod test {
+	use super::*;
+
+	#[test]
+	fn ostree_live_image_reuses_existing_payload_without_duplication() {
+		let dir = std::env::temp_dir().join(format!("katsu-live-image-{}", uuid::Uuid::new_v4()));
+		fs::create_dir_all(&dir).unwrap();
+		fs::write(dir.join("squashfs.img"), b"erofs sysroot").unwrap();
+		let image = IsoBuilder::live_root_image(&dir, true).unwrap();
+		assert_eq!(image, dir.join("rootfs.img"));
+		assert_eq!(fs::read(&image).unwrap(), b"erofs sysroot");
+		assert!(!dir.join("squashfs.img").exists());
+
+		fs::write(dir.join("squashfs.img"), b"stale image").unwrap();
+		IsoBuilder::live_root_image(&dir, true).unwrap();
+		assert!(!dir.join("squashfs.img").exists());
+		assert_eq!(fs::read(&image).unwrap(), b"erofs sysroot");
+		fs::remove_dir_all(dir).unwrap();
+	}
+
+	#[test]
+	fn plain_live_image_keeps_squashfs_name() {
+		assert_eq!(
+			IsoBuilder::live_root_image(Path::new("LiveOS"), false).unwrap(),
+			Path::new("LiveOS/squashfs.img")
+		);
+	}
+
+	#[test]
+	fn live_templates_select_ostree_initramfs_only_for_sysroots() {
+		for template in [
+			include_str!("../templates/grub.cfg.tera"),
+			include_str!("../templates/limine.cfg.tera"),
+			include_str!("../templates/refind.cfg.tera"),
+		] {
+			for ostree in ["", "ostree=/ostree/boot.1/um/checksum/0"] {
+				let mut context = tera::Context::new();
+				for key in [
+					"GRUB_PREPEND_COMMENT",
+					"LIMINE_PREPEND_COMMENT",
+					"REFIND_PREPEND_COMMENT",
+					"volid",
+					"distro",
+					"vmlinuz",
+					"initramfs",
+					"cmd",
+				] {
+					context.insert(key, "test");
+				}
+				context.insert("ostree", ostree);
+				let rendered = tera::Tera::one_off(template, &context, false).unwrap();
+				let cmdlines: Vec<_> = rendered
+					.lines()
+					.filter(|line| {
+						line.contains("rd.live.image") || line.contains("rd.katsu.ostree")
+					})
+					.collect();
+				assert!(!cmdlines.is_empty());
+				for line in cmdlines {
+					assert_eq!(
+						line.contains("rd.katsu.ostree rd.systemd.gpt_auto=0 rd.katsu.label=test"),
+						!ostree.is_empty()
+					);
+					assert_eq!(line.contains("root=live:"), ostree.is_empty());
+					assert!(!line.contains("rd.live.overlay.overlayfs=1"));
+				}
+			}
+		}
+	}
+
 	#[test]
 	fn shellish_parse_empty() {
 		assert!(shellish_parse::parse("", false).unwrap().is_empty());
