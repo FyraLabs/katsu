@@ -61,7 +61,7 @@ pub struct BootcRootBuilder {
 	#[serde(default)]
 	pub layout: BootcLayout,
 
-	/// OSTree ref to commit the image as, e.g. `um/44/x86_64`.
+	/// Additional OSTree ref for the imported image, e.g. `um/44/x86_64`.
 	/// Defaults to a value derived from the image's distro metadata.
 	#[serde(default)]
 	pub ref_: Option<String>,
@@ -75,7 +75,7 @@ pub struct BootcRootBuilder {
 	#[serde(default = "default_true")]
 	pub embed_image: bool,
 
-	// Embed image metadata on derived images
+	// Nested layout embeds metadata in the tree; OSTree layout writes a workspace sidecar.
 	#[serde(default = "default_true")]
 	pub embed_image_metadata: bool,
 
@@ -227,6 +227,7 @@ mount_program = "/usr/bin/fuse-overlayfs"
 	/// in `/etc`; bootc images ship everything in `/etc` and have no `/usr/etc`,
 	/// so relocate and leave an empty placeholder. Both populated is rejected by
 	/// `ostree admin deploy`.
+	#[cfg(test)]
 	fn prepare_etc_for_commit(rootfs: &Path) -> Result<()> {
 		let etc = rootfs.join("etc");
 		let usr_etc = rootfs.join("usr/etc");
@@ -266,6 +267,7 @@ mount_program = "/usr/bin/fuse-overlayfs"
 
 	/// Move `src` to `dest`, falling back to a recursive copy when a rename is not
 	/// possible (for example across overlayfs layers).
+	#[cfg(test)]
 	fn move_path(src: &Path, dest: &Path) -> Result<()> {
 		match std::fs::rename(src, dest) {
 			Ok(()) => Ok(()),
@@ -281,6 +283,7 @@ mount_program = "/usr/bin/fuse-overlayfs"
 	}
 
 	/// Recursively copy a file, directory or symlink, preserving symlinks.
+	#[cfg(test)]
 	fn copy_path(src: &Path, dest: &Path) -> Result<()> {
 		let meta = std::fs::symlink_metadata(src)?;
 
@@ -309,6 +312,7 @@ mount_program = "/usr/bin/fuse-overlayfs"
 	}
 
 	/// Remove a file, symlink or directory tree.
+	#[cfg(test)]
 	fn remove_path(path: &Path) -> Result<()> {
 		let meta = std::fs::symlink_metadata(path)?;
 		if meta.is_dir() {
@@ -324,6 +328,7 @@ mount_program = "/usr/bin/fuse-overlayfs"
 	/// These are runtime state or self-referential plumbing from the image build:
 	/// the `sysroot/ostree/ostree -> /sysroot/ostree` symlink loop would make
 	/// ostree recurse into itself, and `/var` state is not deployment content.
+	#[cfg(test)]
 	fn sanitize_rootfs_for_commit(rootfs: &Path) -> Result<()> {
 		// Self-referential symlink left behind by bootc's image layout.
 		let sysroot = rootfs.join("sysroot");
@@ -344,20 +349,34 @@ mount_program = "/usr/bin/fuse-overlayfs"
 		Ok(())
 	}
 
-	/// Commit a rootfs into an OSTree repository.
-	fn commit_rootfs(repo: &Path, rootfs: &Path, branch: &str, subject: &str) -> Result<()> {
-		info!(?repo, ?branch, "Committing rootfs to OSTree repository");
-		cmd_lib::run_cmd!(
-			ostree commit
-				--repo=$repo
-				--branch=$branch
-				--subject=$subject
-				--tree=dir=$rootfs
-				--owner-uid=0
-				--owner-gid=0
-				2>&1;
-		)?;
-		Ok(())
+	/// Import real OCI layer state and metadata, rather than committing a flattened tree.
+	fn import_image(repo: &Path, image: &str, digestfile: &Path) -> Result<String> {
+		let source = format!("ostree-unverified-image:containers-storage:{image}");
+		info!(?repo, ?source, "Importing bootc image with upstream ostree-container importer");
+		let status = std::process::Command::new("ostree")
+			.args(["container", "image", "pull", "--ostree-digestfile"])
+			.arg(digestfile)
+			.arg(repo)
+			.arg(&source)
+			.status()?;
+		if !status.success() {
+			bail!(
+				"Container import failed ({status}); the build host needs an ostree CLI with `container image pull` support and access to the rootful containers-storage image"
+			);
+		}
+		let checksum = std::fs::read_to_string(digestfile)?.trim().to_string();
+		if checksum.len() != 64 || !checksum.bytes().all(|b| b.is_ascii_hexdigit()) {
+			bail!("Container importer returned invalid OSTree checksum: {checksum}");
+		}
+		Ok(checksum)
+	}
+
+	fn image_origin(image: &str) -> Result<String> {
+		if image.is_empty() || image.chars().any(char::is_control) {
+			bail!("Invalid container image reference for deployment origin");
+		}
+		// The source is already trusted locally; do not claim signature verification.
+		Ok(format!("[origin]\ncontainer-image-reference=ostree-unverified-registry:{image}\n"))
 	}
 
 	/// Deploy a committed branch into a sysroot so it can be booted directly.
@@ -370,15 +389,17 @@ mount_program = "/usr/bin/fuse-overlayfs"
 	/// `ostree admin deploy` expects a fairly specific shape and will fail early
 	/// on each missing piece, so we pre-create the directories it looks for:
 	/// `deploy/<stateroot>/var` and `boot/`.
-	fn deploy_sysroot(sysroot: &Path, stateroot: &str, branch: &str) -> Result<()> {
+	fn deploy_sysroot(
+		sysroot: &Path, stateroot: &str, checksum: &str, origin: &Path,
+	) -> Result<()> {
 		let stateroot_dir = sysroot.join("ostree/deploy").join(stateroot);
 		std::fs::create_dir_all(&stateroot_dir)?;
 		std::fs::create_dir_all(sysroot.join("boot"))?;
 		std::fs::create_dir_all(stateroot_dir.join("var"))?;
 
-		info!(?sysroot, ?stateroot, ?branch, "Deploying OSTree commit into sysroot");
+		info!(?sysroot, ?stateroot, ?checksum, "Deploying imported bootc image into sysroot");
 		cmd_lib::run_cmd!(
-			ostree admin deploy --sysroot=$sysroot --os=$stateroot --stateroot=$stateroot $branch 2>&1;
+			ostree admin deploy --sysroot=$sysroot --os=$stateroot --stateroot=$stateroot --origin-file=$origin $checksum 2>&1;
 		)?;
 
 		Ok(())
@@ -461,17 +482,6 @@ mount_program = "/usr/bin/fuse-overlayfs"
 		let mounted = Self::mount_rootfs(image)?;
 		let rootfs = mounted.path();
 
-		Self::sanitize_rootfs_for_commit(rootfs)?;
-		Self::prepare_etc_for_commit(rootfs)?;
-
-		if self.embed_image_metadata {
-			let metadata =
-				BootcImageMetadata { tag: image.to_string(), digest: digest.to_string() };
-			let serialized = serde_yaml::to_string(&metadata)?;
-			info!("Embedding image metadata into committed tree");
-			std::fs::write(rootfs.join(".bootc_meta.yaml"), serialized)?;
-		}
-
 		// Commit straight into a repository living at the sysroot path. ostree
 		// deploys from a repo in place, so building it anywhere else would mean
 		// copying it (a second full copy of ~9G for a bootc image) before the
@@ -486,18 +496,20 @@ mount_program = "/usr/bin/fuse-overlayfs"
 			},
 			None => self.default_branch(rootfs, manifest)?,
 		};
-		let subject = format!(
-			"{} {}",
-			manifest.distro.as_deref().unwrap_or("Katsu"),
-			image.split(':').next_back().unwrap_or("live")
-		);
-		Self::commit_rootfs(&repo, rootfs, &branch, &subject)?;
-
-		// The mount is no longer needed now that the commit exists; dropping it
-		// unmounts and removes the ephemeral container.
+		// Only inspect the mount for distro metadata. Import the original image
+		// unchanged so its manifest and layer identities remain meaningful.
 		drop(mounted);
+		let checksum = Self::import_image(&repo, image, &workspace.join("bootc-imported-commit"))?;
+		cmd_lib::run_cmd!(ostree refs --repo=$repo --create=$branch $checksum;)?;
+		let origin = workspace.join("bootc-image.origin");
+		std::fs::write(&origin, Self::image_origin(image)?)?;
+		if self.embed_image_metadata {
+			let metadata =
+				BootcImageMetadata { tag: image.to_string(), digest: digest.to_string() };
+			std::fs::write(workspace.join("bootc-image.yaml"), serde_yaml::to_string(&metadata)?)?;
+		}
 
-		Self::deploy_sysroot(&sysroot, &self.stateroot, &branch)?;
+		Self::deploy_sysroot(&sysroot, &self.stateroot, &checksum, &origin)?;
 
 		info!(?sysroot, ?branch, "OSTree sysroot ready for direct boot");
 		Ok(TreeOutput::OstreeSysroot { sysroot, stateroot: self.stateroot.clone() })
@@ -607,6 +619,19 @@ mod tests {
 	}
 
 	/// An already-composed tree must be left untouched.
+	#[test]
+	fn image_origin_uses_container_reference_without_plain_refspec() {
+		let origin =
+			BootcRootBuilder::image_origin("ghcr.io/ultramarine-linux/plasma-bootc:44").unwrap();
+		assert_eq!(
+			origin,
+			"[origin]\ncontainer-image-reference=ostree-unverified-registry:ghcr.io/ultramarine-linux/plasma-bootc:44\n"
+		);
+		assert!(!origin.contains("refspec="));
+		assert!(BootcRootBuilder::image_origin("image\nrefspec=other").is_err());
+		assert!(BootcRootBuilder::image_origin("").is_err());
+	}
+
 	#[test]
 	fn leaves_usr_etc_tree_alone() {
 		let root = scratch("katsu-bootc-usr-etc");
