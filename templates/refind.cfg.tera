@@ -8,7 +8,7 @@ menuentry "{{ distro }}" {
     volume   "{{ volid }}"
     loader   /boot/{{ vmlinuz }}
     initrd   /boot/{{ initramfs }}
-    options  "root=live:LABEL={{ volid }} rd.live.image enforcing=0 {{ cmd }}"
+    options  "root=live:LABEL={{ volid }} rd.live.image {{ ostree }} enforcing=0 {{ cmd }}"
     submenuentry "{{ distro }} (Check Image)" {
         add_options "rd.live.check"
     }

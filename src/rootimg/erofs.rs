@@ -20,6 +20,9 @@ pub struct MkfsErofsOptions {
 	pub log_level: u32,
 	pub extra_features: Vec<String>,
 	pub tar_mode: bool,
+	/// --workers=<n>: number of worker threads. Defaults to the CPU count when
+	/// unset, matching mkfs.erofs' own default.
+	pub workers: Option<u32>,
 }
 
 impl MkfsErofsOptions {
@@ -50,6 +53,10 @@ impl MkfsErofsOptions {
 			args.push(format!("-E{features}"));
 		}
 
+		if let Some(workers) = self.workers {
+			args.push(format!("--workers={workers}"));
+		}
+
 		if self.tar_mode {
 			args.push("--tar=f".to_string());
 		}
@@ -67,7 +74,14 @@ impl Default for MkfsErofsOptions {
 			exclude_paths: ["/sys/", "/proc/"].iter().map(|s| s.to_string()).collect(),
 			file_contexts: None,
 			log_level: 0,
-			extra_features: ["all-fragments", "fragdedupe=inode", "dedupe"]
+			workers: None,
+			// NOTE: `dedupe` is deliberately not enabled by default. It performs
+			// global full-file comparison, which is effectively single-threaded and
+			// holds large amounts of state in memory - on a ~10G bootc tree it can
+			// run for many minutes on one core and exhaust RAM. It also largely
+			// duplicates work ostree has already done: the repo is content-addressed,
+			// so the same object appears once. Set `KATSU_EROFS_DEDUPE=1` to opt in.
+			extra_features: ["all-fragments", "fragdedupe=inode"]
 				.iter()
 				.map(|s| s.to_string())
 				.collect(),
@@ -85,7 +99,15 @@ pub fn erofs_mkfs(
 	cmd.arg(source);
 
 	tracing::info!("Creating EROFS image: {:?}", cmd);
-	let output = cmd.status()?;
+	let output = cmd.status().map_err(|e| {
+		if e.kind() == std::io::ErrorKind::NotFound {
+			color_eyre::eyre::eyre!(
+				"mkfs.erofs not found; install erofs-utils (e.g. `dnf install erofs-utils`)"
+			)
+		} else {
+			color_eyre::eyre::eyre!("Running mkfs.erofs: {e}")
+		}
+	})?;
 	if !output.success() {
 		return Err(color_eyre::eyre::eyre!(
 			"mkfs.erofs failed with exit code: {}",

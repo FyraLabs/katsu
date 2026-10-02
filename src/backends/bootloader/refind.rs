@@ -1,4 +1,4 @@
-use super::{Bootloader, REFIND_PREPEND_COMMENT};
+use super::{Bootloader, OstreeDeployment, REFIND_PREPEND_COMMENT};
 use crate::{builder::ISO_TREE, config::Manifest, util::loopdev_with_file};
 use color_eyre::Result;
 use std::{fs, io::Write, path::Path};
@@ -7,6 +7,7 @@ use tracing::info;
 impl Bootloader {
 	pub(super) fn cp_refind(
 		&self, manifest: &Manifest, chroot: &Path, workspace: &Path,
+		ostree: Option<&OstreeDeployment>,
 	) -> Result<()> {
 		info!("Copying rEFInd files");
 		let distro = manifest.distro.as_deref().unwrap_or("Linux");
@@ -39,8 +40,9 @@ impl Bootloader {
 		let volid = manifest.get_volid();
 
 		let refind_cfg = iso_tree.join("EFI/BOOT/refind.conf");
+		let ostree_karg = ostree.map(|o| o.karg.clone()).unwrap_or_default();
 		crate::tpl!(
-			"refind.cfg.tera" => { REFIND_PREPEND_COMMENT, distro, vmlinuz, initramfs, cmd, volid } => &refind_cfg
+			"refind.cfg.tera" => { REFIND_PREPEND_COMMENT, distro, vmlinuz, initramfs, cmd, volid, ostree: ostree_karg } => &refind_cfg
 		);
 
 		let mut nsh = fs::File::create(iso_tree.join("startup.nsh"))?;

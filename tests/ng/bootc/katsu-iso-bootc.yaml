@@ -3,5 +3,18 @@ builder: bootc
 distro: Ultramarine Atomic
 
 bootc:
-  image: ghcr.io/ultramarine-linux/plasma-bootc:main
+  image: ghcr.io/ultramarine-linux/plasma-bootc:44
+
+  # Optional derivation, built with `podman build --build-arg DERIVE_FROM=<image>`.
+  # Left disabled by default so the fixture tests the base image as-is; uncomment
+  # along with `context` to exercise the derivation path.
   # derivation: bootc/Containerfile
+  # context: .
+
+  # Commit the image's rootfs to an OSTree repo and deploy it into a sysroot
+  # that the live media boots directly. No podman/skopeo is needed at runtime,
+  # unlike the `nested` layout which embeds the OCI image inside itself.
+  layout: ostree
+  stateroot: um
+  # ref_ defaults to "<stateroot>/<VERSION_ID from the image>/<arch>",
+  # i.e. "um/44/x86_64" for this image.

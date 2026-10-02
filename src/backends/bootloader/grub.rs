@@ -1,4 +1,4 @@
-use super::{Bootloader, GRUB_PREPEND_COMMENT};
+use super::{Bootloader, GRUB_PREPEND_COMMENT, OstreeDeployment};
 use crate::{
 	builder::{BOOTIMGS, ISO_TREE},
 	config::Manifest,
@@ -8,9 +8,20 @@ use color_eyre::{Result, eyre::bail};
 use std::{fs, os::unix::fs::symlink, path::Path};
 use tracing::{debug, info, info_span, trace, warn};
 
+/// The boot parameters a GRUB config needs, grouped so the template writer stays
+/// readable as boot options grow.
+struct GrubBootParams<'a> {
+	volid: &'a str,
+	distro: &'a str,
+	vmlinuz: &'a str,
+	initramfs: &'a str,
+	kernel_cmdline: &'a str,
+}
+
 impl Bootloader {
 	pub(super) fn cp_grub(
 		&self, manifest: &Manifest, chroot: &Path, workspace: &Path,
+		ostree: Option<&OstreeDeployment>,
 	) -> Result<()> {
 		let iso_tree = workspace.join(ISO_TREE);
 		let boot_imgs_dir = workspace.join(BOOTIMGS);
@@ -38,7 +49,17 @@ impl Bootloader {
 		let (vmlinuz, initramfs) =
 			self.copy_kernel_and_initramfs(chroot, &boot_imgs_dir, &iso_tree)?;
 
-		self.generate_grub_config(&iso_tree, volid, distro, &vmlinuz, &initramfs, kernel_cmdline)?;
+		self.generate_grub_config(
+			&iso_tree,
+			&GrubBootParams {
+				volid: &volid,
+				distro,
+				vmlinuz: &vmlinuz,
+				initramfs: &initramfs,
+				kernel_cmdline,
+			},
+			ostree,
+		)?;
 		self.setup_efi_boot_files(manifest, &iso_tree)?;
 		self.generate_grub_images(chroot, &iso_tree, manifest)?;
 		self.mkefiboot(workspace, manifest)?;
@@ -228,17 +249,24 @@ impl Bootloader {
 	}
 
 	fn generate_grub_config(
-		&self, iso_tree: &Path, volid: String, distro: &str, vmlinuz: &str, initramfs: &str,
-		kernel_cmdline: &str,
+		&self, iso_tree: &Path, boot: &GrubBootParams<'_>, ostree: Option<&OstreeDeployment>,
 	) -> Result<()> {
+		// When booting an OSTree deployment the initramfs needs to be told where
+		// the deployment lives; without this it cannot find the root filesystem.
+		let ostree_karg = ostree.map(|o| o.karg.clone()).unwrap_or_default();
+		if !ostree_karg.is_empty() {
+			info!(karg = %ostree_karg, "Booting an OSTree deployment");
+		}
+
 		crate::tpl!(
 			"grub.cfg.tera" => {
 				GRUB_PREPEND_COMMENT,
-				volid,
-				distro,
-				vmlinuz: vmlinuz.to_string(),
-				initramfs: initramfs.to_string(),
-				cmd: kernel_cmdline.to_string()
+				volid: boot.volid.to_string(),
+				distro: boot.distro.to_string(),
+				vmlinuz: boot.vmlinuz.to_string(),
+				initramfs: boot.initramfs.to_string(),
+				cmd: boot.kernel_cmdline.to_string(),
+				ostree: ostree_karg
 			} => iso_tree.join("boot/grub/grub.cfg")
 		);
 

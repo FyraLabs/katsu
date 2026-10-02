@@ -286,8 +286,9 @@ impl IsoBuilder {
 		info!(?current_dir, "Current directory");
 		// https://github.com/dracut-ng/dracut-ng/issues/443
 		// fixes a weird quirk in bootc builds, may need a check for bootc though since it kinda breaks SELinux
-		let is_bootc_image =
-			{ feature_flag_bool!("dracut-bootc") || root.join("sysroot").exists() };
+		let is_bootc_image = feature_flag_bool!("dracut-bootc")
+			|| root.join("usr/lib/ostree-boot").exists()
+			|| root.join("usr/lib/ostree/prepare-root.conf").exists();
 		if is_bootc_image {
 			info!("Detected bootc image, setting DRACUT_NO_XATTR=1");
 			cmd.env("DRACUT_NO_XATTR", "1");
@@ -371,15 +372,62 @@ impl IsoBuilder {
 
 		Ok(())
 	}
+	/// Build an EROFS image from `root`.
+	///
 	#[allow(dead_code)]
 	pub fn erofs(&self, root: &Path, image: &Path) -> Result<()> {
+		self.erofs_with_selinux_root(root, root, image)
+	}
+
+	/// Like [`Self::erofs`], but reads SELinux contexts from `selinux_root`.
+	///
+	/// For an OSTree sysroot the contexts live under
+	/// `ostree/deploy/<stateroot>/deploy/<csum>.0/{etc,usr/etc}/...`, not at the
+	/// squash root, so passing the sysroot here would silently skip labelling and
+	/// produce an image whose files have no SELinux labels.
+	pub fn erofs_with_selinux_root(
+		&self, root: &Path, selinux_root: &Path, image: &Path,
+	) -> Result<()> {
 		let mut opts = MkfsErofsOptions::default();
-		// selinux bs
-		let selinux_fcontexts = root.join("etc/selinux/targeted/contexts/files/file_contexts");
-		if selinux_fcontexts.exists() {
-			opts.file_contexts = Some(selinux_fcontexts.display().to_string());
-		} else {
-			warn!("SELinux file contexts not found, skipping");
+
+		// `mkfs.erofs --file-contexts` wants a single file. Newer images keep the
+		// vendor copy under usr/etc; older ones only have /etc. Prefer the
+		// machine-local /etc when present, since that is what the running system
+		// would consult.
+		let candidates = [
+			"etc/selinux/targeted/contexts/files/file_contexts",
+			"usr/etc/selinux/targeted/contexts/files/file_contexts",
+		];
+		let selinux_fcontexts =
+			candidates.iter().map(|rel| selinux_root.join(rel)).find(|path| path.exists());
+
+		match selinux_fcontexts {
+			Some(path) => {
+				debug!(?path, "Using SELinux file contexts for EROFS");
+				opts.file_contexts = Some(path.display().to_string());
+			},
+			None => warn!(
+				?selinux_root,
+				"SELinux file contexts not found, skipping; the resulting image will \
+				 have no SELinux labels"
+			),
+		}
+
+		if let Some(workers) = feature_flag_str!("erofs-workers") {
+			match workers.parse::<u32>() {
+				Ok(n) => {
+					info!(workers = n, "Using configured EROFS worker count");
+					opts.workers = Some(n);
+				},
+				Err(_) => warn!(%workers, "Ignoring non-numeric erofs-workers value"),
+			}
+		}
+
+		// Opt-in: global full-file deduplication. See the note on
+		// `MkfsErofsOptions::default` for why this is off by default.
+		if feature_flag_bool!("erofs-dedupe") {
+			info!("Enabling EROFS global deduplication (slow, memory hungry)");
+			opts.extra_features.push("dedupe".to_string());
 		}
 
 		erofs_mkfs(root, image, &opts)?;
@@ -543,15 +591,18 @@ impl ImageBuilder for IsoBuilder {
 		let tree_output = phase!("root": self.root_builder.build(chroot, manifest))
 			.ok_or_else(|| color_eyre::eyre::eyre!("Cannot skip 'root' phase - it is required"))?;
 
-		let tree_root = match tree_output {
-			crate::backends::fs_tree::TreeOutput::Directory(path) => path,
+		let tree_root = match &tree_output {
 			crate::backends::fs_tree::TreeOutput::Tarball(_) => {
 				bail!(
 					"RootBuilder returned an image, but ISOBuilder requires a directory as rootfs - Unimplemented code path."
 				);
 			},
+			// A sysroot ships wholesale (repo + deployment); the bootloader and
+			// dracut phases operate on the deployment root inside it.
+			_ => tree_output.rootfs()?,
 		};
-		// self.root_builder.build(chroot.canonicalize()?.as_path(), manifest)?;
+		let squash_root = tree_output.squash_root();
+		debug!(?tree_root, ?squash_root, sysroot = tree_output.is_sysroot(), "Resolved tree roots");
 
 		let _ = phase!("dracut": self.dracut(&tree_root));
 
@@ -591,10 +642,20 @@ impl ImageBuilder for IsoBuilder {
 		let image_dir = workspace.join(ISO_TREE).join("LiveOS");
 		fs::create_dir_all(&image_dir)?;
 
+		// For a plain rootfs this is the tree itself; for an OSTree sysroot it is
+		// the whole sysroot, so that `/ostree/repo` and therefore the deployment
+		// ship on the media and the system can boot without any runtime install.
+		//
+		// SELinux contexts are read from the deployment root (`tree_root`), which
+		// for a sysroot is *inside* the squashed tree rather than at its top.
 		if feature_flag_bool!("no-erofs") {
-			let _ = phase!("rootimg": self.squashfs(&tree_root, &image_dir.join("squashfs.img")));
+			let _ = phase!("rootimg": self.squashfs(&squash_root, &image_dir.join("squashfs.img")));
 		} else {
-			let _ = phase!("rootimg": self.erofs(&tree_root, &image_dir.join("squashfs.img")));
+			let _ = phase!("rootimg": self.erofs_with_selinux_root(
+				&squash_root,
+				&tree_root,
+				&image_dir.join("squashfs.img")
+			));
 		}
 
 		let _ = phase!("copy-live": self.bootloader.copy_liveos(manifest, &tree_root, &workspace));
