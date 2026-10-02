@@ -237,7 +237,7 @@ const DR_OMIT: &str = "";
 const DR_ARGS: &str = "-vv --xz --reproducible";
 
 impl IsoBuilder {
-	fn dracut(&self, root: &Path) -> Result<PathBuf> {
+	fn dracut(&self, root: &Path, workspace: &Path) -> Result<PathBuf> {
 		bail_let!(
 			Some(kver) = fs::read_dir(root.join("usr/lib/modules"))?.find_map(|f| {
 				// find any directory
@@ -305,7 +305,7 @@ impl IsoBuilder {
 		info!(?cmd, "Running dracut command");
 
 		// Prepare iso-tree path for later
-		let iso_tree_path = root.join("../").join(ISO_TREE);
+		let iso_tree_path = workspace.join(ISO_TREE);
 		std::fs::create_dir_all(iso_tree_path.join("boot"))?;
 		let final_initramfs_path = iso_tree_path.join("boot").join("initramfs.img");
 
@@ -625,7 +625,7 @@ impl ImageBuilder for IsoBuilder {
 		let squash_root = tree_output.squash_root();
 		debug!(?tree_root, ?squash_root, sysroot = tree_output.is_sysroot(), "Resolved tree roots");
 
-		let _ = phase!("dracut": self.dracut(&tree_root));
+		let _ = phase!("dracut": self.dracut(&tree_root, &workspace));
 
 		// Clean up kernel artifacts from /boot before squashing
 		// kernel-install will regenerate them on target system
