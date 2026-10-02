@@ -280,12 +280,7 @@ impl Bootloader {
 		Ok(())
 	}
 
-	/// Lay out `<iso_tree>/EFI`, mirroring Fedora's ESP layout.
-	///
-	/// `EFI/BOOT` (shim's removable-media loader + fallback.efi) and `EFI/<vendor>`
-	/// (CSV, shim, second stage) are kept separate: the CSV names `shimx64.efi`
-	/// relative to itself, so flattening the two into one directory makes that
-	/// resolve back to the running shim and the firmware resets in a loop.
+	/// Preserve the EFI vendor layout, including fallback CSVs and GRUB configs.
 	fn setup_efi_boot_files(&self, manifest: &Manifest, iso_tree: &Path) -> Result<()> {
 		let arch_short_upper = self.get_arch_short(manifest).to_uppercase();
 
@@ -312,6 +307,8 @@ impl Bootloader {
 			let dest = iso_tree.join("EFI").join(vendor);
 			debug!(?src, ?dest, "Copying EFI vendor directory");
 			Self::copy_dir(&src, &dest)?;
+			// Packaged GRUB can use a vendor prefix rather than EFI/BOOT.
+			fs::copy(iso_tree.join("boot/grub/grub.cfg"), dest.join("grub.cfg"))?;
 			vendor_copied = true;
 		}
 		if !vendor_copied {
@@ -541,6 +538,35 @@ mod tests {
 		Bootloader::copy_efi_payload(&tmp, &chroot_boot, &efi_dest, true).unwrap();
 
 		assert!(efi_dest.join("EFI/fedora/shimx64.efi").is_file());
+	}
+
+	#[test]
+	fn installs_grub_config_at_the_vendor_prefix() {
+		let tmp =
+			std::env::temp_dir().join(format!("katsu-grub-vendor-config-{}", std::process::id()));
+		fs::create_dir_all(&tmp).unwrap();
+		make_usr_lib_efi(&tmp);
+		let iso_tree = tmp.join("iso");
+		Bootloader::copy_usr_lib_efi(&tmp.join("usr/lib/efi"), &iso_tree.join("boot/efi/EFI"))
+			.unwrap();
+		let vendor = iso_tree.join("boot/efi/EFI/fedora");
+		let csv = b"shimx64.efi,Fedora,,This is the boot entry for Fedora\n";
+		fs::write(vendor.join("BOOTX64.CSV"), csv).unwrap();
+		fs::write(vendor.join("grub.cfg"), b"stale vendor config").unwrap();
+
+		fs::create_dir_all(iso_tree.join("boot/grub/fonts")).unwrap();
+		let config = b"search --label KATSU-LIVEOS\nmenuentry 'Live' {}\n";
+		fs::write(iso_tree.join("boot/grub/grub.cfg"), config).unwrap();
+		fs::write(iso_tree.join("boot/grub/fonts/unicode.pf2"), b"font").unwrap();
+		let manifest: Manifest = serde_yaml::from_str("dnf:\n  arch: x86_64\n").unwrap();
+
+		Bootloader::Grub.setup_efi_boot_files(&manifest, &iso_tree).unwrap();
+
+		assert_eq!(fs::read(iso_tree.join("EFI/fedora/grub.cfg")).unwrap(), config);
+		assert_eq!(fs::read(iso_tree.join("EFI/BOOT/grub.cfg")).unwrap(), config);
+		assert_eq!(fs::read(iso_tree.join("EFI/fedora/BOOTX64.CSV")).unwrap(), csv);
+		assert!(!iso_tree.join("EFI/BOOT/BOOTX64.CSV").exists());
+		fs::remove_dir_all(tmp).unwrap();
 	}
 
 	#[test]
