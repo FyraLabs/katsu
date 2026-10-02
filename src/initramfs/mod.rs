@@ -11,7 +11,8 @@ const LIVE_SERVICE: &str = r#"[Unit]
 Description=Prepare Katsu OSTree live media
 DefaultDependencies=no
 ConditionKernelCommandLine=rd.katsu.ostree
-Requires=systemd-udev-trigger.service
+IgnoreOnIsolate=yes
+Wants=systemd-udev-trigger.service
 After=systemd-udev-trigger.service dracut-pre-mount.service
 Before=sysroot.mount
 OnFailure=emergency.target
@@ -41,20 +42,35 @@ Type=overlay
 Options=lowerdir=/run/katsu/ro,upperdir=/run/katsu/writable/upper,workdir=/run/katsu/writable/work
 "#;
 
+// These mounts are created by prepare-root, not by .mount unit ExecStart.
+// Keep their runtime-discovered units out of ordinary local-fs teardown and
+// order them before the target retained by initrd-switch-root.target.
+const OSTREE_BIND_MOUNT_DROPIN: &str =
+	"[Unit]\nDefaultDependencies=no\nIgnoreOnIsolate=yes\nBefore=initrd-fs.target\n";
+
 const PREPARE_ROOT_DROPIN: &str = r#"[Service]
 ExecStartPre=/usr/libexec/katsu-ostree-mountpoints
 "#;
 
 const MOUNTPOINTS: &str = r#"#!/bin/sh
 . /lib/dracut-lib.sh
-set -e
-ostree_path=$(getarg ostree=)
-deployment=$(realpath -e "/sysroot$ostree_path")
+
+fail() {
+    echo "katsu-ostree-mountpoints: $*" >&2
+    exit 1
+}
+
+# getarg calls debug_on, which may return 1: do not invoke it under errexit.
+ostree_path=$(getarg ostree=) || fail 'Missing ostree deployment boot link'
+deployment=$(realpath -e "/sysroot$ostree_path") \
+    || fail "Cannot resolve deployment boot link: /sysroot$ostree_path"
 case "$deployment" in
     /sysroot/ostree/deploy/*/deploy/*) ;;
-    *) echo 'katsu: invalid deployment after sysroot mount' >&2; exit 1 ;;
+    *) fail "Invalid deployment after sysroot mount: $deployment" ;;
 esac
-mkdir -p "$deployment/sysroot" "$deployment/var"
+mkdir -p "$deployment/sysroot" "$deployment/var" \
+    || fail "Cannot create mountpoints in deployment: $deployment"
+echo "katsu-ostree-mountpoints: prepared mountpoints in $deployment"
 # prepare-root creates /run/ostree itself. The real-root OSTree generator
 # mounts the stateroot's var from the writable physical sysroot.
 "#;
@@ -80,6 +96,16 @@ pub fn stage_ostree_live(workspace: &Path) -> Result<PathBuf> {
 		("usr/lib/systemd/system/katsu-ostree-live.service", LIVE_SERVICE, false),
 		("usr/lib/systemd/system/sysroot.mount", SYSROOT_MOUNT, false),
 		(
+			"usr/lib/systemd/system/sysroot-usr.mount.d/katsu-live.conf",
+			OSTREE_BIND_MOUNT_DROPIN,
+			false,
+		),
+		(
+			"usr/lib/systemd/system/sysroot-sysroot.mount.d/katsu-live.conf",
+			OSTREE_BIND_MOUNT_DROPIN,
+			false,
+		),
+		(
 			"usr/lib/systemd/system/ostree-prepare-root.service.d/katsu-live.conf",
 			PREPARE_ROOT_DROPIN,
 			false,
@@ -102,6 +128,7 @@ pub fn stage_ostree_live(workspace: &Path) -> Result<PathBuf> {
 	let wants = stage.join("usr/lib/systemd/system/initrd-root-fs.target.requires");
 	fs::create_dir_all(&wants)?;
 	std::os::unix::fs::symlink("../sysroot.mount", wants.join("sysroot.mount"))?;
+
 	Ok(stage)
 }
 
@@ -148,6 +175,43 @@ pub fn append_ostree_live(initramfs: &Path, workspace: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn mountpoints_helper_tolerates_dracut_debug_on_returning_false() {
+		let workspace = std::env::temp_dir().join(format!("katsu-getarg-{}", uuid::Uuid::new_v4()));
+		fs::create_dir_all(&workspace).unwrap();
+		let library = workspace.join("dracut-lib.sh");
+		fs::write(
+			&library,
+			r#"
+debug_on() { [ "$RD_DEBUG" = yes ] && set -x; }
+getarg() {
+    echo /ostree/boot.1/um/checksum/0
+    debug_on
+    return 0
+}
+"#,
+		)
+		.unwrap();
+		let script =
+			MOUNTPOINTS.replace(". /lib/dracut-lib.sh", &format!(". {}", library.display()));
+		// Stub filesystem commands so the test needs no privileged mounts.
+		let script = format!(
+			"realpath() {{ echo /sysroot/ostree/deploy/um/deploy/checksum.0; }}\nmkdir() {{ return 0; }}\n{script}"
+		);
+		let mut child = Command::new("sh")
+			.env_remove("RD_DEBUG")
+			.stdin(Stdio::piped())
+			.stdout(Stdio::piped())
+			.stderr(Stdio::piped())
+			.spawn()
+			.unwrap();
+		child.stdin.take().unwrap().write_all(script.as_bytes()).unwrap();
+		let output = child.wait_with_output().unwrap();
+		assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+		assert!(String::from_utf8_lossy(&output.stdout).contains("prepared mountpoints"));
+		fs::remove_dir_all(workspace).unwrap();
+	}
 
 	#[test]
 	fn appended_archive_extracts_live_integration() {
@@ -224,6 +288,18 @@ mod tests {
 					.unwrap()
 					.success()
 			);
+		}
+		let live_service =
+			fs::read_to_string(stage.join("usr/lib/systemd/system/katsu-ostree-live.service"))
+				.unwrap();
+		assert!(live_service.contains("IgnoreOnIsolate=yes"));
+		assert!(live_service.contains("Wants=systemd-udev-trigger.service"));
+		assert!(!live_service.contains("Requires=systemd-udev-trigger.service"));
+		for unit in ["sysroot-usr.mount", "sysroot-sysroot.mount"] {
+			let dropin = stage.join(format!("usr/lib/systemd/system/{unit}.d/katsu-live.conf"));
+			let contents = fs::read_to_string(dropin).unwrap();
+			assert!(contents.contains("DefaultDependencies=no"));
+			assert!(contents.contains("IgnoreOnIsolate=yes"));
 		}
 		// Repeated incremental builds must not retain old integration files.
 		fs::write(stage.join("stale"), b"old").unwrap();
