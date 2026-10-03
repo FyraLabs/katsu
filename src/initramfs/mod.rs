@@ -77,6 +77,78 @@ echo "katsu-ostree-mountpoints: prepared mountpoints in $deployment"
 
 const PREPARE_ROOT_CONFIG: &str = "[composefs]\nenabled=false\n[root]\ntransient=false\n[sysroot]\nreadonly=false\n[etc]\ntransient=false\n";
 
+/// Composefs equivalent of [`LIVE_SERVICE`].
+///
+/// Root selection belongs to bootc's `bootc-root-setup.service`, which reads
+/// `composefs=<D>`; our only job is to make the ISO the backing filesystem and
+/// provide a writable upper for the repository.
+const COMPOSEFS_LIVE_SERVICE: &str = r#"[Unit]
+Description=Prepare Katsu composefs live media
+DefaultDependencies=no
+ConditionKernelCommandLine=rd.katsu.composefs
+IgnoreOnIsolate=yes
+Wants=systemd-udev-trigger.service
+After=systemd-udev-trigger.service dracut-pre-mount.service
+Before=sysroot.mount
+OnFailure=emergency.target
+OnFailureJobMode=isolate
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/katsu-composefs-live
+RemainAfterExit=yes
+StandardOutput=journal+console
+StandardError=journal+console
+"#;
+
+/// `/sysroot` for a composefs boot: the physical media merged with a writable
+/// upper, so bootc can open the repository and write its runtime state.
+const COMPOSEFS_SYSROOT_MOUNT: &str = r#"[Unit]
+Description=Katsu writable composefs live sysroot
+DefaultDependencies=no
+Requires=katsu-composefs-live.service
+After=katsu-composefs-live.service
+Before=initrd-root-fs.target
+OnFailure=emergency.target
+OnFailureJobMode=isolate
+
+[Mount]
+What=overlay
+Where=/sysroot
+Type=overlay
+Options=lowerdir=/run/katsu/ro,upperdir=/run/katsu/writable/upper,workdir=/run/katsu/writable/work
+"#;
+
+/// Stage the composefs initramfs integration.
+///
+/// Appended to the image's own initramfs rather than regenerated with dracut: a
+/// composefs tree has no `usr/` at its root, so dracut has nothing to work from,
+/// and the image already ships an initramfs built for its kernel. Appending
+/// keeps that and layers our media handling on top.
+pub fn stage_composefs_live(workspace: &Path) -> Result<PathBuf> {
+	let stage = workspace.join("composefs-live-initramfs");
+	if stage.exists() {
+		fs::remove_dir_all(&stage)?;
+	}
+	let files = [
+		("usr/libexec/katsu-composefs-live", include_str!("katsu-composefs-live.sh"), true),
+		("usr/lib/systemd/system/katsu-composefs-live.service", COMPOSEFS_LIVE_SERVICE, false),
+		("usr/lib/systemd/system/sysroot.mount", COMPOSEFS_SYSROOT_MOUNT, false),
+	];
+	for (relative, contents, executable) in files {
+		let path = stage.join(relative);
+		fs::create_dir_all(path.parent().unwrap())?;
+		fs::write(&path, contents)?;
+		if executable {
+			fs::set_permissions(path, fs::Permissions::from_mode(0o755))?;
+		}
+	}
+	let wants = stage.join("usr/lib/systemd/system/initrd-root-fs.target.requires");
+	fs::create_dir_all(&wants)?;
+	std::os::unix::fs::symlink("../sysroot.mount", wants.join("sysroot.mount"))?;
+	Ok(stage)
+}
+
 /// Stage an initramfs-only integration, leaving the source deployment untouched.
 /// Appended as a separate CPIO so overrides win without dracut's --sysroot
 /// source-path rewriting or changes to immutable deployment directories.
@@ -136,6 +208,18 @@ pub fn stage_ostree_live(workspace: &Path) -> Result<PathBuf> {
 /// uncompressed newc archive after dracut's compressed archive.
 pub fn append_ostree_live(initramfs: &Path, workspace: &Path) -> Result<()> {
 	let stage = stage_ostree_live(workspace)?;
+	append_stage(initramfs, workspace, &stage, "ostree-live")
+}
+
+/// Append the composefs integration to an initramfs the image already provides.
+pub fn append_composefs_live(initramfs: &Path, workspace: &Path) -> Result<()> {
+	let stage = stage_composefs_live(workspace)?;
+	append_stage(initramfs, workspace, &stage, "composefs-live")
+}
+
+fn append_stage(
+	initramfs: &Path, workspace: &Path, stage: &Path, archive_name: &str,
+) -> Result<()> {
 	let mut paths = Vec::new();
 	fn collect(dir: &Path, stage: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
 		let mut entries = fs::read_dir(dir)?.collect::<std::io::Result<Vec<_>>>()?;
@@ -148,11 +232,11 @@ pub fn append_ostree_live(initramfs: &Path, workspace: &Path) -> Result<()> {
 		}
 		Ok(())
 	}
-	collect(&stage, &stage, &mut paths)?;
-	let archive = workspace.join("ostree-live.cpio");
+	collect(stage, stage, &mut paths)?;
+	let archive = workspace.join(format!("{archive_name}.cpio"));
 	let mut cpio = Command::new("cpio")
 		.args(["--create", "--format=newc", "--null", "--owner=0:0", "--reproducible", "--quiet"])
-		.current_dir(&stage)
+		.current_dir(stage)
 		.stdin(Stdio::piped())
 		.stdout(fs::File::create(&archive)?)
 		.spawn()?;
@@ -163,7 +247,7 @@ pub fn append_ostree_live(initramfs: &Path, workspace: &Path) -> Result<()> {
 	}
 	drop(input);
 	if !cpio.wait()?.success() {
-		bail!("Failed to create OSTree live initramfs integration archive");
+		bail!("Failed to create the {archive_name} initramfs integration archive");
 	}
 	let mut output = fs::OpenOptions::new().append(true).open(initramfs)?;
 	let padding = (4 - output.metadata()?.len() % 4) % 4;
@@ -175,6 +259,50 @@ pub fn append_ostree_live(initramfs: &Path, workspace: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn stages_composefs_live_handoff_for_bootc_root_setup() {
+		let workspace =
+			std::env::temp_dir().join(format!("katsu-initramfs-cfs-{}", uuid::Uuid::new_v4()));
+		let stage = stage_composefs_live(&workspace).unwrap();
+
+		// bootc assembles the root, so we must not ship the OSTree prepare-root
+		// overrides or disable composefs for this layout.
+		assert!(!stage.join("etc/ostree/prepare-root.conf").exists());
+		assert!(
+			!stage
+				.join("usr/lib/systemd/system/ostree-prepare-root.service.d/katsu-live.conf")
+				.exists()
+		);
+
+		let service =
+			fs::read_to_string(stage.join("usr/lib/systemd/system/katsu-composefs-live.service"))
+				.unwrap();
+		// Ordering is what keeps the mounts alive through switch-root, so assert the
+		// same protections the OSTree path needed.
+		assert!(service.contains("ConditionKernelCommandLine=rd.katsu.composefs"));
+		assert!(service.contains("IgnoreOnIsolate=yes"));
+		assert!(service.contains("Wants=systemd-udev-trigger.service"));
+		assert!(!service.contains("Requires=systemd-udev-trigger.service"));
+		assert!(service.contains("Before=sysroot.mount"));
+
+		let script = "usr/libexec/katsu-composefs-live";
+		assert_eq!(fs::metadata(stage.join(script)).unwrap().permissions().mode() & 0o111, 0o111);
+		assert!(
+			std::process::Command::new("sh")
+				.arg("-n")
+				.arg(stage.join(script))
+				.status()
+				.unwrap()
+				.success()
+		);
+		assert!(
+			stage
+				.join("usr/lib/systemd/system/initrd-root-fs.target.requires/sysroot.mount")
+				.exists()
+		);
+		fs::remove_dir_all(workspace).unwrap();
+	}
 
 	#[test]
 	fn mountpoints_helper_tolerates_dracut_debug_on_returning_false() {

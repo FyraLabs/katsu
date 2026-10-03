@@ -1,9 +1,11 @@
+use crate::backends::fs_tree::StagedRoot;
 use crate::backends::fs_tree::TreeOutput;
 use crate::builder::default_true;
 use crate::{backends::fs_tree::RootBuilder, config::Manifest, feature_flag_str};
 use bytesize::ByteSize;
 use color_eyre::{Result, eyre::bail};
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info};
 
@@ -582,14 +584,19 @@ impl BootcRootBuilder {
 		// override per-image with `bootc.staging_disk_size` or for a one-off build
 		// with `KATSU_FEATURE_FLAGS=staging-disk-size=32G`.
 		let disk_size = feature_flag_str!("staging-disk-size")
-			.unwrap_or_else(|| self.staging_disk_size.to_string());
-		// `fallocate` accepts SI suffixes like `24G`, which is what `ByteSize`
-		// renders, but a malformed value must fail here rather than at mkfs time.
-		if disk_size.trim().is_empty() {
-			bail!("staging disk size must not be empty");
-		}
-		info!(%disk_size, ?disk, "Creating staging disk image");
-		cmd_lib::run_cmd!(fallocate -l $disk_size $disk;)?;
+			.map(|size| {
+				size.parse::<ByteSize>()
+					.map_err(|e| color_eyre::eyre::eyre!("invalid staging-disk-size {size:?}: {e}"))
+			})
+			.transpose()?
+			.unwrap_or(self.staging_disk_size);
+		// Use the raw byte count: `ByteSize`'s Display renders "24.0 GB", which
+		// `fallocate` rejects as an invalid length.
+		let disk_bytes = disk_size.as_u64();
+		info!(?disk, bytes = disk_bytes, "Creating staging disk image");
+		// A sparse file: `set_len` extends the length without allocating blocks, so
+		// the image only occupies what the install actually writes.
+		fs::File::create(&disk)?.set_len(disk_bytes)?;
 
 		info!(?disk, ?image, "Installing bootc unified storage onto a staging disk image");
 		// bootc must not run directly on the build host: `SourceInfo` shells out to
@@ -623,18 +630,16 @@ impl BootcRootBuilder {
 
 		// Copy the written root filesystem into place. The installer mounts and
 		// unmounts the target itself, so re-attach the image's root partition just
-		// long enough to copy the tree out, then release everything.
-		let loop_dev = cmd_lib::run_fun!(losetup -Pf --show $disk)?;
-		let loop_dev = loop_dev.trim().to_string();
-		if loop_dev.is_empty() {
-			bail!("losetup returned no device for {}", disk.display());
-		}
-		let guard = LoopDevice { path: loop_dev.clone() };
-		let part = format!("{loop_dev}p3");
-
+		// long enough to expose the tree, then release everything on drop.
+		// The image is partitioned, so the root partition must be visible to mount.
+		// `loopdev_with_file` attaches without scanning, and only the bare device node
+		// appears; use the builder to force a partition scan.
+		let (loop_dev, loop_hdl) = crate::util::loopdev_with_file_and_parts(&disk)?;
+		let loop_dev = loop_dev.to_string_lossy().to_string();
 		// `to-disk` finishes by unmounting what it wrote, but the loop device and its
 		// partitions can need a moment before they are usable again.
 		cmd_lib::run_cmd!(udevadm settle;)?;
+		let part = format!("{loop_dev}p3");
 
 		let staging = workspace.join("unified-root");
 		if staging.exists() {
@@ -642,7 +647,6 @@ impl BootcRootBuilder {
 		}
 		std::fs::create_dir_all(&staging)?;
 		cmd_lib::run_cmd!(mount -o ro $part $staging;)?;
-		let mounted = StagedRoot { mount: staging.clone() };
 
 		// Verify the layout is what we expect before handing it to the ISO phases,
 		// so a partial install fails here rather than during squash.
@@ -650,48 +654,37 @@ impl BootcRootBuilder {
 			bail!("Unified install produced no composefs in {}", staging.display());
 		}
 
-		// The tree must be a plain directory: the EROFS phase walks it, and the
-		// workspace is removed during teardown. Reflink sharing from the staging
-		// filesystem is not preserved, which is expected and measured separately.
-		cmd_lib::run_cmd!(cp -a --reflink=auto ${staging}/. ${sysroot}/;)?;
-		drop(mounted);
-		drop(guard);
-		let _ = std::fs::remove_dir_all(&staging);
-		if disk.exists() {
-			std::fs::remove_file(&disk)?;
+		// Expose the installed tree through an overlayfs rather than copying it: the
+		// staging root is the read-only lower layer and an upper absorbs any
+		// build-time mutation, so nothing is written back to the image and no ~13G
+		// copy is needed. This matches how the system will run live, and the upper
+		// layer is discarded with the mount.
+		let upper = workspace.join("unified-overlay");
+		for dir in ["upper", "work"] {
+			let path = upper.join(dir);
+			if path.exists() {
+				std::fs::remove_dir_all(&path)?;
+			}
+			std::fs::create_dir_all(&path)?;
 		}
+		std::fs::create_dir_all(&sysroot)?;
+		let lower = staging.display();
+		let upp = upper.join("upper");
+		let work = upper.join("work");
+		let target = sysroot.display();
+		let overlay = sysroot.clone();
+		cmd_lib::run_cmd!(
+			mount -t overlay overlay -o lowerdir=$lower,upperdir=$upp,workdir=$work $target;
+		)?;
 
-		info!(?sysroot, "Unified composefs layout ready");
-		Ok(TreeOutput::UnifiedSysroot { sysroot })
-	}
-}
-
-/// Detaches a loop device on drop.
-struct LoopDevice {
-	path: String,
-}
-
-impl Drop for LoopDevice {
-	fn drop(&mut self) {
-		// Bind first: cmd_lib expands `$self.path` as a whole expression.
-		let path = self.path.clone();
-		if let Err(err) = cmd_lib::run_cmd!(losetup -d $path 2>/dev/null;) {
-			debug!(?err, device = %path, "Detaching loop device failed");
-		}
-	}
-}
-
-/// Keeps a staging root unmounted until its tree has been extracted.
-struct StagedRoot {
-	mount: PathBuf,
-}
-
-impl Drop for StagedRoot {
-	fn drop(&mut self) {
-		let mount = self.mount.clone();
-		if let Err(err) = cmd_lib::run_cmd!(umount -R $mount 2>/dev/null;) {
-			debug!(?err, mount = %mount.display(), "Unmounting staged root failed");
-		}
+		// The mounts and loop device must outlive this function, so they travel with
+		// the returned output and are released when the build drops it.
+		info!(?sysroot, "Unified composefs layout ready (overlay, no copy)");
+		Ok(TreeOutput::UnifiedSysroot {
+			sysroot,
+			_loop: loop_hdl,
+			_mounts: vec![StagedRoot::new(staging), StagedRoot::new(overlay)],
+		})
 	}
 }
 

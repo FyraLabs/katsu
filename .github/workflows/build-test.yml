@@ -330,6 +330,92 @@ jobs:
           name: iso-bootc-x86_64
           path: tests/ng/katsu-work/image/katsu.iso
 
+  iso-bootc-x86_64-comptest:
+    strategy:
+      fail-fast: false
+      matrix:
+        compression:
+          - "zstd,level=6"
+          - "lzma,6"
+          - "xz"
+        pcluster_size:
+          - 1048576
+          - 131072
+        # `fragdedupe` accepts only `inode` or `full`; there is no `all` value.
+        fragdedupe:
+          - full
+          - inode
+
+    needs: build-environment
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+      # Pass /dev from host to container
+      # Very hacky, but it works
+      # Microsoft/Github, if you're reading this,
+      # I'm sorry.
+      options: --privileged --security-opt seccomp=unconfined -v /dev:/dev -v /usr:/hostusr -v /:/hostfs
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clean up space before build
+        run: |
+          df -h
+          # Wipe stuff in our host /usr to make some space
+
+          # We don't need the android SDK
+          rm -rf /hostusr/local/lib/android
+          # We're a Rust shop, not a Haskell shop
+          rm -rf /hostusr/local/.ghcup
+          rm -rf /hostfs/opt/ghc
+          # We don't even use .NET
+          rm -rf /hostusr/share/dotnet
+          # We don't need CodeQL in this action
+          rm -rf /hostfs/opt/hostedtoolcache/CodeQL
+
+      - name: Run test
+        # One comma-separated line: clap splits KATSU_FEATURE_FLAGS on `,`, so a
+        # folded/multi-line value would leave leading spaces on later flags and
+        # they would silently not apply.
+        env:
+          KATSU_FEATURE_FLAGS: erofs-compression=${{ matrix.compression }},erofs-chunk-size=${{ matrix.pcluster_size }},erofs-fragdedupe=${{ matrix.fragdedupe }}
+        run: |
+          export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
+          pushd tests/ng
+          echo "COLORBT_SHOW_HIDDEN=1" >> .env
+          echo "KATSU_LOG=trace" >> .env
+
+          start=$(date +%s)
+          katsu -o iso bootc/katsu-iso-bootc.yaml 2>&1
+          elapsed=$(( $(date +%s) - start ))
+
+          mv out.iso katsu-work/image/katsu.iso
+          bytes=$(stat -c %s katsu-work/image/katsu.iso)
+          human=$(numfmt --to=iec --suffix=B "$bytes")
+          popd
+
+          # This job exists to compare size and build cost across the matrix, so
+          # surface both in the summary instead of requiring every artifact to be
+          # downloaded and measured by hand.
+          {
+            echo "### EROFS compression test"
+            echo
+            echo "| compression | chunk size | fragdedupe | ISO size | build time |"
+            echo "|---|---|---|---|---|"
+            echo "| \`${{ matrix.compression }}\` | ${{ matrix.pcluster_size }} | ${{ matrix.fragdedupe }} | $human ($bytes bytes) | ${elapsed}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: iso-bootc-comptest-${{ matrix.compression }}-${{ matrix.pcluster_size }}-${{ matrix.fragdedupe }}
+          path: tests/ng/katsu-work/image/katsu.iso
+          # The whole point of this job is measuring size; a silently empty or
+          # truncated upload would invalidate the comparison.
+          if-no-files-found: error
+
+
   iso-refind-x86_64:
     needs: build-environment
     runs-on: ubuntu-latest

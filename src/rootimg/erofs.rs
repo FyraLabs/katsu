@@ -95,10 +95,16 @@ impl Default for MkfsErofsOptions {
 			// `KATSU_EROFS_WORKERS` to raise it deliberately, or
 			// `KATSU_EROFS_DEDUPE=0` to disable dedup for a faster build.
 			dedupe_workers: 2,
-			// `fragdedupe=full` always dedupes fragments by content, whereas `inode`
-			// only dedupes when inode data is identical (faster, less effective).
-			// Size is the priority for shipped media, so pay the build cost.
-			extra_features: ["all-fragments", "fragdedupe=full", "dedupe"]
+			// `fragdedupe=inode` dedupes only when inode data is identical. That is the
+			// measured-safe setting: `fragdedupe=full` compares every fragment's content
+			// and OOM-killed the build host (RAM *and* swap exhausted) on an ~18G tree,
+			// where the `inode` form completed and still deduplicated ~17.8G.
+			//
+			// `dedupe` is single-threaded by design (`mkfs.erofs` warns
+			// "multi-threaded dedupe is NOT implemented"), so `--workers` does not bound
+			// its memory; it is an index over the whole tree. Keep `--workers` low and
+			// prefer `KATSU_FEATURE_FLAGS=no-erofs-dedupe` on a host without headroom.
+			extra_features: ["all-fragments", "fragdedupe=inode", "dedupe"]
 				.iter()
 				.map(|s| s.to_string())
 				.collect(),
@@ -150,7 +156,7 @@ mod tests {
 		assert!(opts.dedupe_enabled());
 		let args = opts.build_args();
 		assert!(features(&args).contains("dedupe"));
-		assert!(features(&args).contains("fragdedupe=full"));
+		assert!(features(&args).contains("fragdedupe=inode"));
 		let expected = format!("--workers={}", opts.dedupe_workers);
 		assert!(args.contains(&expected));
 	}

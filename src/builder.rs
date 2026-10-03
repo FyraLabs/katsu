@@ -15,6 +15,23 @@ use std::{
 };
 use tracing::{debug, info, trace, warn};
 
+/// Which live-media integration the initramfs should carry.
+///
+/// The three layouts boot through different mechanisms, so the kernel arguments
+/// and units appended to the initramfs differ even though the media payload is
+/// the same shape in all cases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LiveLayout {
+	/// A plain rootfs: no deployment selection, no katsu integration.
+	Plain,
+	/// An OSTree sysroot, selected by `ostree=` and assembled by
+	/// `ostree-prepare-root` with our own overrides.
+	Ostree,
+	/// A native composefs root, selected by `composefs=<D>` and assembled by
+	/// bootc's `bootc-root-setup.service`.
+	Composefs,
+}
+
 pub const WORKDIR: &str = "katsu-work";
 pub const BOOTIMGS: &str = "boot_imgs";
 
@@ -237,15 +254,58 @@ const DR_OMIT: &str = "";
 const DR_ARGS: &str = "-vv --xz --reproducible";
 
 impl IsoBuilder {
-	/// Switch fragment deduplication to the inode-only mode.
+	/// Switch fragment deduplication to the content-comparing `full` mode.
 	///
-	/// `mkfs.erofs` accepts only `inode` and `full`: `inode` dedupes solely when
-	/// inode data is identical, which builds faster but yields a larger image.
-	fn set_fragdedupe_inode(extra_features: &mut [String]) {
+	/// `mkfs.erofs` accepts only `inode` and `full`. `inode` dedupes solely when
+	/// inode data is identical; `full` compares every fragment's content, which is
+	/// more thorough but much heavier and has OOM-killed this host on a large tree.
+	fn set_fragdedupe_full(extra_features: &mut [String]) {
 		for feature in extra_features.iter_mut() {
-			if feature == "fragdedupe=full" {
-				*feature = "fragdedupe=inode".to_string();
+			if feature == "fragdedupe=inode" {
+				*feature = "fragdedupe=full".to_string();
 			}
+		}
+	}
+
+	/// Produce the ISO initramfs for a composefs layout.
+	///
+	/// A composefs tree has no `usr/` at its root, so dracut cannot read it
+	/// directly; the OS lives inside the composefs image. That image *does* contain
+	/// a full tree (`usr/lib/modules/<kver>` and everything dracut needs), so mount
+	/// it and generate against the mounted image instead of the tree root. This
+	/// yields an initramfs built specifically for the live media rather than the
+	/// image's disk-boot one, which would still carry its own root selection.
+	fn composefs_dracut(&self, root: &Path, workspace: &Path) -> Result<PathBuf> {
+		// A composefs image is metadata-only and must be resolved against its object
+		// store. Mounting it through the `composefs` library (the same one bootc uses)
+		// is required: a bare EROFS mount exposes directory entries but not file
+		// contents, because the image references objects under `composefs/objects/`.
+		//
+		// The repository must be read from the *staging* mount, not the ISO tree: the
+		// tree is an overlayfs, and the kernel refuses to mount an EROFS image whose
+		// backing file lives on overlayfs (`ENOTBLK`). Both are views of the same
+		// data; only the plain mount works here.
+		let staging_repo = workspace.join("unified-root/composefs");
+		let repo = if staging_repo.is_dir() { staging_repo } else { root.join("composefs") };
+		let deployment = crate::backends::bootloader::ComposefsDeployment::resolve(root)?
+			.ok_or_else(|| {
+				color_eyre::eyre::eyre!("No composefs BLS entry under {}", root.display())
+			})?;
+		let mountpoint = workspace.join("composefs-root");
+		deployment.mount(&repo, &mountpoint)?;
+		// The mount must outlive dracut, so release it after generating.
+		let guard = crate::backends::fs_tree::StagedRoot::new(mountpoint.clone());
+		let result = self.dracut_generate(&mountpoint, workspace, LiveLayout::Composefs);
+		drop(guard);
+		result
+	}
+
+	fn dracut(&self, root: &Path, workspace: &Path, live: LiveLayout) -> Result<PathBuf> {
+		match live {
+			// A composefs tree has no `usr/` at its root, so the OS tree is taken
+			// from the mounted composefs image instead.
+			LiveLayout::Composefs => self.composefs_dracut(root, workspace),
+			_ => self.dracut_generate(root, workspace, live),
 		}
 	}
 
@@ -270,13 +330,13 @@ impl IsoBuilder {
 		Ok(root_image)
 	}
 
-	fn dracut(&self, root: &Path, workspace: &Path, ostree_live: bool) -> Result<PathBuf> {
+	/// Run dracut against `source_root`, writing the live initramfs into the ISO tree.
+	fn dracut_generate(&self, root: &Path, workspace: &Path, live: LiveLayout) -> Result<PathBuf> {
 		bail_let!(
 			Some(kver) = fs::read_dir(root.join("usr/lib/modules"))?.find_map(|f| {
-				// find any directory
 				trace!(?f, "File in /usr/lib/modules");
 				f.ok()
-				.and_then(|entry| entry.file_name().to_str().map(|s| s.to_string()))
+					.and_then(|entry| entry.file_name().to_str().map(|s| s.to_string()))
 			}) => "Can't find any kernel version in /usr/lib/modules"
 		);
 		info!(?kver, "Found kernel version");
@@ -285,13 +345,29 @@ impl IsoBuilder {
 		// set dracut options
 		// this is kind of a hack, but uhh it works maybe
 
-		let default_modules = if ostree_live { "ostree systemd qemu qemu-net" } else { DR_MODS };
+		let default_modules = match live {
+			LiveLayout::Plain => DR_MODS,
+			// The OSTree path selects the deployment via `ostree=`, and drives it
+			// from our own prepare-root overrides.
+			LiveLayout::Ostree => "ostree systemd qemu qemu-net",
+			// Composefs root assembly is bootc's job, so the `bootc` module (and its
+			// `bootc-root-setup.service`) is required rather than omitted.
+			LiveLayout::Composefs => "bootc systemd qemu qemu-net",
+		};
 		let mut dr_mods = feature_flag_str!("dracut-mods").unwrap_or(default_modules.to_string());
 		let mut dr_omit = feature_flag_str!("dracut-omit").unwrap_or(DR_OMIT.to_string());
-		if ostree_live {
-			dr_mods.push_str(" ostree systemd");
-			// Do not let generic live or composefs generators race our sysroot mount.
-			dr_omit.push_str(" dmsquash-live dmsquash-live-autooverlay livenet bootc");
+		match live {
+			LiveLayout::Plain => {},
+			LiveLayout::Ostree => {
+				dr_mods.push_str(" ostree systemd");
+				// Do not let generic live or composefs generators race our sysroot mount.
+				dr_omit.push_str(" dmsquash-live dmsquash-live-autooverlay livenet bootc");
+			},
+			LiveLayout::Composefs => {
+				dr_mods.push_str(" bootc systemd");
+				// The generic live generators would race our own sysroot.mount.
+				dr_omit.push_str(" dmsquash-live dmsquash-live-autooverlay livenet ostree");
+			},
 		}
 
 		let binding = feature_flag_str!("dracut-args").unwrap_or(DR_ARGS.to_string());
@@ -309,6 +385,16 @@ impl IsoBuilder {
 		if !dr_omit.is_empty() {
 			dr_args.push("--omit".to_string());
 			dr_args.push(dr_omit);
+		}
+		// dracut wants a writable scratch directory and defaults to `$sysroot/var/tmp`,
+		// which cannot work against a read-only composefs mount. Point it at the
+		// workspace instead of making the image writable, which its whole design
+		// avoids.
+		if matches!(live, LiveLayout::Composefs) {
+			let tmpdir = workspace.join("dracut-tmp");
+			std::fs::create_dir_all(&tmpdir)?;
+			dr_args.push("--tmpdir".to_string());
+			dr_args.push(tmpdir.display().to_string());
 		}
 		let mut cmd = std::process::Command::new("dracut");
 
@@ -328,7 +414,7 @@ impl IsoBuilder {
 			cmd.arg(root.canonicalize()?);
 		}
 
-		if ostree_live {
+		if !matches!(live, LiveLayout::Plain) {
 			cmd.arg("--install").arg("mount mkdir realpath touch ln systemd-escape checkisomd5");
 			cmd.arg("--add-drivers").arg("erofs squashfs overlay loop iso9660");
 			cmd.arg("--no-hostonly-cmdline");
@@ -365,8 +451,14 @@ impl IsoBuilder {
 			if !pending_initramfs_path.is_file() {
 				bail!("Dracut succeeded but did not write {}", pending_initramfs_path.display());
 			}
-			if ostree_live {
-				crate::initramfs::append_ostree_live(&pending_initramfs_path, workspace)?;
+			match live {
+				LiveLayout::Ostree => {
+					crate::initramfs::append_ostree_live(&pending_initramfs_path, workspace)?
+				},
+				LiveLayout::Composefs => {
+					crate::initramfs::append_composefs_live(&pending_initramfs_path, workspace)?
+				},
+				LiveLayout::Plain => {},
 			}
 			fs::rename(&pending_initramfs_path, &final_initramfs_path)?;
 		} else {
@@ -474,6 +566,32 @@ impl IsoBuilder {
 			),
 		}
 
+		// The options below mirror `mkfs.erofs` so a build can be tuned without
+		// editing code. Unset flags leave the measured defaults from
+		// `MkfsErofsOptions::default` in place.
+		if let Some(compression) = feature_flag_str!("erofs-compression") {
+			info!(%compression, "Using configured EROFS compression");
+			opts.compression = Some(compression);
+		}
+		if let Some(chunk) = feature_flag_str!("erofs-chunk-size") {
+			match chunk.parse::<u32>() {
+				Ok(n) => {
+					info!(chunk_size = n, "Using configured EROFS chunk size");
+					opts.chunk_size = Some(n);
+				},
+				Err(_) => warn!(%chunk, "Ignoring non-numeric erofs-chunk-size value"),
+			}
+		}
+		if let Some(xattr) = feature_flag_str!("erofs-xattr-level") {
+			match xattr.parse::<u32>() {
+				Ok(n) => {
+					info!(xattr_level = n, "Using configured EROFS xattr level");
+					opts.xattr_level = Some(n);
+				},
+				Err(_) => warn!(%xattr, "Ignoring non-numeric erofs-xattr-level value"),
+			}
+		}
+
 		if let Some(workers) = feature_flag_str!("erofs-workers") {
 			match workers.parse::<u32>() {
 				Ok(n) => {
@@ -494,12 +612,32 @@ impl IsoBuilder {
 			info!("EROFS global deduplication enabled");
 		}
 
-		// Fragment dedup defaults to the size-optimized `full` mode. `inode` is
-		// cheaper to build but dedupes only identical inodes, so allow opting into
-		// it when iterating rather than shipping.
-		if feature_flag_bool!("erofs-fast-fragdedupe") {
-			info!("Using inode-only fragment deduplication (faster, larger output)");
-			Self::set_fragdedupe_inode(&mut opts.extra_features);
+		// Fragment dedup defaults to the measured-safe `inode` mode. `full` compares
+		// every fragment's content and is much heavier; allow opting in when size
+		// matters more than build stability.
+		match feature_flag_str!("erofs-fragdedupe").as_deref() {
+			Some("inode") | None => {},
+			Some("full") => {
+				info!("Using content-comparing fragment deduplication (slower, heavier)");
+				Self::set_fragdedupe_full(&mut opts.extra_features);
+			},
+			Some(other) => {
+				bail!("invalid erofs-fragdedupe value {other:?}; expected `inode` or `full`")
+			},
+		}
+		// `fragdedupe` only applies with a fragments mode, so reject the combination
+		// mkfs.erofs would otherwise silently ignore or reject itself.
+		if let Some(mode) = feature_flag_str!("erofs-fragments") {
+			opts.extra_features.retain(|f| !f.contains("fragments"));
+			match mode.as_str() {
+				"none" => {},
+				"all" => opts.extra_features.push("all-fragments".to_string()),
+				"plain" => opts.extra_features.push("fragments".to_string()),
+				other => bail!(
+					"invalid erofs-fragments value {other:?}; expected `none`, `plain` or `all`"
+				),
+			}
+			info!(mode, "Using configured EROFS fragments mode");
 		}
 
 		erofs_mkfs(root, image, &opts)?;
@@ -688,7 +826,15 @@ impl ImageBuilder for IsoBuilder {
 		let squash_root = tree_output.squash_root();
 		debug!(?tree_root, ?squash_root, sysroot = tree_output.is_sysroot(), "Resolved tree roots");
 
-		let _ = phase!("dracut": self.dracut(&tree_root, &workspace, tree_output.is_sysroot()));
+		let _ = phase!("dracut": self.dracut(
+			&tree_root,
+			&workspace,
+			match &tree_output {
+				crate::backends::fs_tree::TreeOutput::UnifiedSysroot { .. } => LiveLayout::Composefs,
+				crate::backends::fs_tree::TreeOutput::OstreeSysroot { .. } => LiveLayout::Ostree,
+				_ => LiveLayout::Plain,
+			}
+		));
 
 		// Clean up kernel artifacts from /boot before squashing
 		// kernel-install will regenerate them on target system
@@ -889,16 +1035,41 @@ mod test {
 	}
 
 	#[test]
-	fn fragdedupe_full_is_the_default_and_inode_is_opt_in() {
+	fn erofs_options_map_to_mkfs_erofs_arguments() {
 		use crate::rootimg::erofs::MkfsErofsOptions;
-		// Shipping media favors size, so the aggressive content-based mode is the
-		// default and `erofs-fast-fragdedupe` trades it for build speed.
-		let mut features = MkfsErofsOptions::default().extra_features;
-		assert!(features.iter().any(|f| f == "fragdedupe=full"));
 
-		IsoBuilder::set_fragdedupe_inode(&mut features);
+		// These are the switches the compression-test CI matrix drives, so assert the
+		// values actually reach the command line rather than being dropped.
+		let opts = MkfsErofsOptions {
+			compression: Some("lzma,6".to_string()),
+			chunk_size: Some(131072),
+			..Default::default()
+		};
+		let args = opts.build_args();
+		assert!(args.contains(&"-zlzma,6".to_string()));
+		assert!(args.contains(&"-C131072".to_string()));
+	}
+
+	#[test]
+	fn set_fragdedupe_full_is_a_noop_when_inode_is_absent() {
+		// The rewrite must not invent the feature, since `fragdedupe` only applies
+		// alongside a fragments mode.
+		let mut features = vec!["all-fragments".to_string()];
+		IsoBuilder::set_fragdedupe_full(&mut features);
+		assert_eq!(features, vec!["all-fragments".to_string()]);
+	}
+
+	#[test]
+	fn fragdedupe_inode_is_the_default_and_full_is_opt_in() {
+		use crate::rootimg::erofs::MkfsErofsOptions;
+		// `inode` is the measured-safe setting: `full` compares every fragment and
+		// has OOM-killed the build host on a large tree.
+		let mut features = MkfsErofsOptions::default().extra_features;
 		assert!(features.iter().any(|f| f == "fragdedupe=inode"));
-		assert!(!features.iter().any(|f| f == "fragdedupe=full"));
+
+		IsoBuilder::set_fragdedupe_full(&mut features);
+		assert!(features.iter().any(|f| f == "fragdedupe=full"));
+		assert!(!features.iter().any(|f| f == "fragdedupe=inode"));
 		// The neighbouring features must survive the rewrite.
 		assert!(features.iter().any(|f| f == "dedupe"));
 		assert!(features.iter().any(|f| f == "all-fragments"));

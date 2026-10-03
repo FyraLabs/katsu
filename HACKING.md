@@ -118,19 +118,33 @@ debugging use `console=ttyS0,115200 rd.debug rd.shell panic=0`; do not use
 Shipped media favor size over build time:
 
 ```text
--E all-fragments,fragdedupe=full,dedupe   --workers=2
+-E all-fragments,fragdedupe=inode,dedupe   --workers=2
 ```
 
-`fragdedupe` accepts only `inode` or `full` (`full` dedupes fragment data by
-content; `inode` only when inode data is identical, and is faster). `dedupe`
-dedupes compressed data globally. The worker count is capped because dedupe
-memory scales with it. Override for faster local iteration:
+`fragdedupe` accepts only `inode` or `full` (`full` compares every fragment's
+content, and is heavier still). `dedupe` dedupes compressed data globally and is
+**single-threaded by design** — `mkfs.erofs` warns "multi-threaded dedupe is NOT
+implemented" — so `--workers` does not bound its memory, which scales with the
+tree. The worker count is therefore capped, and `dedupe` can be dropped entirely
+on a host without headroom.
 
-```sh
-KATSU_FEATURE_FLAGS=erofs-fast-fragdedupe   # inode mode: faster, larger image
-KATSU_FEATURE_FLAGS=no-erofs-dedupe         # disable global dedupe
-KATSU_FEATURE_FLAGS=erofs-workers=8         # override the worker cap
-```
+Every `mkfs.erofs` option the build needs is exposed as a feature flag:
+
+| Flag | Effect |
+|---|---|
+| `erofs-compression=<spec>` | `-z`, e.g. `zstd,level=6`, `lzma,6`, `xz` |
+| `erofs-chunk-size=<n>` | `-C` physical cluster size |
+| `erofs-xattr-level=<n>` | `-x` xattr level |
+| `erofs-workers=<n>` | `--workers`, overrides the dedupe cap |
+| `erofs-fragdedupe=inode\|full` | `fragdedupe` mode (default `inode`) |
+| `erofs-fragments=none\|plain\|all` | `none`, `fragments`, or `all-fragments` |
+| `no-erofs-dedupe` | drop `-E dedupe` |
+
+Invalid values fail loudly rather than being silently ignored, since a typo would
+otherwise produce an image built with the wrong settings and no indication.
+
+The compression-test CI job drives these across a matrix and reports size and
+build time to the run's job summary.
 
 Unified storage shares data between the composefs object store and the image
 store via reflinks, which EROFS cannot see: content dedup recovers what is

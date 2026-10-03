@@ -401,6 +401,12 @@ pub fn create_sparse(path: &Path, size: u64) -> Result<File> {
 
 pub struct LoopDevHdl(loopdev::LoopDevice);
 
+impl std::fmt::Debug for LoopDevHdl {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_tuple("LoopDevHdl").field(&self.0.path()).finish()
+	}
+}
+
 impl Drop for LoopDevHdl {
 	fn drop(&mut self) {
 		let Err(e) = self.0.detach() else { return };
@@ -413,6 +419,18 @@ pub fn loopdev_with_file(path: &Path) -> Result<(std::path::PathBuf, LoopDevHdl)
 	let lc = loopdev::LoopControl::open()?;
 	let loopdev = lc.next_free()?;
 	loopdev.attach_file(path)?;
+	crate::bail_let!(Some(ldp) = loopdev.path() => "Fail to unwrap loopdev.path() = None");
+	Ok((ldp, LoopDevHdl(loopdev)))
+}
+
+/// Like [`loopdev_with_file`], but forces a partition scan.
+///
+/// Attaching alone publishes only the bare loop device; a partitioned image also
+/// needs `LO_FLAGS_PARTSCAN` before `/dev/loopNp3` and friends appear.
+pub fn loopdev_with_file_and_parts(path: &Path) -> Result<(std::path::PathBuf, LoopDevHdl)> {
+	let lc = loopdev::LoopControl::open()?;
+	let loopdev = lc.next_free()?;
+	loopdev.with().part_scan(true).attach(path)?;
 	crate::bail_let!(Some(ldp) = loopdev.path() => "Fail to unwrap loopdev.path() = None");
 	Ok((ldp, LoopDevHdl(loopdev)))
 }
