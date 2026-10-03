@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""Measure cold random-read latency on an EROFS payload.
+
+Used by the `iso-bootc-x86_64-comptest` CI job so a configuration cannot look
+good on size alone while making the live system slow. The payload is loop-mounted
+by the caller; this samples its content-addressed objects.
+
+Reads go through the filesystem rather than O_DIRECT: EROFS over a loop device
+rejects O_DIRECT with EINVAL, so the caller drops the page cache first and that is
+what makes the samples cold.
+
+The file set and offsets are derived from a fixed seed, so every variant in a
+comparison reads exactly the same bytes.
+
+Note the scope: a composefs payload has no `usr/` at its root, so these objects
+reflect the cluster size, fragments mode and compression algorithm, but *not* the
+per-path `--compress-hints` entries, whose patterns match paths inside the
+composefs image. Hints variants will therefore measure alike here.
+"""
+
+import argparse
+import os
+import random
+import sys
+import time
+
+BLOCK = 4096
+SAMPLES = 300
+SEED = 0xC0FFEE
+
+
+def collect(root: str, block: int) -> list[str]:
+    """Every file at least one block long, in a stable order."""
+    files: list[str] = []
+    for dirpath, dirnames, names in os.walk(root):
+        dirnames.sort()
+        for name in sorted(names):
+            path = os.path.join(dirpath, name)
+            try:
+                if os.path.getsize(path) >= block:
+                    files.append(path)
+            except OSError:
+                # Unreadable entries are not fatal: the point is a comparable
+                # sample, not exhaustiveness.
+                pass
+    files.sort()
+    return files
+
+
+def measure(files: list[str], block: int, samples: int, seed: int) -> list[float]:
+    rng = random.Random(seed)
+    latencies = []
+    for _ in range(samples):
+        path = files[rng.randrange(len(files))]
+        size = os.path.getsize(path)
+        # Block-aligned so the read does not straddle a cluster boundary.
+        offset = (rng.randrange(0, size - block) // block) * block
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            start = time.perf_counter()
+            os.pread(fd, block, offset)
+            latencies.append(time.perf_counter() - start)
+        finally:
+            os.close(fd)
+    latencies.sort()
+    return latencies
+
+
+def percentile(latencies: list[float], fraction: float) -> float:
+    index = min(len(latencies) - 1, int(len(latencies) * fraction))
+    return latencies[index] * 1e6
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("root", help="mounted EROFS root to sample")
+    parser.add_argument("--samples", type=int, default=SAMPLES)
+    parser.add_argument("--block", type=int, default=BLOCK)
+    parser.add_argument("--seed", type=lambda v: int(v, 0), default=SEED)
+    args = parser.parse_args()
+
+    files = collect(args.root, args.block)
+    if not files:
+        print(f"no files of at least {args.block} bytes under {args.root}", file=sys.stderr)
+        return 1
+
+    latencies = measure(files, args.block, args.samples, args.seed)
+    print(
+        f"{percentile(latencies, 0.5):.0f}us / "
+        f"{percentile(latencies, 0.9):.0f}us / "
+        f"{percentile(latencies, 0.99):.0f}us "
+        f"({len(files)} files, {len(latencies)} samples)"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
