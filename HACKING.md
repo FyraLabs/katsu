@@ -67,9 +67,20 @@ that `bootc status` reads, and deploys with an `origin.container-image-reference
 using the unverified policy (no signature verification is claimed).
 
 `unified` builds bootc's native composefs layout. The ISO carries one read-only
-`LiveOS/rootfs.img`; at boot the media is mounted read-only and a tmpfs-backed
-OverlayFS provides writable state before `bootc-root-setup` selects the OS. The
-payload contains a read-only containers-storage as well, so the live system can
+`LiveOS/rootfs.img`. At boot the initramfs mounts the media by label, loop-mounts
+the payload and exposes it at `/sysroot` as a **bind mount**; `bootc-root-setup`
+then mounts the composefs image itself and assembles the root.
+
+Two filesystem details are load-bearing:
+
+- `/sysroot` must not be an OverlayFS. The kernel refuses an EROFS image whose
+  backing file lives on overlayfs (`ENOTBLK`), and the composefs repository lives
+  inside that image, so a bind mount of the loop payload is used instead.
+- The read-only payload needs a writable deployment state. `state/deploy/<D>/{etc,var}`
+  is overlaid with a tmpfs upper before `bootc-root-setup` runs, so services that
+  write under `/var` (logind, NetworkManager, sshd, homed) can start.
+
+The payload contains a read-only containers-storage as well, so the live system can
 install itself offline:
 
 ```sh

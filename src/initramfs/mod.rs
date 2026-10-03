@@ -101,10 +101,14 @@ StandardOutput=journal+console
 StandardError=journal+console
 "#;
 
-/// `/sysroot` for a composefs boot: the physical media merged with a writable
-/// upper, so bootc can open the repository and write its runtime state.
+/// `/sysroot` for a composefs boot is the live EROFS payload, not an overlay:
+/// bootc's `bootc-root-setup.service` mounts the composefs image itself, and the
+/// kernel refuses an EROFS image whose backing file lives on overlayfs
+/// (`ENOTBLK`). The repository therefore has to sit on a real filesystem, which a
+/// bind mount of the loop-mounted payload preserves. `/run/katsu/ro` is mounted
+/// by [`stage_composefs_live`]'s script before this unit runs.
 const COMPOSEFS_SYSROOT_MOUNT: &str = r#"[Unit]
-Description=Katsu writable composefs live sysroot
+Description=Katsu composefs live sysroot
 DefaultDependencies=no
 Requires=katsu-composefs-live.service
 After=katsu-composefs-live.service
@@ -113,10 +117,36 @@ OnFailure=emergency.target
 OnFailureJobMode=isolate
 
 [Mount]
-What=overlay
+What=/run/katsu/ro
 Where=/sysroot
-Type=overlay
-Options=lowerdir=/run/katsu/ro,upperdir=/run/katsu/writable/upper,workdir=/run/katsu/writable/work
+Type=none
+Options=bind
+"#;
+
+/// Give `/sysroot/state` a writable tmpfs upper before bootc assembles the root.
+///
+/// On a disk install the deployment state (`state/deploy/<D>/{etc,var}` and
+/// `state/os/default/var`) lives on writable Btrfs subvolumes, and bootc mounts
+/// the deployment's `/var` directly from there. Live media is read-only, so
+/// without an upper every service that writes under `/var` fails (logind,
+/// NetworkManager, sshd, upower). Overlaying the state directory reproduces the
+/// disk behaviour without touching the composefs repository below it, which must
+/// stay off overlayfs.
+const COMPOSEFS_STATE_OVERLAY: &str = r#"[Unit]
+Description=Katsu writable composefs live state
+DefaultDependencies=no
+Requires=sysroot.mount
+After=sysroot.mount
+Before=bootc-root-setup.service initrd-root-fs.target
+OnFailure=emergency.target
+OnFailureJobMode=isolate
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/katsu-composefs-state
+StandardOutput=journal+console
+StandardError=journal+console
 "#;
 
 /// Stage the composefs initramfs integration.
@@ -138,6 +168,8 @@ pub fn stage_composefs_live(workspace: &Path) -> Result<PathBuf> {
 			true,
 		),
 		("usr/lib/systemd/system/katsu-composefs-live.service", COMPOSEFS_LIVE_SERVICE, false),
+		("usr/lib/systemd/system/katsu-composefs-state.service", COMPOSEFS_STATE_OVERLAY, false),
+		("usr/libexec/katsu-composefs-state", include_str!("katsu-composefs-state.sh"), true),
 		("usr/lib/systemd/system/sysroot.mount", COMPOSEFS_SYSROOT_MOUNT, false),
 	];
 	for (relative, contents, executable) in files {
@@ -151,6 +183,14 @@ pub fn stage_composefs_live(workspace: &Path) -> Result<PathBuf> {
 	let wants = stage.join("usr/lib/systemd/system/initrd-root-fs.target.requires");
 	fs::create_dir_all(&wants)?;
 	std::os::unix::fs::symlink("../sysroot.mount", wants.join("sysroot.mount"))?;
+	// `Before=` only orders; the state overlay also has to be pulled into the
+	// transaction before bootc assembles the root.
+	let state_wants = stage.join("usr/lib/systemd/system/bootc-root-setup.service.wants");
+	fs::create_dir_all(&state_wants)?;
+	std::os::unix::fs::symlink(
+		"../katsu-composefs-state.service",
+		state_wants.join("katsu-composefs-state.service"),
+	)?;
 	Ok(stage)
 }
 
@@ -320,6 +360,44 @@ mod tests {
 			stage
 				.join("usr/lib/systemd/system/initrd-root-fs.target.requires/sysroot.mount")
 				.exists()
+		);
+		// `/sysroot` must expose the repository on a real filesystem: bootc mounts
+		// the composefs image itself, and an EROFS image on overlayfs fails with
+		// ENOTBLK. A bind mount of the loop payload keeps it off overlayfs.
+		let sysroot_mount =
+			fs::read_to_string(stage.join("usr/lib/systemd/system/sysroot.mount")).unwrap();
+		assert!(sysroot_mount.contains("Options=bind"));
+		assert!(!sysroot_mount.contains("Type=overlay"));
+		assert!(!sysroot_mount.contains("lowerdir="));
+
+		// A read-only payload leaves every service that writes under /var broken,
+		// so the deployment state needs a writable upper before bootc assembles the
+		// root.
+		let state =
+			fs::read_to_string(stage.join("usr/lib/systemd/system/katsu-composefs-state.service"))
+				.unwrap();
+		assert!(state.contains("After=sysroot.mount"));
+		assert!(state.contains("Before=bootc-root-setup.service"));
+		assert!(
+			stage
+				.join(
+					"usr/lib/systemd/system/bootc-root-setup.service.wants/\
+					 katsu-composefs-state.service"
+				)
+				.exists()
+		);
+		let state_script = "usr/libexec/katsu-composefs-state";
+		assert_eq!(
+			fs::metadata(stage.join(state_script)).unwrap().permissions().mode() & 0o111,
+			0o111
+		);
+		assert!(
+			std::process::Command::new("sh")
+				.arg("-n")
+				.arg(stage.join(state_script))
+				.status()
+				.unwrap()
+				.success()
 		);
 		fs::remove_dir_all(workspace).unwrap();
 	}

@@ -364,7 +364,18 @@ impl IsoBuilder {
 			},
 			LiveLayout::Composefs => {
 				// The generic live generators would race our own sysroot.mount.
-				dr_omit.push_str(" dmsquash-live dmsquash-live-autooverlay livenet ostree");
+				//
+				// `ostree` is not omitted: the image's own dracut configs
+				// (`20-bootc-base.conf` and the Ostree generator's own `55-ostree.conf`)
+				// add it, so omitting it there is what breaks the build. Its
+				// `installkernel` is the only thing that pulls `erofs` and `overlay` into
+				// the initramfs, and without them dracut aborts with a hard error:
+				// "Module 'overlayfs' will not be installed, because kernel module
+				// 'overlay' is not available" / "Module 'iscsi' cannot be installed".
+				// The `50bootc` module installs those same two modules *unconditionally*
+				// rather than gated on the dependencies check, so with it carried over
+				// from the image's initramfs the boot path is unaffected either way.
+				dr_omit.push_str(" dmsquash-live dmsquash-live-autooverlay livenet");
 			},
 		}
 
@@ -412,10 +423,38 @@ impl IsoBuilder {
 			cmd.arg(root.canonicalize()?);
 		}
 
+		// The composefs layout reaches the OS tree through a mount that can be released
+		// by the kernel once `katsu` stops holding it, which leaves dracut running with
+		// a `-r` that no longer resolves. That makes module probes fail and dracut exit
+		// with `Module 'iscsi' cannot be installed.`, so a removable backing store is a
+		// hard error rather than something to paper over.
+		if dracut_outside_chroot && !root.is_dir() {
+			bail!(
+				"composefs root {} is not readable when generating the initramfs",
+				root.display()
+			);
+		}
+
 		if !matches!(live, LiveLayout::Plain) {
 			cmd.arg("--install").arg("mount mkdir realpath touch ln systemd-escape checkisomd5");
 			cmd.arg("--add-drivers").arg("erofs squashfs overlay loop iso9660");
 			cmd.arg("--no-hostonly-cmdline");
+		}
+		// `-r` rebases *units and files* onto the sysroot, but dracut still reads
+		// kernel modules from the build host's `/lib/modules`. On a machine whose
+		// kernel matches the image's that silently works; anywhere else (CI) every
+		// module probe fails, and an optional module whose `check()` returns 1 —
+		// `iscsi` is the usual one — aborts the build with
+		// `Module 'iscsi' cannot be installed.` Point dracut at the image's own
+		// modules instead, which for a composefs layout live inside the mounted
+		// image rather than in the tree.
+		let kmoddir = root.join("usr/lib/modules").join(&kver);
+		if kmoddir.is_dir() {
+			// Resolve so dracut does not interpret the path relative to whatever
+			// working directory it happens to change into.
+			let kmoddir = kmoddir.canonicalize()?;
+			debug!(?kmoddir, "Using kernel modules from the source root");
+			cmd.arg("--kmoddir").arg(&kmoddir);
 		}
 		let cmd = cmd.args(&dr_args).arg("--kver").arg(&kver);
 
