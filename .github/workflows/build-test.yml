@@ -350,11 +350,10 @@ jobs:
           rm -rf /hostfs/opt/hostedtoolcache/CodeQL
 
       - name: Run test
+        # One comma-separated line: clap splits KATSU_FEATURE_FLAGS on `,`, so a
+        # folded/multi-line value would leave leading spaces on later flags and
+        # they would silently not apply.
         env:
-          KATSU_FEATURE_FLAGS: >-
-            erofs-compression=${{ matrix.compression }},
-            erofs-chunk-size=${{ matrix.pcluster_size }},
-            erofs-fragdedupe=${{ matrix.fragdedupe }}
           KATSU_FEATURE_FLAGS: erofs-compression=${{ matrix.compression }},erofs-chunk-size=${{ matrix.pcluster_size }},erofs-fragdedupe=${{ matrix.fragdedupe }}
         run: |
           export PATH=$HOME/.cargo/bin:$PATH
