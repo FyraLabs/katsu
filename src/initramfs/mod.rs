@@ -132,6 +132,11 @@ pub fn stage_composefs_live(workspace: &Path) -> Result<PathBuf> {
 	}
 	let files = [
 		("usr/libexec/katsu-composefs-live", include_str!("katsu-composefs-live.sh"), true),
+		(
+			"usr/lib/systemd/system-generators/katsu-composefs-generator",
+			include_str!("katsu-composefs-generator.sh"),
+			true,
+		),
 		("usr/lib/systemd/system/katsu-composefs-live.service", COMPOSEFS_LIVE_SERVICE, false),
 		("usr/lib/systemd/system/sysroot.mount", COMPOSEFS_SYSROOT_MOUNT, false),
 	];
@@ -292,6 +297,21 @@ mod tests {
 			std::process::Command::new("sh")
 				.arg("-n")
 				.arg(stage.join(script))
+				.status()
+				.unwrap()
+				.success()
+		);
+		// The live service must be pinned to the labeled ISO device, or it races
+		// udev and cannot resolve /dev/disk/by-label/<label>.
+		let generator = "usr/lib/systemd/system-generators/katsu-composefs-generator";
+		assert_eq!(
+			fs::metadata(stage.join(generator)).unwrap().permissions().mode() & 0o111,
+			0o111
+		);
+		assert!(
+			std::process::Command::new("sh")
+				.arg("-n")
+				.arg(stage.join(generator))
 				.status()
 				.unwrap()
 				.success()

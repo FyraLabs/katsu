@@ -16,14 +16,11 @@ RUN --mount=type=cache,target=/var/cache \
     gdisk \
     util-linux-core \
     grub2-efi \
-    shim-x64 \
     bootupd \
-    grub2-pc-modules \
     grub2-tools-extra \
     uboot-images-armv8 \
     uboot-tools \
     rustc \
-    qemu-user-static-aarch64 \
     qemu-user-binfmt \
     qemu-img \
     cargo \
@@ -57,7 +54,10 @@ RUN --mount=type=cache,target=/var/cache \
 #   openssl-devel, pkgconf
 #                  linking `composefs-rs` pulls in `openssl-sys`, which needs the
 #                  OpenSSL headers at build time and probes for them via pkg-config.
-#   shim-x64, bootupd, grub2-pc-modules
+#   shim-x64, grub2-pc-modules, qemu-user-static-aarch64
+#                  x86_64-only, so deliberately absent from this shared list. See
+#                  the architecture-scoped installs below.
+#   bootupd
 #                  `grub2-efi` alone does not pull in shim. The ISO's
 #                  removable-media loader needs it, `bootupctl` populates the
 #                  `/usr/lib/efi/<component>/<version>/` cache katsu reads the EFI
@@ -67,6 +67,19 @@ RUN --mount=type=cache,target=/var/cache \
 # Keep this list comment-free inline: a `#` inside a backslash-continued command is
 # not a shell comment, it becomes an argument.
 # TODO: Probably don't add RPMFusion repos to the image, guide users to add GPG keys and repos themselves?
+
+# Architecture-scoped packages, kept out of the list above so an ARM build does
+# not try to resolve x86_64-exclusive names. `shim-x64` is a noarch wrapper that
+# Requires `shim-x64` proper, and `qemu-user-static-aarch64` only exists on
+# x86_64; either one fails the whole transaction on aarch64.
+ARG TARGETARCH
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+      amd64) arch_pkgs="shim-x64 grub2-pc-modules qemu-user-static-aarch64" ;; \
+      arm64) arch_pkgs="qemu-user-static" ;; \
+      *) echo >&2 "Unsupported TARGETARCH: ${TARGETARCH}"; exit 1 ;; \
+    esac; \
+    dnf install -y --setopt=install_weak_deps=False ${arch_pkgs}
 
 FROM base AS rust-builder
 

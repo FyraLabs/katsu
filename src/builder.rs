@@ -354,17 +354,15 @@ impl IsoBuilder {
 			// `bootc-root-setup.service`) is required rather than omitted.
 			LiveLayout::Composefs => "bootc systemd qemu qemu-net",
 		};
-		let mut dr_mods = feature_flag_str!("dracut-mods").unwrap_or(default_modules.to_string());
+		let dr_mods = feature_flag_str!("dracut-mods").unwrap_or(default_modules.to_string());
 		let mut dr_omit = feature_flag_str!("dracut-omit").unwrap_or(DR_OMIT.to_string());
 		match live {
 			LiveLayout::Plain => {},
 			LiveLayout::Ostree => {
-				dr_mods.push_str(" ostree systemd");
 				// Do not let generic live or composefs generators race our sysroot mount.
 				dr_omit.push_str(" dmsquash-live dmsquash-live-autooverlay livenet bootc");
 			},
 			LiveLayout::Composefs => {
-				dr_mods.push_str(" bootc systemd");
 				// The generic live generators would race our own sysroot.mount.
 				dr_omit.push_str(" dmsquash-live dmsquash-live-autooverlay livenet ostree");
 			},
