@@ -306,15 +306,18 @@ jobs:
       fail-fast: false
       matrix:
         compression:
-          - "zstd,level=6"
-          - "lzma,6"
-          - "xz"
+          - zstd
+          - lzma
+          - xz
+        level:
+          - "6"
         pcluster_size:
           - 1048576
           - 131072
         # `fragdedupe` accepts only `inode` or `full`; there is no `all` value.
+        # `full` compares every fragment's content and is known to OOM a large
+        # tree, so it rides in the dedicated latency job instead.
         fragdedupe:
-          - full
           - inode
 
     needs: build-environment
@@ -352,9 +355,10 @@ jobs:
       - name: Run test
         # One comma-separated line: clap splits KATSU_FEATURE_FLAGS on `,`, so a
         # folded/multi-line value would leave leading spaces on later flags and
-        # they would silently not apply.
+        # they would silently not apply. The compression level is its own flag for
+        # the same reason: `zstd,level=6` would be split and the level dropped.
         env:
-          KATSU_FEATURE_FLAGS: erofs-compression=${{ matrix.compression }},erofs-chunk-size=${{ matrix.pcluster_size }},erofs-fragdedupe=${{ matrix.fragdedupe }}
+          KATSU_FEATURE_FLAGS: erofs-compression=${{ matrix.compression }},erofs-compression-level=${{ matrix.level }},erofs-chunk-size=${{ matrix.pcluster_size }},erofs-fragdedupe=${{ matrix.fragdedupe }}
         run: |
           export PATH=$HOME/.cargo/bin:$PATH
           export KATSU_KEEP_CHROOT=1
@@ -369,6 +373,11 @@ jobs:
           mv out.iso katsu-work/image/katsu.iso
           bytes=$(stat -c %s katsu-work/image/katsu.iso)
           human=$(numfmt --to=iec --suffix=B "$bytes")
+          # The payload dominates the ISO and is what the EROFS settings actually
+          # shape, so report it separately: two configurations can produce the same
+          # ISO size while compressing the payload very differently.
+          payload_bytes=$(stat -c %s katsu-work/iso-tree/LiveOS/rootfs.img)
+          payload_human=$(numfmt --to=iec --suffix=B "$payload_bytes")
           popd
 
           # This job exists to compare size and build cost across the matrix, so
@@ -377,18 +386,105 @@ jobs:
           {
             echo "### EROFS compression test"
             echo
-            echo "| compression | chunk size | fragdedupe | ISO size | build time |"
-            echo "|---|---|---|---|---|"
-            echo "| \`${{ matrix.compression }}\` | ${{ matrix.pcluster_size }} | ${{ matrix.fragdedupe }} | $human ($bytes bytes) | ${elapsed}s |"
+            echo "| compression | level | chunk size | fragdedupe | payload | ISO size | build time |"
+            echo "|---|---|---|---|---|---|---|"
+            echo "| \`${{ matrix.compression }}\` | ${{ matrix.level }} | ${{ matrix.pcluster_size }} | ${{ matrix.fragdedupe }} | $payload_human ($payload_bytes bytes) | $human ($bytes bytes) | ${elapsed}s |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: iso-bootc-comptest-${{ matrix.compression }}-${{ matrix.pcluster_size }}-${{ matrix.fragdedupe }}
+          name: iso-bootc-comptest-${{ matrix.compression }}-${{ matrix.level }}-${{ matrix.pcluster_size }}-${{ matrix.fragdedupe }}
           path: tests/ng/katsu-work/image/katsu.iso
           # The whole point of this job is measuring size; a silently empty or
           # truncated upload would invalidate the comparison.
+          if-no-files-found: error
+
+
+  # The shipped defaults trade some size for live read latency: `fragments`
+  # instead of `all-fragments`, 128KiB physical clusters instead of 1MiB, and
+  # per-path hints for kernel modules and shared libraries. This job measures
+  # that tradeoff against the previous defaults so the choice stays evidenced
+  # rather than assumed. `fragdedupe=full` rides along because it is the one
+  # setting known to OOM a large tree and must not land in the main matrix.
+  iso-bootc-x86_64-latency:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: default
+            fragments: fragments
+            pcluster_size: 131072
+            compress_hints: live
+          - name: size-max
+            fragments: all-fragments
+            pcluster_size: 1048576
+            compress_hints: none
+          - name: no-hints
+            fragments: fragments
+            pcluster_size: 131072
+            compress_hints: none
+          - name: fragdedupe-full
+            fragments: fragments
+            pcluster_size: 131072
+            compress_hints: live
+            fragdedupe: full
+
+    needs: build-environment
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+      # Same host passthrough requirements as the compression matrix above.
+      options: --privileged --security-opt seccomp=unconfined -v /dev:/dev -v /run/udev:/run/udev -v /var/tmp:/var/tmp -v /var/lib/containers:/var/lib/containers -v /usr:/hostusr -v /:/hostfs
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clean up space before build
+        run: |
+          df -h
+          rm -rf /hostusr/local/lib/android
+          rm -rf /hostusr/local/.ghcup
+          rm -rf /hostfs/opt/ghc
+          rm -rf /hostfs/usr/share/dotnet
+          rm -rf /hostfs/opt/hostedtoolcache/CodeQL
+
+      - name: Run test
+        # One comma-separated line: clap splits KATSU_FEATURE_FLAGS on `,`, so a
+        # folded/multi-line value would leave leading spaces on later flags and
+        # they would silently not apply.
+        env:
+          KATSU_FEATURE_FLAGS: erofs-compression=zstd,erofs-compression-level=6,erofs-chunk-size=${{ matrix.pcluster_size }},erofs-fragments=${{ matrix.fragments }},erofs-compress-hints=${{ matrix.compress_hints }}${{ matrix.fragdedupe && format(',erofs-fragdedupe={0}', matrix.fragdedupe) || '' }}
+        run: |
+          export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
+          pushd tests/ng
+          echo "COLORBT_SHOW_HIDDEN=1" >> .env
+          echo "KATSU_LOG=trace" >> .env
+
+          start=$(date +%s)
+          katsu -o iso bootc/katsu-iso-bootc.yaml 2>&1
+          elapsed=$(( $(date +%s) - start ))
+
+          mv out.iso katsu-work/image/katsu.iso
+          bytes=$(stat -c %s katsu-work/image/katsu.iso)
+          human=$(numfmt --to=iec --suffix=B "$bytes")
+          payload_bytes=$(stat -c %s katsu-work/iso-tree/LiveOS/rootfs.img)
+          payload_human=$(numfmt --to=iec --suffix=B "$payload_bytes")
+          popd
+
+          {
+            echo "### EROFS read-latency test"
+            echo
+            echo "| variant | fragments | pcluster | hints | payload | ISO size | build time |"
+            echo "|---|---|---|---|---|---|---|"
+            echo "| \`${{ matrix.name }}\` | \`${{ matrix.fragments }}\` | ${{ matrix.pcluster_size }} | \`${{ matrix.compress_hints }}\` | $payload_human ($payload_bytes bytes) | $human ($bytes bytes) | ${elapsed}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: iso-bootc-latency-${{ matrix.name }}
+          path: tests/ng/katsu-work/image/katsu.iso
           if-no-files-found: error
 
 

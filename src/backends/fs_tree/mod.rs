@@ -6,6 +6,10 @@ use color_eyre::{Result, eyre::bail};
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
+/// File name of the staging disk image bootc installs a unified layout into,
+/// relative to the workspace.
+pub const UNIFIED_STAGING_IMAGE: &str = "unified.raw";
+
 pub trait RootBuilder {
 	fn build(&self, chroot: &Path, manifest: &Manifest) -> Result<TreeOutput>;
 }
@@ -46,6 +50,9 @@ pub enum TreeOutput {
 	/// used; dropping them releases the mounts and the loop device.
 	UnifiedSysroot {
 		sysroot: PathBuf,
+		/// The staging disk image bootc installed into, whose ESP the live payload
+		/// must carry so bootc can find it at runtime.
+		staging_image: PathBuf,
 		/// Keeps the loop device attached while the layers below are mounted.
 		_loop: crate::util::LoopDevHdl,
 		/// The overlay and its read-only lower layer, torn down on drop.
@@ -96,6 +103,17 @@ impl TreeOutput {
 		matches!(self, Self::OstreeSysroot { .. } | Self::UnifiedSysroot { .. })
 	}
 
+	/// The staging disk image a unified layout was installed into, if any.
+	///
+	/// The live payload has to carry that image's ESP, because bootc looks for one
+	/// on the media it boots from; a plain EROFS loop would not provide it.
+	pub fn staging_image(&self) -> Option<&Path> {
+		match self {
+			Self::UnifiedSysroot { staging_image, .. } => Some(staging_image),
+			_ => None,
+		}
+	}
+
 	/// Reconstruct a `TreeOutput` from a workspace left by a previous build, so the
 	/// `root` phase can be skipped when iterating on later phases.
 	///
@@ -107,7 +125,7 @@ impl TreeOutput {
 		// extracted tree is an overlay over a loop device, so it has to be rebuilt
 		// rather than reused as a directory. Check the image first, since the tree
 		// directory may legitimately be absent after a clean teardown.
-		if workspace.join("unified.raw").is_file() {
+		if workspace.join(UNIFIED_STAGING_IMAGE).is_file() {
 			info!(?workspace, "Re-attaching unified composefs sysroot from its staging image");
 			return Self::reattach_unified(workspace).map(Some);
 		}
@@ -137,7 +155,7 @@ impl TreeOutput {
 	/// later phases cannot tell the difference. Only valid within the workspace that
 	/// created the image.
 	fn reattach_unified(workspace: &Path) -> Result<Self> {
-		let disk = workspace.join("unified.raw");
+		let disk = workspace.join(UNIFIED_STAGING_IMAGE);
 		if !disk.is_file() {
 			bail!(
 				"no staging image at {}; the unified layout needs a full `root` phase",
@@ -169,7 +187,12 @@ impl TreeOutput {
 		// phases fail obscurely. The mounts are already live, so a bail here would leak
 		// them, hence the guard is built first.
 		let mounts = vec![StagedRoot::new(staging)];
-		let output = Self::UnifiedSysroot { sysroot, _loop: loop_hdl, _mounts: mounts };
+		let output = Self::UnifiedSysroot {
+			sysroot,
+			staging_image: disk.clone(),
+			_loop: loop_hdl,
+			_mounts: mounts,
+		};
 		if !output.squash_root().join("composefs").is_dir() {
 			bail!(
 				"staging image {} has no composefs repository; re-run the `root` phase",

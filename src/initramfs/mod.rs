@@ -356,6 +356,19 @@ mod tests {
 				.unwrap()
 				.success()
 		);
+
+		// The payload is a GPT disk, so the root filesystem is a partition. Mounting
+		// the whole image would present a disk to bootc rather than the EROFS, and
+		// losing the partition scan would drop the ESP bootc needs.
+		let contents = fs::read_to_string(stage.join(script)).unwrap();
+		assert!(
+			contents.contains("losetup --show -P"),
+			"the payload must be attached with partition scanning"
+		);
+		assert!(
+			contents.contains(r#""${loop}p3""#),
+			"the composefs root is partition 3 of the payload"
+		);
 		assert!(
 			stage
 				.join("usr/lib/systemd/system/initrd-root-fs.target.requires/sysroot.mount")

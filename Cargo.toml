@@ -47,3 +47,7 @@ indexmap = "2.2.6"
 tiffin = "0.3.2"
 karen = "0.1.2"
 shellish_parse = "2.2.0"
+# Writing the live payload's GPT table in-process. bootc needs a discoverable ESP
+# on the media it boots from, which a bare EROFS loop cannot provide; a library
+# avoids shelling out to sfdisk and the partition-scan race that follows.
+gpt = "4.1"

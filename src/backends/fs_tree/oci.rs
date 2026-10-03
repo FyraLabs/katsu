@@ -682,6 +682,7 @@ impl BootcRootBuilder {
 		info!(?sysroot, "Unified composefs layout ready (overlay, no copy)");
 		Ok(TreeOutput::UnifiedSysroot {
 			sysroot,
+			staging_image: workspace.join(crate::backends::fs_tree::UNIFIED_STAGING_IMAGE),
 			_loop: loop_hdl,
 			_mounts: vec![StagedRoot::new(staging), StagedRoot::new(overlay)],
 		})

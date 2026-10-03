@@ -4,7 +4,7 @@ use crate::{
 	cli::OutputFormat,
 	config::{Manifest, Script},
 	feature_flag_bool, feature_flag_str,
-	rootimg::erofs::{MkfsErofsOptions, erofs_mkfs},
+	rootimg::erofs::{CompressHints, MkfsErofsOptions, erofs_mkfs},
 	util::{just_write, loopdev_with_file},
 };
 use color_eyre::{Result, eyre::bail};
@@ -569,6 +569,38 @@ impl IsoBuilder {
 		self.erofs_with_selinux_root(root, root, image)
 	}
 
+	/// Wrap a built EROFS payload in the GPT disk image the live media ships.
+	///
+	/// The ESP comes from the bootc staging image rather than being synthesised, so
+	/// the live system's bootloader state matches a real install. The `/boot` tree
+	/// goes into an XBOOTLDR partition, mirroring the staging layout, and the EROFS
+	/// replaces its Btrfs root.
+	fn wrap_payload_in_gpt(
+		staging_image: &Path, payload: &Path, tree_root: &Path, destination: &Path,
+		workspace: &Path,
+	) -> Result<()> {
+		use crate::rootimg::gpt::{WrapOptions, find_staging_esp, wrap_in_gpt};
+
+		// The staging image is loop-attached by the `root` phase's output; read its
+		// ESP from the whole-disk node so this works whether or not that is still
+		// mounted.
+		let (disk, handle) = crate::util::loopdev_with_file_and_parts(staging_image)?;
+		let esp = find_staging_esp(&disk)?;
+		let result = wrap_in_gpt(&WrapOptions {
+			root_image: payload,
+			destination,
+			boot_tree: &tree_root.join("boot"),
+			esp: &esp,
+			scratch: &workspace.join("gpt-scratch"),
+		});
+		drop(handle);
+		// The standalone EROFS is an intermediate; the GPT image now holds it.
+		if result.is_ok() {
+			fs::remove_file(payload).ok();
+		}
+		result
+	}
+
 	/// Like [`Self::erofs`], but reads SELinux contexts from `selinux_root`.
 	///
 	/// For an OSTree sysroot the contexts live under
@@ -610,6 +642,16 @@ impl IsoBuilder {
 			info!(%compression, "Using configured EROFS compression");
 			opts.compression = Some(compression);
 		}
+		// The level is a separate flag because the flag list is comma-separated and
+		// a `zstd,level=6` value would be split apart, silently dropping the level.
+		if let Some(level) = feature_flag_str!("erofs-compression-level") {
+			if let Some(compression) = opts.compression.as_mut() {
+				info!(%level, "Using configured EROFS compression level");
+				*compression = format!("{compression},level={level}");
+			} else {
+				warn!("Ignoring erofs-compression-level without an erofs-compression algorithm");
+			}
+		}
 		if let Some(chunk) = feature_flag_str!("erofs-chunk-size") {
 			match chunk.parse::<u32>() {
 				Ok(n) => {
@@ -637,6 +679,18 @@ impl IsoBuilder {
 				},
 				Err(_) => warn!(%workers, "Ignoring non-numeric erofs-workers value"),
 			}
+		}
+
+		// A hints file lets hot, randomly-read paths use smaller physical clusters
+		// without giving up large clusters for bulk data. The `live` strategy is the
+		// default; a path uses that file instead, and `none` disables hints entirely.
+		if let Some(hints) = feature_flag_str!("erofs-compress-hints") {
+			opts.compress_hints = match hints.as_str() {
+				"live" => Some(CompressHints::Live),
+				"none" => None,
+				other => Some(CompressHints::Path(PathBuf::from(other))),
+			};
+			info!(strategy = %hints, "Using EROFS compression hints");
 		}
 
 		// Dedup is on by default (see `MkfsErofsOptions::default`). Allow explicit
@@ -924,13 +978,38 @@ impl ImageBuilder for IsoBuilder {
 		//
 		// SELinux contexts are read from the deployment root (`tree_root`), which
 		// for a sysroot is *inside* the squashed tree rather than at its top.
+		//
+		// The unified layout additionally wraps the payload in a GPT disk image:
+		// bootc looks for an ESP among the backing devices of whatever it booted
+		// from, and a bare EROFS loop provides none, so every bootc command —
+		// including `bootc status` — would fail. Building the EROFS to a temporary
+		// path leaves the final one free for the wrapper.
+		let needs_gpt = tree_output.staging_image().is_some() && !feature_flag_bool!("no-erofs");
+		let payload = if needs_gpt {
+			let mut scratch = root_image.as_os_str().to_os_string();
+			scratch.push(".erofs");
+			PathBuf::from(scratch)
+		} else {
+			root_image.clone()
+		};
+
 		if feature_flag_bool!("no-erofs") {
-			let _ = phase!("rootimg": self.squashfs(&squash_root, &root_image));
+			let _ = phase!("rootimg": self.squashfs(&squash_root, &payload));
 		} else {
 			let _ = phase!("rootimg": self.erofs_with_selinux_root(
 				&squash_root,
 				&tree_root,
-				&root_image
+				&payload
+			));
+		}
+
+		if let Some(staging_image) = tree_output.staging_image().filter(|_| needs_gpt) {
+			let _ = phase!("rootimg": Self::wrap_payload_in_gpt(
+				staging_image,
+				&payload,
+				&tree_root,
+				&root_image,
+				&workspace
 			));
 		}
 
@@ -1145,7 +1224,7 @@ mod test {
 		assert!(!features.iter().any(|f| f == "fragdedupe=inode"));
 		// The neighbouring features must survive the rewrite.
 		assert!(features.iter().any(|f| f == "dedupe"));
-		assert!(features.iter().any(|f| f == "all-fragments"));
+		assert!(features.iter().any(|f| f == "fragments"));
 	}
 
 	#[test]

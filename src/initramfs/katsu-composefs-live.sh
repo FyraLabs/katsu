@@ -27,7 +27,13 @@ ln -s "/dev/disk/by-label/$label" /run/initramfs/livedev
 
 image=/run/initramfs/live/LiveOS/rootfs.img
 [ -f "$image" ] || fail "Root image not found: $image"
-mount -o ro,loop "$image" /run/katsu/ro || fail 'Cannot mount live root image'
+
+# The payload is a GPT disk, not a bare filesystem: bootc looks for an ESP among
+# the backing devices of everything it mounts, and only a partitioned disk can
+# expose one. Its root filesystem is partition 3 (ESP, XBOOTLDR, root).
+loop=$(losetup --show -P --find -r "$image") || fail 'Cannot attach live root image'
+[ -b "${loop}p3" ] || fail "No root partition in $image (expected a GPT payload)"
+mount -o ro "${loop}p3" /run/katsu/ro || fail 'Cannot mount live root partition'
 
 [ -d /run/katsu/ro/composefs ] || fail 'Live image contains no composefs repository'
 # bootc-root-setup opens the deployment state even when no /etc or /var mount is
