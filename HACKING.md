@@ -89,11 +89,12 @@ bootc install to-disk \
   --target-imgref <registry image> /dev/vdb
 ```
 
-**Image requirement:** `additionalimagestores` must include
-`/usr/lib/bootc/storage` in the image's full `/etc/containers/storage.conf`. The
-shipped `/usr/share/containers/storage.conf` points only at the empty
-`/usr/lib/containers/storage`, and `storage.conf.d` drop-ins are not honoured for
-this setting.
+**No image-side configuration is required.** `bootc install` resolves the store
+itself, from `/sysroot`, and never consults the image's
+`/etc/containers/storage.conf`. Do not add `additionalimagestores` there: it makes
+containers-storage `stat` `/usr/lib/bootc/storage`, a symlink through `/sysroot`,
+which fails whenever that is not mounted. Live media configures podman for itself
+in the livesys extension instead.
 
 The `unified` layout stages a disk image because bootc's composefs installer
 requires a real backing device with an ESP. Set its size with
