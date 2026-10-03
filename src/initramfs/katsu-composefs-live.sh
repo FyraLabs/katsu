@@ -17,7 +17,7 @@ fail() {
 label=$(getarg rd.katsu.label=) || fail 'Missing rd.katsu.label'
 [ -n "$label" ] || fail 'Empty rd.katsu.label'
 
-mkdir -p /run/initramfs/live /run/katsu/ro
+mkdir -p /run/initramfs/live /run/katsu/ro /run/katsu/esp /run/katsu/xbootldr
 if getargbool 0 rd.live.check; then
     checkisomd5 --verbose "/dev/disk/by-label/$label" || fail 'ISO media check failed'
 fi
@@ -28,21 +28,15 @@ ln -s "/dev/disk/by-label/$label" /run/initramfs/livedev
 image=/run/initramfs/live/LiveOS/rootfs.img
 [ -f "$image" ] || fail "Root image not found: $image"
 
-# The payload is a GPT disk, not a bare filesystem: bootc looks for an ESP among
-# the backing devices of everything it mounts, and only a partitioned disk can
-# expose one. Its root filesystem is partition 3 (ESP, XBOOTLDR, root).
-#
-# The loop is deliberately *not* attached read-only. bootc's `Storage::new`,
-# which every command including `bootc status` goes through, mounts the ESP with a
-# plain `mount(2)` and no `MS_RDONLY`; the kernel then refuses with `EPERM` if the
-# loop is read-only, and `bootc status` fails with `Mounting /dev/loopNp1:
-# Permission denied`. `mount(8)` hides this by silently downgrading to a
-# read-only mount, but bootc calls the syscall directly. Nothing is written in
-# practice: the backing file lives on the read-only ISO, so writes would be
-# rejected by the medium.
 loop=$(losetup --show -P --find "$image") || fail 'Cannot attach live root image'
 [ -b "${loop}p3" ] || fail "No root partition in $image (expected a GPT payload)"
 mount -o ro "${loop}p3" /run/katsu/ro || fail 'Cannot mount live root partition'
+
+# The loop is read-only (the backing file sits on the write-protected ISO), and
+# bootc mounts these read-write. Pre-mounting them ro makes bootc clone the
+# existing mount instead of issuing its own mount(2), which fails with EPERM.
+mount -o ro "${loop}p1" /run/katsu/esp || fail 'Cannot mount live ESP'
+mount -o ro "${loop}p2" /run/katsu/xbootldr || fail 'Cannot mount live XBOOTLDR'
 
 [ -d /run/katsu/ro/composefs ] || fail 'Live image contains no composefs repository'
 # bootc-root-setup opens the deployment state even when no /etc or /var mount is
