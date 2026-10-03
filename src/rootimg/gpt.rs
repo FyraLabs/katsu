@@ -124,6 +124,13 @@ pub struct Layout {
 	pub total: u64,
 }
 
+/// Headroom above the payload for the root partition.
+///
+/// Deliberately non-zero: sizing the partition to exactly the EROFS length leaves
+/// no margin, so the copy would silently truncate the moment the image grew by a
+/// sector. A few MiB costs nothing on a multi-gigabyte payload.
+const ROOT_HEADROOM: u64 = 16 * 1024 * 1024;
+
 /// Compute the payload's partition sizes.
 ///
 /// The XBOOTLDR partition is sized from the `/boot` tree with headroom for the
@@ -134,7 +141,7 @@ pub struct Layout {
 pub fn layout(root_len: u64, boot_len: u64) -> Layout {
 	let esp_size = ESP_SIZE;
 	let xbootldr_size = round_up_mib(boot_len + XBOOTLDR_HEADROOM).max(ESP_SIZE);
-	let root_size = round_up_sector(root_len);
+	let root_size = round_up_sector(root_len + ROOT_HEADROOM);
 	// Two alignment offsets: one before the ESP and one of slack at the end, which
 	// also leaves room for the backup GPT header.
 	let total = START_OFFSET + esp_size + xbootldr_size + root_size + START_OFFSET;
@@ -385,11 +392,31 @@ fn copy_recursive(source: &Path, dest: &Path) -> Result<()> {
 }
 
 /// Write the EROFS payload into the root partition.
+///
+/// No `sync_all` afterwards: the destination is a loop device whose backing file
+/// sits on the workspace, which on a composefs build is itself an overlay over a
+/// loop. Forcing the full 4 GiB through that stack parks the process in
+/// `balance_dirty_pages` for tens of minutes and gains nothing, because every
+/// later reader goes through the same page cache. The write is already visible to
+/// them as soon as `io::copy` returns.
 fn write_erofs_into(root_image: &Path, root_partition: &Path) -> Result<()> {
+	let payload_len = fs::metadata(root_image)?.len();
+	let partition_len = block_device_size(root_partition);
+	if partition_len > 0 && payload_len > partition_len {
+		bail!(
+			"Root partition ({} bytes) is smaller than the payload ({} bytes); \
+			 the image would be truncated",
+			partition_len,
+			payload_len
+		);
+	}
+
 	let mut source = fs::File::open(root_image)?;
 	let mut dest = fs::OpenOptions::new().write(true).open(root_partition)?;
-	std::io::copy(&mut source, &mut dest)?;
-	dest.sync_all()?;
+	let copied = std::io::copy(&mut source, &mut dest)?;
+	if copied != payload_len {
+		bail!("Copied {copied} of {payload_len} payload bytes into the root partition");
+	}
 	Ok(())
 }
 
@@ -457,8 +484,8 @@ impl Drop for MountPoint {
 }
 
 /// Size in bytes of a block device, via the kernel rather than `metadata`, which
-/// reports 0 for device nodes. Only the privileged assembly test needs it.
-#[cfg(test)]
+/// reports 0 for device nodes. Returns 0 when it cannot be determined, which
+/// callers treat as "unknown" rather than "empty".
 fn block_device_size(device: &Path) -> u64 {
 	let output = Command::new("blockdev").arg("--getsize64").arg(device).output();
 	match output {
@@ -480,9 +507,24 @@ mod tests {
 		let parts = layout(root, 32 * 1024 * 1024);
 		assert_eq!(parts.esp_size, ESP_SIZE);
 		assert!(parts.xbootldr_size >= 32 * 1024 * 1024 + XBOOTLDR_HEADROOM);
-		assert_eq!(parts.root_size, root);
+		// The root partition must exceed the payload, or the copy truncates it.
+		assert!(
+			parts.root_size > root,
+			"root {} is not larger than the payload {root}",
+			parts.root_size
+		);
 		// Every partition plus both alignment gaps must fit in the total.
 		assert!(parts.total >= START_OFFSET + parts.esp_size + parts.xbootldr_size + root);
+	}
+
+	#[test]
+	fn root_partition_has_headroom_over_the_payload() {
+		// Sizing the partition to exactly the EROFS length is the failure this
+		// guards: `io::copy` stops at the source's EOF, so a payload that grew by a
+		// sector would be silently cut short mid-file.
+		let payload = 1024 * 1024 + 7;
+		let parts = layout(payload, 0);
+		assert!(parts.root_size >= payload + ROOT_HEADROOM);
 	}
 
 	#[test]

@@ -52,17 +52,16 @@ macro_rules! feature_flag_bool {
 /// This makes use of the new CLI option `-X` (Feature Flags)
 ///
 /// This one is a string value, detecting if any feature flag with the prefix `$flag=` is present in the feature flags
+///
+/// The value is everything after the first `=`, so a value may itself contain
+/// `=` without being silently truncated. A bare flag (`erofs-dedupe`) has no
+/// value and yields `None`; use [`feature_flag_bool!`] for those.
 #[macro_export]
 macro_rules! feature_flag_str {
 	($flag:literal) => {{
 		{
 			let parsed_cli = $crate::cli::KatsuCli::p_parse();
-			let feature_flags = parsed_cli.feature_flags.clone();
-			feature_flags
-				.iter()
-				.find(|x| x.starts_with(&format!("{}=", $flag)))
-				.and_then(|x| x.split('=').nth(1))
-				.map(|s| s.to_string()) // Convert &str to owned String
+			$crate::util::lookup_feature_flag(&parsed_cli.feature_flags, $flag)
 		}
 	}};
 }
@@ -388,6 +387,20 @@ pub fn run_with_chroot<T>(root: &Path, f: impl FnOnce() -> Result<T>) -> Result<
 	res
 }
 
+/// Look up a `key=value` feature flag in a parsed flag list.
+///
+/// Split out of [`feature_flag_str!`] so the lookup is testable without the
+/// process-wide cached CLI.
+///
+/// The value is everything after the first `=`. Splitting on every `=` instead
+/// would silently truncate a value that contains one, e.g.
+/// `erofs-compression=zstd,level=6` becoming `zstd,level`. Matching is exact on
+/// the key, so `erofs-compression` cannot pick up `erofs-compression-level`.
+pub fn lookup_feature_flag(flags: &[String], key: &str) -> Option<String> {
+	let needle = format!("{key}=");
+	flags.iter().find_map(|flag| flag.strip_prefix(&needle)).map(str::to_string)
+}
+
 /// Create an empty sparse file with given size
 pub fn create_sparse(path: &Path, size: u64) -> Result<File> {
 	use std::io::{Seek, SeekFrom, Write};
@@ -443,4 +456,40 @@ pub fn just_write(path: impl AsRef<Path>, content: impl AsRef<str>) -> Result<()
 	let _ = std::fs::create_dir_all(parent);
 	File::create(path)?.write_all(content.as_bytes())?;
 	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::lookup_feature_flag;
+
+	fn flags(list: &[&str]) -> Vec<String> {
+		list.iter().map(|s| s.to_string()).collect()
+	}
+
+	#[test]
+	fn keeps_a_value_that_contains_an_equals_sign() {
+		// Splitting on every `=` would return "zstd,level" and silently drop the
+		// level, which is exactly the class of bug this lookup exists to avoid.
+		let f = flags(&["erofs-compression=zstd,level=6"]);
+		assert_eq!(lookup_feature_flag(&f, "erofs-compression").as_deref(), Some("zstd,level=6"));
+	}
+
+	#[test]
+	fn does_not_match_a_longer_key_that_shares_the_prefix() {
+		// `erofs-compression-level` must not satisfy a lookup for
+		// `erofs-compression`, regardless of ordering.
+		let f = flags(&["erofs-compression-level=6", "erofs-compression=zstd"]);
+		assert_eq!(lookup_feature_flag(&f, "erofs-compression").as_deref(), Some("zstd"));
+		assert_eq!(lookup_feature_flag(&f, "erofs-compression-level").as_deref(), Some("6"));
+	}
+
+	#[test]
+	fn a_bare_flag_has_no_value() {
+		// `erofs-dedupe` is a boolean flag; an empty value must not be invented for
+		// it, or `feature_flag_str!` would report some other flag's absence as one.
+		let f = flags(&["erofs-dedupe", "erofs-chunk-size=131072"]);
+		assert_eq!(lookup_feature_flag(&f, "erofs-dedupe"), None);
+		assert_eq!(lookup_feature_flag(&f, "erofs-chunk-size").as_deref(), Some("131072"));
+		assert_eq!(lookup_feature_flag(&f, "absent"), None);
+	}
 }

@@ -144,12 +144,19 @@ Every `mkfs.erofs` option the build needs is exposed as a feature flag:
 | Flag | Effect |
 |---|---|
 | `erofs-compression=<spec>` | `-z`, e.g. `zstd,level=6`, `lzma,6`, `xz` |
+| `erofs-compression-level=<n>` | level for `erofs-compression`; separate flag because the flag list is comma-separated |
 | `erofs-chunk-size=<n>` | `-C` physical cluster size |
 | `erofs-xattr-level=<n>` | `-x` xattr level |
-| `erofs-workers=<n>` | `--workers`, overrides the dedupe cap |
+| `erofs-workers=<n>` | `--workers` |
 | `erofs-fragdedupe=inode\|full` | `fragdedupe` mode (default `inode`) |
-| `erofs-fragments=none\|plain\|all` | `none`, `fragments`, or `all-fragments` |
-| `no-erofs-dedupe` | drop `-E dedupe` |
+| `erofs-fragments=none\|fragments\|all-fragments` | fragments mode (aliases `plain`, `all`) |
+| `erofs-compress-hints=live\|none\|<path>` | per-path cluster sizes (default `live`) |
+| `erofs-dedupe` | opt in to global content dedup; off by default |
+
+`erofs-dedupe` is off by default. It is single-threaded and index-based, so on
+the Plasma payload at `-C131072` it took the EROFS phase from ~10 min to ~35 min
+and `mkfs.erofs` RSS from 0.6G to 8.3G, while the payload was marginally *larger*
+(4.67G -> 4.84G). `fragdedupe=inode` is what captures the repeated files.
 
 Invalid values fail loudly rather than being silently ignored, since a typo would
 otherwise produce an image built with the wrong settings and no indication.

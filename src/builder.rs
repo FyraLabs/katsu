@@ -711,14 +711,13 @@ impl IsoBuilder {
 			info!(strategy = %hints, "Using EROFS compression hints");
 		}
 
-		// Dedup is on by default (see `MkfsErofsOptions::default`). Allow explicit
-		// opt-out for a faster build, and treat an explicit workers value as
-		// authoritative rather than the memory-capped default.
-		if feature_flag_bool!("no-erofs-dedupe") {
-			info!("Disabling EROFS global deduplication");
-			opts.extra_features.retain(|f| f != "dedupe");
-		} else {
-			info!("EROFS global deduplication enabled");
+		// Global dedup is opt-in. It is single-threaded and index-based, so on a
+		// large tree it costs minutes and gigabytes of RAM while `fragdedupe=inode`
+		// already captures the duplicated files. See `MkfsErofsOptions::default`
+		// for the measurement.
+		if feature_flag_bool!("erofs-dedupe") {
+			info!("Enabling EROFS global deduplication");
+			opts.set_dedupe(true);
 		}
 
 		// Fragment dedup defaults to the measured-safe `inode` mode. `full` compares
@@ -1255,7 +1254,6 @@ mod test {
 		assert!(features.iter().any(|f| f == "fragdedupe=full"));
 		assert!(!features.iter().any(|f| f == "fragdedupe=inode"));
 		// The neighbouring features must survive the rewrite.
-		assert!(features.iter().any(|f| f == "dedupe"));
 		assert!(features.iter().any(|f| f == "fragments"));
 	}
 

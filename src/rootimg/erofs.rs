@@ -127,6 +127,14 @@ impl MkfsErofsOptions {
 	pub fn dedupe_enabled(&self) -> bool {
 		self.extra_features.iter().any(|f| f == "dedupe")
 	}
+
+	/// Turn global deduplication on or off.
+	pub fn set_dedupe(&mut self, enabled: bool) {
+		self.extra_features.retain(|f| f != "dedupe");
+		if enabled {
+			self.extra_features.push("dedupe".to_string());
+		}
+	}
 }
 
 impl Default for MkfsErofsOptions {
@@ -144,12 +152,8 @@ impl Default for MkfsErofsOptions {
 			file_contexts: None,
 			log_level: 0,
 			workers: None,
-			// Dedup is on by default: it is what keeps repeated content from being
-			// stored twice, and the ISO is the artifact users actually download.
-			// `--workers` is capped for it because memory scales with worker count;
-			// an uncapped run previously exhausted RAM on a ~10G tree. Set
-			// `KATSU_EROFS_WORKERS` to raise it deliberately, or
-			// `KATSU_EROFS_DEDUPE=0` to disable dedup for a faster build.
+			// Only relevant when global dedup is asked for; it bounds the compression
+			// workers, not the dedup index.
 			dedupe_workers: 2,
 			// `fragments` (not `all-fragments`) packs fragment data into the shared
 			// inode without force-packing every whole file. `all-fragments` compresses
@@ -161,11 +165,17 @@ impl Default for MkfsErofsOptions {
 			// and OOM-killed the build host (RAM *and* swap exhausted) on an ~18G tree,
 			// where the `inode` form completed and still deduplicated ~17.8G.
 			//
-			// `dedupe` is single-threaded by design (`mkfs.erofs` warns
-			// "multi-threaded dedupe is NOT implemented"), so `--workers` does not bound
-			// its memory; it is an index over the whole tree. Keep `--workers` low and
-			// prefer `KATSU_FEATURE_FLAGS=no-erofs-dedupe` on a host without headroom.
-			extra_features: ["fragments", "fragdedupe=inode", "dedupe"]
+			// Global `dedupe` is deliberately *not* in the default set. Measured on the
+			// Ultramarine Plasma payload at `-C131072`, adding it changed the EROFS
+			// phase from ~10min to ~35min and `mkfs.erofs` peak RSS from 0.6G to 8.3G
+			// while the payload was, if anything, slightly larger (4.67G -> 4.84G). It
+			// is single-threaded by design (mkfs.erofs warns "multi-threaded dedupe is
+			// NOT implemented"), so `--workers` does not bound its memory: it is an
+			// index over the whole tree, and the 128KiB clusters used here multiply the
+			// extent count it has to track. `fragdedupe=inode` already catches identical
+			// files, which is where the size win actually comes from.
+			// `KATSU_FEATURE_FLAGS=erofs-dedupe` opts back in.
+			extra_features: ["fragments", "fragdedupe=inode"]
 				.iter()
 				.map(|s| s.to_string())
 				.collect(),
@@ -221,17 +231,48 @@ mod tests {
 		args.iter().find(|a| a.starts_with("-E")).expect("expected an -E feature argument").clone()
 	}
 
+	/// The individual `-E` features, so a lookup for `dedupe` does not match the
+	/// `fragdedupe=inode` entry that merely contains the substring.
+	fn feature_list(args: &[String]) -> Vec<String> {
+		features(args).trim_start_matches("-E").split(',').map(str::to_string).collect()
+	}
+
 	#[test]
-	fn dedupe_is_enabled_by_default_with_a_capped_worker_count() {
-		// Dedup is expensive and its memory use scales with workers, so the
-		// default must bound parallelism instead of letting mkfs.erofs pick.
+	fn dedupe_is_off_by_default() {
+		// Global dedup is single-threaded and index-based: measured on the Plasma
+		// payload at `-C131072` it took the EROFS phase from ~10min to ~35min and
+		// `mkfs.erofs` RSS from 0.6G to 8.3G, with the payload marginally larger.
+		// `fragdedupe=inode` is what actually dedupes the repeated files.
 		let opts = MkfsErofsOptions::default();
+		assert!(!opts.dedupe_enabled());
+		let args = opts.build_args();
+		assert!(!feature_list(&args).iter().any(|f| f == "dedupe"));
+		// `--workers` only bounds dedup, so it must not be emitted without it.
+		assert!(!args.iter().any(|a| a.starts_with("--workers")));
+		// The fragment dedup that carries the size win stays on.
+		assert!(features(&args).contains("fragdedupe=inode"));
+	}
+
+	#[test]
+	fn dedupe_can_be_opted_into_with_a_capped_worker_count() {
+		// Opting in must still bound the compression workers, since dedup's own
+		// index is single-threaded and unaffected by the flag.
+		let mut opts = MkfsErofsOptions::default();
+		opts.set_dedupe(true);
 		assert!(opts.dedupe_enabled());
 		let args = opts.build_args();
-		assert!(features(&args).contains("dedupe"));
-		assert!(features(&args).contains("fragdedupe=inode"));
-		let expected = format!("--workers={}", opts.dedupe_workers);
-		assert!(args.contains(&expected));
+		assert!(feature_list(&args).iter().any(|f| f == "dedupe"));
+		assert!(args.contains(&format!("--workers={}", opts.dedupe_workers)));
+	}
+
+	#[test]
+	fn set_dedupe_toggles_without_duplicating_the_feature() {
+		let mut opts = MkfsErofsOptions::default();
+		opts.set_dedupe(true);
+		opts.set_dedupe(true);
+		assert_eq!(opts.extra_features.iter().filter(|f| *f == "dedupe").count(), 1);
+		opts.set_dedupe(false);
+		assert!(!opts.dedupe_enabled());
 	}
 
 	#[test]
@@ -276,15 +317,6 @@ mod tests {
 		let args = opts.build_args();
 		assert!(args.contains(&"--workers=7".to_string()));
 		assert_eq!(args.iter().filter(|a| a.starts_with("--workers")).count(), 1);
-	}
-
-	#[test]
-	fn dedupe_can_be_disabled() {
-		let mut opts = MkfsErofsOptions::default();
-		opts.extra_features.retain(|f| f != "dedupe");
-		assert!(!opts.dedupe_enabled());
-		let args = opts.build_args();
-		assert!(!args.iter().any(|a| a.starts_with("--workers")));
 	}
 
 	#[test]
