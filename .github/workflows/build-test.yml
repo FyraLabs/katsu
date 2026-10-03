@@ -260,7 +260,12 @@ jobs:
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
       # I'm sorry.
-      options: --privileged --security-opt seccomp=unconfined -v /dev:/dev -v /usr:/hostusr -v /:/hostfs
+      #
+      # `bootc install` mirrors /dev, /var/lib/containers, /var/tmp and /run/udev
+      # from the host and compares each against /proc/1/root/<path>, so all four
+      # must exist at the same path inside the container. Without /run/udev in
+      # particular it fails with "Comparing filesystems at /run/udev ...".
+      options: --privileged --security-opt seccomp=unconfined -v /dev:/dev -v /run/udev:/run/udev -v /var/tmp:/var/tmp -v /var/lib/containers:/var/lib/containers -v /usr:/hostusr -v /:/hostfs
 
     steps:
       - uses: actions/checkout@v4
@@ -320,7 +325,12 @@ jobs:
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
       # I'm sorry.
-      options: --privileged --security-opt seccomp=unconfined -v /dev:/dev -v /usr:/hostusr -v /:/hostfs
+      #
+      # `bootc install` mirrors /dev, /var/lib/containers, /var/tmp and /run/udev
+      # from the host and compares each against /proc/1/root/<path>, so all four
+      # must exist at the same path inside the container. Without /run/udev in
+      # particular it fails with "Comparing filesystems at /run/udev ...".
+      options: --privileged --security-opt seccomp=unconfined -v /dev:/dev -v /run/udev:/run/udev -v /var/tmp:/var/tmp -v /var/lib/containers:/var/lib/containers -v /usr:/hostusr -v /:/hostfs
 
     steps:
       - uses: actions/checkout@v4
@@ -340,10 +350,11 @@ jobs:
           rm -rf /hostfs/opt/hostedtoolcache/CodeQL
 
       - name: Run test
-        # One comma-separated line: clap splits KATSU_FEATURE_FLAGS on `,`, so a
-        # folded/multi-line value would leave leading spaces on later flags and
-        # they would silently not apply.
         env:
+          KATSU_FEATURE_FLAGS: >-
+            erofs-compression=${{ matrix.compression }},
+            erofs-chunk-size=${{ matrix.pcluster_size }},
+            erofs-fragdedupe=${{ matrix.fragdedupe }}
           KATSU_FEATURE_FLAGS: erofs-compression=${{ matrix.compression }},erofs-chunk-size=${{ matrix.pcluster_size }},erofs-fragdedupe=${{ matrix.fragdedupe }}
         run: |
           export PATH=$HOME/.cargo/bin:$PATH
