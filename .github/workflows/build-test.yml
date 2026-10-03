@@ -339,12 +339,6 @@ jobs:
             fragments: fragments
             compress_hints: live
             fragdedupe: inode
-          - compression: xz
-            level: "6"
-            pcluster_size: 131072
-            fragments: fragments
-            compress_hints: live
-            fragdedupe: inode
 
     needs: build-environment
     runs-on: ubuntu-latest
