@@ -1,32 +1,70 @@
-use super::{Bootloader, GRUB_PREPEND_COMMENT};
+use super::{BootPayload, Bootloader, GRUB_PREPEND_COMMENT};
 use crate::{
 	builder::{BOOTIMGS, ISO_TREE},
 	config::Manifest,
 	util::loopdev_with_file,
 };
 use color_eyre::{Result, eyre::bail};
-use std::{fs, os::unix::fs::symlink, path::Path};
-use tracing::{debug, info, info_span, trace, warn};
+use std::{
+	fs,
+	os::unix::fs::symlink,
+	path::{Path, PathBuf},
+};
+use tracing::{debug, info, info_span, warn};
+
+/// The boot parameters a GRUB config needs, grouped so the template writer stays
+/// readable as boot options grow.
+struct GrubBootParams<'a> {
+	volid: &'a str,
+	distro: &'a str,
+	vmlinuz: &'a str,
+	initramfs: &'a str,
+	kernel_cmdline: &'a str,
+}
 
 impl Bootloader {
 	pub(super) fn cp_grub(
-		&self, manifest: &Manifest, chroot: &Path, workspace: &Path,
+		&self, manifest: &Manifest, chroot: &Path, workspace: &Path, ostree: &BootPayload,
 	) -> Result<()> {
 		let iso_tree = workspace.join(ISO_TREE);
 		let boot_imgs_dir = workspace.join(BOOTIMGS);
 
 		fs::create_dir_all(&boot_imgs_dir)?;
 		if self.get_arch(manifest) == "x86_64" {
-			info!("Copying GRUB hybrid boot image");
-			let hybrid_img = chroot.join("usr/lib/grub/i386-pc/boot_hybrid.img");
-			trace!(?hybrid_img, "Source hybrid boot image location");
-			let dest = boot_imgs_dir.join("boot_hybrid.img");
-			trace!(?dest, "Destination hybrid boot image location");
-			if !hybrid_img.exists() {
-				warn!("Hybrid boot image not found at expected location");
+			// `boot_hybrid.img` is a 512-byte MBR stub shipped with the GRUB tooling
+			// rather than part of an image's boot payload, so it normally only exists
+			// on the build host, which already provides `grub2-mkimage`/`grub2-mkrescue`
+			// for this phase. Hybrid BIOS boot needs it, so a missing file is an error
+			// unless explicitly opted out.
+			let opt_out = crate::feature_flag_bool!("no-grub-hybrid-mbr");
+			let candidates = [
+				// Build host first: this is where the GRUB tooling lives.
+				PathBuf::from("/usr/lib/grub/i386-pc/boot_hybrid.img"),
+				PathBuf::from("/usr/share/grub/i386-pc/boot_hybrid.img"),
+				// In-image copies, for images that do ship their own GRUB payload.
+				chroot.join("usr/lib/grub/i386-pc/boot_hybrid.img"),
+				chroot.join("boot/grub2/i386-pc/boot_hybrid.img"),
+				chroot.join("usr/lib/ostree-boot/grub2/i386-pc/boot_hybrid.img"),
+			];
+			// Only the presence of the staged file matters downstream: `xorriso`
+			// reads it from `boot_imgs_dir` and omits `--grub2-mbr` when absent.
+			match candidates.iter().find(|path| path.is_file()) {
+				Some(hybrid_img) => {
+					let dest = boot_imgs_dir.join("boot_hybrid.img");
+					fs::copy(hybrid_img, &dest)?;
+					debug!(?hybrid_img, ?dest, "Copied GRUB hybrid boot image");
+				},
+				None if opt_out => warn!(
+					?candidates,
+					"No GRUB hybrid boot image and `no-grub-hybrid-mbr` is set; \
+					 the ISO will boot under UEFI only"
+				),
+				None => bail!(
+					"No GRUB hybrid boot image found in any of {candidates:?}; \
+					 BIOS hybrid boot would be broken. Pass \
+					 `-X no-grub-hybrid-mbr` to build a UEFI-only ISO."
+				),
 			}
-			fs::copy(&hybrid_img, &dest)?;
-			debug!("Successfully copied hybrid boot image");
 		}
 
 		self.create_grub_directories(&iso_tree, &boot_imgs_dir)?;
@@ -36,9 +74,19 @@ impl Bootloader {
 		let distro = manifest.distro.as_deref().unwrap_or("Linux");
 
 		let (vmlinuz, initramfs) =
-			self.copy_kernel_and_initramfs(chroot, &boot_imgs_dir, &iso_tree)?;
+			self.copy_kernel_and_initramfs(chroot, &boot_imgs_dir, &iso_tree, ostree)?;
 
-		self.generate_grub_config(&iso_tree, volid, distro, &vmlinuz, &initramfs, kernel_cmdline)?;
+		self.generate_grub_config(
+			&iso_tree,
+			&GrubBootParams {
+				volid: &volid,
+				distro,
+				vmlinuz: &vmlinuz,
+				initramfs: &initramfs,
+				kernel_cmdline,
+			},
+			ostree,
+		)?;
 		self.setup_efi_boot_files(manifest, &iso_tree)?;
 		self.generate_grub_images(chroot, &iso_tree, manifest)?;
 		self.mkefiboot(workspace, manifest)?;
@@ -53,9 +101,24 @@ impl Bootloader {
 	}
 
 	fn copy_kernel_and_initramfs(
-		&self, chroot: &Path, boot_imgs_dir: &Path, iso_tree: &Path,
+		&self, chroot: &Path, boot_imgs_dir: &Path, iso_tree: &Path, payload: &BootPayload,
 	) -> Result<(String, String)> {
-		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, boot_imgs_dir, true)?;
+		// A composefs layout keeps its kernel and initramfs under
+		// `boot/bootc_composefs-<D>/` rather than `/boot` or `/usr/lib/modules`,
+		// and the BLS entry is the authoritative source for those paths.
+		let vmlinuz = match payload.vmlinuz.as_deref() {
+			Some(path) => {
+				debug!(?path, "Staging composefs kernel from the BLS entry");
+				let dest = boot_imgs_dir.join("boot").join("vmlinuz");
+				fs::create_dir_all(dest.parent().unwrap())?;
+				fs::copy(path, &dest)?;
+				"vmlinuz".to_string()
+			},
+			None => {
+				let (vmlinuz, _) = self.cp_vmlinuz_initramfs(chroot, boot_imgs_dir, true)?;
+				vmlinuz
+			},
+		};
 
 		let iso_boot = iso_tree.join("boot");
 		let chroot_boot = if chroot.join("usr/lib/ostree-boot").exists() {
@@ -67,7 +130,7 @@ impl Bootloader {
 		// HACK: detect ostree-boot to avoid copying wrong files
 		let ostree_boot = chroot_boot.ends_with("ostree-boot");
 
-		let _ = fs::remove_dir_all(&iso_boot);
+		// Keep the live initramfs generated by the dracut phase.
 		fs::create_dir_all(&iso_boot)?;
 
 		let grub_dest = iso_boot.join("grub");
@@ -104,7 +167,28 @@ impl Bootloader {
 		})?;
 
 		fs::copy(boot_imgs_dir.join("boot").join(&vmlinuz), iso_boot.join(&vmlinuz))?;
-		fs::copy(boot_imgs_dir.join("boot").join(&initramfs), iso_boot.join("initramfs.img"))?;
+
+		// The dracut phase writes the live-capable initramfs straight into the ISO
+		// tree, so only fall back to the staged copy when nothing is there yet.
+		if iso_boot.join("initramfs.img").exists() {
+			debug!("Keeping the initramfs produced by the dracut phase");
+		} else {
+			// Prefer the BLS-declared initramfs for a composefs layout; otherwise use
+			// whatever the standard discovery found.
+			let staged = match payload.initramfs.as_deref() {
+				Some(path) => {
+					debug!(?path, "Staging composefs initramfs from the BLS entry");
+					let dest = boot_imgs_dir.join("boot").join("initramfs.img");
+					fs::copy(path, &dest)?;
+					dest
+				},
+				None => {
+					let (_, initramfs) = self.cp_vmlinuz_initramfs(chroot, boot_imgs_dir, true)?;
+					boot_imgs_dir.join("boot").join(initramfs)
+				},
+			};
+			fs::copy(staged, iso_boot.join("initramfs.img"))?;
+		}
 
 		Ok((vmlinuz, "initramfs.img".to_string()))
 	}
@@ -135,11 +219,24 @@ impl Bootloader {
 			return Self::copy_dir(&boot_efi, efi_dest);
 		}
 
+		// Fall back to the build host's bootupd component cache. A disk install has
+		// bootupd write the ESP from these components, so an image that never
+		// carried its own EFI payload still leaves them available here, from the
+		// installed shim/grub2-efi packages. Same reasoning as the hybrid MBR above.
+		for host_efi in [Path::new("/usr/lib/efi"), Path::new("/usr/share/efi")] {
+			if host_efi.join("EFI").exists() || Self::usr_efi_has_components(host_efi) {
+				info!(?host_efi, "Copying EFI boot files from the build host");
+				return Self::copy_usr_lib_efi(host_efi, &efi_dest.join("EFI"));
+			}
+		}
+
 		if ostree_boot {
 			bail!(
-				"No EFI payload found: {} has no EFI directory and {} is empty",
+				"No EFI payload found in the image ({}, {}, {}) or on the build host \
+				 (/usr/lib/efi); install shim-x64, grub2-efi-x64 and bootupd",
 				usr_lib_efi.display(),
-				efi_src.display()
+				efi_src.display(),
+				boot_efi.display()
 			);
 		}
 		warn!("No EFI directory found in {}", chroot_boot.display());
@@ -228,69 +325,123 @@ impl Bootloader {
 	}
 
 	fn generate_grub_config(
-		&self, iso_tree: &Path, volid: String, distro: &str, vmlinuz: &str, initramfs: &str,
-		kernel_cmdline: &str,
+		&self, iso_tree: &Path, boot: &GrubBootParams<'_>, payload: &BootPayload,
 	) -> Result<()> {
+		// When booting a deployment the initramfs needs to be told where the root
+		// lives; without this it cannot find the root filesystem.
+		let ostree_karg = payload.karg.clone();
+		if !ostree_karg.is_empty() {
+			info!(karg = %ostree_karg, "Booting a deployment");
+		}
+
 		crate::tpl!(
 			"grub.cfg.tera" => {
 				GRUB_PREPEND_COMMENT,
-				volid,
-				distro,
-				vmlinuz: vmlinuz.to_string(),
-				initramfs: initramfs.to_string(),
-				cmd: kernel_cmdline.to_string()
+				volid: boot.volid.to_string(),
+				distro: boot.distro.to_string(),
+				vmlinuz: boot.vmlinuz.to_string(),
+				initramfs: boot.initramfs.to_string(),
+				cmd: boot.kernel_cmdline.to_string(),
+				ostree: ostree_karg,
+				marker: payload.live_marker().to_string()
 			} => iso_tree.join("boot/grub/grub.cfg")
 		);
 
 		Ok(())
 	}
 
+	/// Preserve the EFI vendor layout, including fallback CSVs and GRUB configs.
 	fn setup_efi_boot_files(&self, manifest: &Manifest, iso_tree: &Path) -> Result<()> {
-		let arch_short = self.get_arch_short(manifest);
-		let arch_short_upper = arch_short.to_uppercase();
-		let arch_32 = self.get_arch_32bit(manifest).to_uppercase();
+		let arch_short_upper = self.get_arch_short(manifest).to_uppercase();
 
 		let efi_root = iso_tree.join("boot/efi/EFI");
 		let boot_out = iso_tree.join("EFI/BOOT");
-		fs::create_dir_all(boot_out.join("fonts"))?;
+		fs::create_dir_all(&boot_out)?;
 
-		let mut copied_any = false;
-		for vendor in ["fedora", "BOOT", "centos", "redhat"] {
-			let src = efi_root.join(vendor);
-			if Self::dir_has_entries(&src)? {
-				debug!(?src, ?boot_out, "Merging EFI vendor directory into EFI/BOOT");
-				Self::copy_dir(&src, &boot_out)?;
-				copied_any = true;
-			}
-		}
-		if !copied_any {
+		let boot_src = efi_root.join("BOOT");
+		if !Self::dir_has_entries(&boot_src)? {
 			bail!(
-				"No EFI vendor directory (fedora/BOOT) found under {}; the image's EFI payload is missing",
+				"No EFI boot payload found at {}; the image is missing shim's removable-media loader",
+				boot_src.display()
+			);
+		}
+		debug!(?boot_src, ?boot_out, "Copying shim removable-media payload");
+		Self::copy_dir(&boot_src, &boot_out)?;
+
+		let mut vendor_copied = false;
+		for vendor in ["fedora", "centos", "redhat"] {
+			let src = efi_root.join(vendor);
+			if !Self::dir_has_entries(&src)? {
+				continue;
+			}
+			let dest = iso_tree.join("EFI").join(vendor);
+			debug!(?src, ?dest, "Copying EFI vendor directory");
+			Self::copy_dir(&src, &dest)?;
+			// Packaged GRUB can use a vendor prefix rather than EFI/BOOT.
+			fs::copy(iso_tree.join("boot/grub/grub.cfg"), dest.join("grub.cfg"))?;
+			vendor_copied = true;
+		}
+		if !vendor_copied {
+			bail!(
+				"No EFI vendor directory (fedora/centos/redhat) found under {}; \
+				 grub's second stage would be missing",
 				efi_root.display()
 			);
 		}
 
-		cmd_lib::run_cmd!(
-			cp -av $iso_tree/boot/grub/grub.cfg $boot_out/BOOT.conf 2>&1;
-			cp -av $iso_tree/boot/grub/grub.cfg $boot_out/grub.cfg 2>&1;
-			cp -av $iso_tree/boot/grub/fonts/unicode.pf2 $boot_out/fonts;
-		)?;
+		// shim's DEFAULT_LOADER, which it resolves next to itself.
+		let expected_second_stage = match arch_short_upper.as_str() {
+			"X64" => "grubx64.efi",
+			"AA64" => "grubaa64.efi",
+			other => bail!("Unsupported EFI architecture {other}"),
+		};
+		if !Self::find_file_recursive(&iso_tree.join("EFI"), expected_second_stage)? {
+			bail!(
+				"No {expected_second_stage} in the EFI tree; shim has nothing to chainload, \
+				 which the firmware will report as a failed boot"
+			);
+		}
 
-		// try and get shims
-		for (shim, alias) in [
-			(format!("shim{arch_short}.efi"), format!("BOOT{arch_short_upper}.EFI")),
-			("shim.efi".to_string(), format!("BOOT{arch_32}.EFI")),
-		] {
-			let src = boot_out.join(&shim);
-			if src.exists() {
-				fs::copy(&src, boot_out.join(&alias))?;
-				debug!(?src, alias, "Created EFI boot alias");
+		// Conventional for removable media; shim's package already provides one.
+		let boot_alias = boot_out.join(format!("BOOT{arch_short_upper}.EFI"));
+		if !boot_alias.exists() {
+			let shim = efi_root.join(format!("fedora/shim{}.efi", self.get_arch_short(manifest)));
+			if shim.is_file() {
+				debug!(?shim, ?boot_alias, "Aliasing shim as the removable-media loader");
+				fs::copy(&shim, &boot_alias)?;
 			} else {
-				warn!(?src, "Shim binary not found, skipping EFI alias");
+				bail!("No removable-media loader (BOOTX64.EFI) and no shim at {}", shim.display());
 			}
 		}
 
+		// GRUB's own config and fonts, next to the second stage.
+		fs::create_dir_all(boot_out.join("fonts"))?;
+		cmd_lib::run_cmd!(
+			cp -av $iso_tree/boot/grub/grub.cfg $boot_out/BOOT.conf 2>&1;
+			cp -av $iso_tree/boot/grub/grub.cfg $boot_out/grub.cfg 2>&1;
+			cp -av $iso_tree/boot/grub/fonts/unicode.pf2 $boot_out/fonts 2>&1;
+		)?;
+
 		Ok(())
+	}
+
+	/// Whether any file with this name exists anywhere under `dir`.
+	fn find_file_recursive(dir: &Path, name: &str) -> Result<bool> {
+		if !dir.is_dir() {
+			return Ok(false);
+		}
+		for entry in fs::read_dir(dir)? {
+			let entry = entry?;
+			let path = entry.path();
+			if path.is_dir() {
+				if Self::find_file_recursive(&path, name)? {
+					return Ok(true);
+				}
+			} else if path.file_name().is_some_and(|n| n == name) {
+				return Ok(true);
+			}
+		}
+		Ok(false)
 	}
 
 	fn get_arch<'a>(&self, manifest: &'a Manifest) -> &'a str {
@@ -305,14 +456,6 @@ impl Bootloader {
 		}
 	}
 
-	fn get_arch_32bit(&self, manifest: &Manifest) -> &'static str {
-		match self.get_arch(manifest) {
-			"x86_64" => "ia32",
-			"aarch64" => "arm",
-			_ => unimplemented!(),
-		}
-	}
-
 	fn mkefiboot(&self, workspace: &Path, _: &Manifest) -> Result<()> {
 		let tree = workspace.join(ISO_TREE);
 
@@ -321,12 +464,13 @@ impl Bootloader {
 
 		let (ldp, hdl) = loopdev_with_file(sparse_path)?;
 
+		// The whole EFI tree, since the CSV's chainload target lives in the vendor dir.
 		cmd_lib::run_cmd!(
 			mkfs.msdos $ldp -v -n EFI 2>&1;
 			mkdir -p /tmp/katsu.efiboot;
 			mount $ldp /tmp/katsu.efiboot;
-			mkdir -p /tmp/katsu.efiboot/EFI/BOOT;
-			cp -avr $tree/EFI/BOOT/. /tmp/katsu.efiboot/EFI/BOOT 2>&1;
+			mkdir -p /tmp/katsu.efiboot/EFI;
+			cp -avr $tree/EFI/. /tmp/katsu.efiboot/EFI/ 2>&1;
 			umount /tmp/katsu.efiboot;
 		)?;
 
@@ -359,6 +503,25 @@ impl Bootloader {
 		};
 
 		debug!("Generating Grub images");
+		// `grub2-mkimage` needs a full module directory including `moddep.lst`. An
+		// image tree keeps only the modules for its own boot path (under
+		// `boot/grub2/<arch>`) and no `usr/lib/grub` at all, so prefer the build
+		// host's tooling directory, which is where `grub2-mkimage` itself comes from.
+		let grub_module_dirs = [
+			PathBuf::from(format!("/usr/lib/grub/{arch}")),
+			chroot.join(format!("usr/lib/grub/{arch}")),
+			chroot.join(format!("boot/grub2/{arch}")),
+		];
+		let grub_modules = grub_module_dirs
+			.iter()
+			.find(|dir| dir.join("moddep.lst").is_file())
+			.ok_or_else(|| {
+				color_eyre::eyre::eyre!(
+					"No GRUB module directory with moddep.lst in any of {grub_module_dirs:?}; \
+					 install grub2-pc-modules / grub2-tools on the build host"
+				)
+			})?;
+		info!(?grub_modules, "Using GRUB module directory");
 		{
 			use std::process::Command;
 
@@ -366,7 +529,7 @@ impl Bootloader {
 				.arg("-O")
 				.arg(arch_out)
 				.arg("-d")
-				.arg(chroot.join(format!("usr/lib/grub/{}", arch)))
+				.arg(grub_modules)
 				.arg("-o")
 				.arg(iso_tree.join("boot/eltorito.img"))
 				.arg("-p")
@@ -464,6 +627,67 @@ mod tests {
 		Bootloader::copy_efi_payload(&tmp, &chroot_boot, &efi_dest, true).unwrap();
 
 		assert!(efi_dest.join("EFI/fedora/shimx64.efi").is_file());
+	}
+
+	#[test]
+	fn grub_staging_preserves_the_live_initramfs() {
+		let tmp =
+			std::env::temp_dir().join(format!("katsu-grub-live-initrd-{}", std::process::id()));
+		let chroot = tmp.join("rootfs");
+		let modules = chroot.join("usr/lib/modules/test-kernel");
+		fs::create_dir_all(&modules).unwrap();
+		fs::write(modules.join("vmlinuz"), b"kernel").unwrap();
+		fs::write(modules.join("initramfs.img"), b"disk initramfs").unwrap();
+		make_usr_lib_efi(&chroot);
+		empty_ostree_boot_efi(&chroot);
+		fs::create_dir_all(chroot.join("usr/lib/grub")).unwrap();
+		fs::create_dir_all(chroot.join("usr/share/grub")).unwrap();
+		fs::write(chroot.join("usr/share/grub/unicode.pf2"), b"font").unwrap();
+
+		let iso_tree = tmp.join("iso-tree");
+		fs::create_dir_all(iso_tree.join("boot")).unwrap();
+		fs::write(iso_tree.join("boot/initramfs.img"), b"live initramfs").unwrap();
+		Bootloader::Grub
+			.copy_kernel_and_initramfs(
+				&chroot,
+				&tmp.join("boot_imgs"),
+				&iso_tree,
+				&BootPayload::default(),
+			)
+			.unwrap();
+
+		assert_eq!(fs::read(iso_tree.join("boot/initramfs.img")).unwrap(), b"live initramfs");
+		assert_eq!(fs::read(iso_tree.join("boot/vmlinuz")).unwrap(), b"kernel");
+		fs::remove_dir_all(tmp).unwrap();
+	}
+
+	#[test]
+	fn installs_grub_config_at_the_vendor_prefix() {
+		let tmp =
+			std::env::temp_dir().join(format!("katsu-grub-vendor-config-{}", std::process::id()));
+		fs::create_dir_all(&tmp).unwrap();
+		make_usr_lib_efi(&tmp);
+		let iso_tree = tmp.join("iso");
+		Bootloader::copy_usr_lib_efi(&tmp.join("usr/lib/efi"), &iso_tree.join("boot/efi/EFI"))
+			.unwrap();
+		let vendor = iso_tree.join("boot/efi/EFI/fedora");
+		let csv = b"shimx64.efi,Fedora,,This is the boot entry for Fedora\n";
+		fs::write(vendor.join("BOOTX64.CSV"), csv).unwrap();
+		fs::write(vendor.join("grub.cfg"), b"stale vendor config").unwrap();
+
+		fs::create_dir_all(iso_tree.join("boot/grub/fonts")).unwrap();
+		let config = b"search --label KATSU-LIVEOS\nmenuentry 'Live' {}\n";
+		fs::write(iso_tree.join("boot/grub/grub.cfg"), config).unwrap();
+		fs::write(iso_tree.join("boot/grub/fonts/unicode.pf2"), b"font").unwrap();
+		let manifest: Manifest = serde_yaml::from_str("dnf:\n  arch: x86_64\n").unwrap();
+
+		Bootloader::Grub.setup_efi_boot_files(&manifest, &iso_tree).unwrap();
+
+		assert_eq!(fs::read(iso_tree.join("EFI/fedora/grub.cfg")).unwrap(), config);
+		assert_eq!(fs::read(iso_tree.join("EFI/BOOT/grub.cfg")).unwrap(), config);
+		assert_eq!(fs::read(iso_tree.join("EFI/fedora/BOOTX64.CSV")).unwrap(), csv);
+		assert!(!iso_tree.join("EFI/BOOT/BOOTX64.CSV").exists());
+		fs::remove_dir_all(tmp).unwrap();
 	}
 
 	#[test]
