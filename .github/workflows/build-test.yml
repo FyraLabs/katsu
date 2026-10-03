@@ -428,6 +428,9 @@ jobs:
           mount -o ro "${payload}p3" "$mount_dir"
           sync
           echo 3 > /proc/sys/vm/drop_caches
+          # Cheap invariant check first: the offset arithmetic is what broke this
+          # job, and it is silent when subtly wrong (it samples nothing useful).
+          "$GITHUB_WORKSPACE/scripts/erofs-read-bench" --self-test
           read_us=$("$GITHUB_WORKSPACE/scripts/erofs-read-bench" "$mount_dir/composefs/objects")
           umount "$mount_dir"
           losetup -d "$payload"

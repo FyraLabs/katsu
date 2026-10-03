@@ -30,14 +30,18 @@ SEED = 0xC0FFEE
 
 
 def collect(root: str, block: int) -> list[str]:
-    """Every file at least one block long, in a stable order."""
+    """Every file with at least one aligned block to read from, in a stable order."""
     files: list[str] = []
     for dirpath, dirnames, names in os.walk(root):
         dirnames.sort()
         for name in sorted(names):
             path = os.path.join(dirpath, name)
             try:
-                if os.path.getsize(path) >= block:
+                # Strictly greater: a file of exactly `block` bytes is eligible by a
+                # `>=` test but has no valid offset range, and `randrange(0, 0)`
+                # raises `ValueError: empty range`. One block long is common enough
+                # (small configs, symlink targets) to hit on a real payload.
+                if os.path.getsize(path) > block:
                     files.append(path)
             except OSError:
                 # Unreadable entries are not fatal: the point is a comparable
@@ -52,9 +56,9 @@ def measure(files: list[str], block: int, samples: int, seed: int) -> list[float
     latencies = []
     for _ in range(samples):
         path = files[rng.randrange(len(files))]
-        size = os.path.getsize(path)
-        # Block-aligned so the read does not straddle a cluster boundary.
-        offset = (rng.randrange(0, size - block) // block) * block
+        # Block-aligned so the read does not straddle a cluster boundary, and capped
+        # so the whole block fits.
+        offset = offsets_for(os.path.getsize(path), block, rng)
         fd = os.open(path, os.O_RDONLY)
         try:
             start = time.perf_counter()
@@ -71,17 +75,72 @@ def percentile(latencies: list[float], fraction: float) -> float:
     return latencies[index] * 1e6
 
 
+def offsets_for(size: int, block: int, rng: random.Random) -> int:
+    """A random block-aligned offset whose whole block fits inside `size`.
+
+    `size` must be strictly greater than `block`; `collect` guarantees that. Split
+    out because the arithmetic is easy to get subtly wrong: a `>=` filter admits a
+    file of exactly `block` bytes, whose only candidate offset is 0 and which then
+    reads past EOF by a full block.
+    """
+    max_offset = (size // block - 1) * block
+    return rng.randrange(0, max_offset // block + 1) * block
+
+
+def self_test() -> int:
+    """Check the sampling invariants. Run with --self-test."""
+    import tempfile
+
+    block = BLOCK
+    rng = random.Random(1)
+
+    # Every candidate offset must leave a whole block inside the file. A `>=`
+    # filter once admitted an exactly-one-block file, whose only offset reads a
+    # full block past EOF, and `randrange(0, 0)` raised on it in CI.
+    for size in range(block + 1, block * 8 + 2):
+        for _ in range(20):
+            offset = offsets_for(size, block, rng)
+            assert offset % block == 0, f"{size}: {offset} not aligned"
+            assert offset >= 0, f"{size}: negative offset {offset}"
+            assert offset + block <= size, f"{size}: read to {offset + block} past EOF"
+
+    # A file of exactly one block must be excluded by the collector, and a larger
+    # one included.
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, size in (("exact", block), ("small", block - 1), ("big", block * 3)):
+            with open(os.path.join(tmp, name), "wb") as fh:
+                fh.write(b"x" * size)
+        files = collect(tmp, block)
+        assert [os.path.basename(p) for p in files] == ["big"], files
+
+    print("self-test ok")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("root", help="mounted EROFS root to sample")
+    parser.add_argument("root", nargs="?", help="mounted EROFS root to sample")
     parser.add_argument("--samples", type=int, default=SAMPLES)
     parser.add_argument("--block", type=int, default=BLOCK)
     parser.add_argument("--seed", type=lambda v: int(v, 0), default=SEED)
+    parser.add_argument("--self-test", action="store_true", help="check sampling invariants")
     args = parser.parse_args()
+
+    if args.self_test:
+        return self_test()
+
+    if args.root is None:
+        parser.error("a root path is required unless --self-test is given")
+    if args.samples < 1:
+        parser.error("--samples must be at least 1")
 
     files = collect(args.root, args.block)
     if not files:
-        print(f"no files of at least {args.block} bytes under {args.root}", file=sys.stderr)
+        print(
+            f"no files larger than {args.block} bytes under {args.root}; "
+            "nothing to sample",
+            file=sys.stderr,
+        )
         return 1
 
     latencies = measure(files, args.block, args.samples, args.seed)
