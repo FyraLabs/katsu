@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""Boot an ISO under UEFI and report how long it takes to reach userspace.
+
+Used by the `iso-bootc-x86_64-comptest` CI job. Read latency on the raw payload
+(scripts/erofs-read-bench) is a proxy; this measures the thing users actually
+feel, and is the only way to see the effect of the per-path `--compress-hints`
+entries, which the payload benchmark cannot reach.
+
+The boot is considered complete when the serial console prints `TARGET_MARKER`.
+Time is measured from QEMU start, so a machine that never reaches the marker
+fails loudly rather than reporting a plausible-looking number.
+"""
+
+import argparse
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+# Printed by systemd once multi-user has been reached. Matched loosely because
+# the line is padded and dotted by the console renderer.
+TARGET_MARKER = "Reached target multi-user.target"
+# A boot that never reaches userspace would otherwise hang until the timeout.
+TIMEOUT_SECONDS = 600
+FAILURE_MARKERS = (
+    "Kernel panic",
+    "Cannot mount ISO",
+    "Failed to mount composefs image",
+    "You are in emergency mode",
+    "Reached target emergency.target",
+)
+
+# Kernel console lines are prefixed with `[    1.234567]`. Using those timestamps
+# rather than the wall clock excludes the GRUB menu wait (60s by default), which
+# would otherwise dominate the measurement and hide the differences this matrix
+# exists to find.
+KERNEL_TIMESTAMP = re.compile(rb"\[\s*(\d+)\.(\d+)\]")
+
+
+def firmware() -> tuple[str, str]:
+    """Locate the OVMF code and variable-store images."""
+    candidates = [
+        ("/usr/share/OVMF/OVMF_CODE.fd", "/usr/share/OVMF/OVMF_VARS.fd"),
+        ("/usr/share/edk2/ovmf/OVMF_CODE.fd", "/usr/share/edk2/ovmf/OVMF_VARS.fd"),
+    ]
+    for code, variables in candidates:
+        if os.path.exists(code) and os.path.exists(variables):
+            return code, variables
+    raise SystemExit(f"OVMF firmware not found in {[c for c, _ in candidates]}")
+
+
+def kernel_seconds(raw: bytes, upto: int) -> float | None:
+    """Kernel uptime in seconds at byte offset `upto`, or None if unavailable."""
+    last = None
+    for match in KERNEL_TIMESTAMP.finditer(raw):
+        if match.start() > upto:
+            break
+        last = match
+    if last is None:
+        return None
+    whole, fraction = last.group(1).decode(), last.group(2).decode()
+    return int(whole) + int(fraction) / (10 ** len(fraction))
+
+
+def boot(iso: str, memory: str, cpus: str, timeout: int) -> float:
+    code, variables = firmware()
+    workdir = tempfile.mkdtemp(prefix="katsu-boot-")
+    serial = os.path.join(workdir, "serial.log")
+    vars_copy = os.path.join(workdir, "vars.fd")
+    shutil.copy(variables, vars_copy)
+
+    cmd = [
+        "qemu-system-x86_64",
+        "-machine", "q35",
+        # KVM is required, not optional: under TCG a full desktop ISO takes many
+        # minutes to reach userspace, which would make this matrix unusable and
+        # the numbers incomparable with anything else. Failing loudly is better
+        # than reporting a TCG time that looks like a regression.
+        "-enable-kvm",
+        "-m", memory,
+        "-smp", cpus,
+        "-display", "none",
+        "-no-reboot",
+        "-drive", f"if=pflash,format=raw,readonly=on,file={code}",
+        "-drive", f"if=pflash,format=raw,file={vars_copy}",
+        "-cdrom", iso,
+        "-boot", "d",
+        "-serial", f"file:{serial}",
+        "-nic", "user,model=virtio-net-pci",
+    ]
+
+    start = time.monotonic()
+    print("qemu: " + " ".join(cmd), file=sys.stderr)
+    process = subprocess.Popen(
+        cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    reached = False
+    try:
+        while True:
+            if process.poll() is not None and not os.path.exists(serial):
+                raise SystemExit(f"QEMU exited early with status {process.returncode}")
+            elapsed = time.monotonic() - start
+            if elapsed > timeout:
+                # Keep the serial log: it is the only evidence of how far the
+                # boot got, and a bare timeout says nothing.
+                kept = os.path.join(tempfile.gettempdir(), "katsu-boot-timeout.log")
+                if os.path.exists(serial):
+                    shutil.copy(serial, kept)
+                raise SystemExit(
+                    f"boot did not reach {TARGET_MARKER!r} within {timeout}s; "
+                    f"serial output kept at {kept}"
+                )
+            if os.path.exists(serial):
+                with open(serial, "rb") as fh:
+                    raw = fh.read()
+                text = raw.decode("utf-8", errors="replace")
+                for marker in FAILURE_MARKERS:
+                    if marker in text:
+                        raise SystemExit(f"boot failed: found {marker!r} in serial output")
+                if TARGET_MARKER in text:
+                    reached = True
+                    # The marker line itself carries no kernel timestamp, so the
+                    # latest one before it is the honest "time to userspace".
+                    at = kernel_seconds(raw, raw.find(TARGET_MARKER.encode("utf-8")))
+                    if at is None:
+                        raise SystemExit(
+                            "reached userspace but no kernel timestamps were captured; "
+                            "the console karg is probably missing"
+                        )
+                    return at
+            time.sleep(0.5)
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        # A clean run leaves nothing worth keeping; a failed one keeps its log
+        # above, so only tidy the workdir when the boot actually succeeded.
+        if reached:
+            shutil.rmtree(workdir, ignore_errors=True)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("iso", help="ISO to boot")
+    parser.add_argument("--memory", default="4G")
+    parser.add_argument("--cpus", default="2")
+    parser.add_argument("--timeout", type=int, default=TIMEOUT_SECONDS)
+    args = parser.parse_args()
+
+    if not os.path.exists("/dev/kvm"):
+        raise SystemExit(
+            "/dev/kvm is not available; a TCG boot is too slow to be a useful "
+            "measurement. The CI container needs --privileged and the host must "
+            "expose /dev/kvm."
+        )
+
+    if not os.path.exists(args.iso):
+        raise SystemExit(f"no ISO at {args.iso}")
+
+    elapsed = boot(args.iso, args.memory, args.cpus, args.timeout)
+    print(f"{elapsed:.0f}s")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

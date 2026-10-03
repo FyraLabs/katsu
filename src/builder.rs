@@ -562,6 +562,24 @@ impl IsoBuilder {
 
 		Ok(())
 	}
+	/// Map an `erofs-fragments` flag value to its `mkfs.erofs -E` token.
+	///
+	/// Both the token names and the shorter aliases are accepted. The tokens are
+	/// what show up in the logged `mkfs.erofs` command line and in CI matrices, so
+	/// requiring a different spelling here is a needless trap. `None` means the
+	/// feature is left off entirely.
+	fn fragments_token(mode: &str) -> Result<Option<&'static str>> {
+		match mode {
+			"none" => Ok(None),
+			"fragments" | "plain" => Ok(Some("fragments")),
+			"all-fragments" | "all" => Ok(Some("all-fragments")),
+			other => bail!(
+				"invalid erofs-fragments value {other:?}; expected `none`, `fragments` \
+				 (alias `plain`) or `all-fragments` (alias `all`)"
+			),
+		}
+	}
+
 	/// Build an EROFS image from `root`.
 	///
 	#[allow(dead_code)]
@@ -719,14 +737,10 @@ impl IsoBuilder {
 		// `fragdedupe` only applies with a fragments mode, so reject the combination
 		// mkfs.erofs would otherwise silently ignore or reject itself.
 		if let Some(mode) = feature_flag_str!("erofs-fragments") {
+			let token = Self::fragments_token(&mode)?;
 			opts.extra_features.retain(|f| !f.contains("fragments"));
-			match mode.as_str() {
-				"none" => {},
-				"all" => opts.extra_features.push("all-fragments".to_string()),
-				"plain" => opts.extra_features.push("fragments".to_string()),
-				other => bail!(
-					"invalid erofs-fragments value {other:?}; expected `none`, `plain` or `all`"
-				),
+			if let Some(token) = token {
+				opts.extra_features.push(token.to_string());
 			}
 			info!(mode, "Using configured EROFS fragments mode");
 		}
@@ -1209,6 +1223,24 @@ mod test {
 		let mut features = vec!["all-fragments".to_string()];
 		IsoBuilder::set_fragdedupe_full(&mut features);
 		assert_eq!(features, vec!["all-fragments".to_string()]);
+	}
+
+	#[test]
+	fn fragments_flag_accepts_both_token_and_alias_spellings() {
+		// CI passes the mkfs.erofs `-E` token; the flag originally demanded a
+		// different alias (`plain`), so the matrix failed with an "invalid value"
+		// error that looked like a typo in the workflow. Both spellings must work.
+		for mode in ["fragments", "plain"] {
+			assert_eq!(IsoBuilder::fragments_token(mode).unwrap(), Some("fragments"), "{mode}");
+		}
+		for mode in ["all-fragments", "all"] {
+			assert_eq!(IsoBuilder::fragments_token(mode).unwrap(), Some("all-fragments"), "{mode}");
+		}
+		assert_eq!(IsoBuilder::fragments_token("none").unwrap(), None);
+
+		// Anything else must fail loudly rather than silently disabling fragments,
+		// which would quietly change the shipped image.
+		assert!(IsoBuilder::fragments_token("bogus").is_err());
 	}
 
 	#[test]

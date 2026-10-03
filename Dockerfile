@@ -43,6 +43,8 @@ RUN --mount=type=cache,target=/var/cache \
     psmisc \
     openssl-devel \
     pkgconf \
+    qemu-kvm \
+    edk2-ovmf \
     https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-44.noarch.rpm \
     https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-44.noarch.rpm
 # Notes on the less obvious packages above:
@@ -54,6 +56,11 @@ RUN --mount=type=cache,target=/var/cache \
 #   openssl-devel, pkgconf
 #                  linking `composefs-rs` pulls in `openssl-sys`, which needs the
 #                  OpenSSL headers at build time and probes for them via pkg-config.
+#   qemu-kvm, edk2-ovmf
+#                  boot the built ISO under UEFI so the compression matrix can
+#                  report boot time alongside size and read latency. `qemu-kvm`
+#                  brings `qemu-system-x86_64`; `qemu-user-*` below is only for
+#                  cross-arch builds and cannot boot a full system.
 #   shim-x64, grub2-pc-modules, qemu-user-static-aarch64
 #                  x86_64-only, so deliberately absent from this shared list. See
 #                  the architecture-scoped installs below.

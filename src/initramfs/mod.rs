@@ -369,6 +369,13 @@ mod tests {
 			contents.contains(r#""${loop}p3""#),
 			"the composefs root is partition 3 of the payload"
 		);
+		// The loop must not be read-only: bootc mounts the ESP with a raw mount(2)
+		// carrying no MS_RDONLY, and the kernel answers `EPERM` when the loop is
+		// read-only, breaking every command including `bootc status`.
+		assert!(
+			!contents.contains("losetup --show -P --find -r"),
+			"a read-only loop makes bootc's ESP mount fail with EPERM"
+		);
 		assert!(
 			stage
 				.join("usr/lib/systemd/system/initrd-root-fs.target.requires/sysroot.mount")

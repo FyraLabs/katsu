@@ -386,8 +386,14 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
 
+          # The boot benchmark reads the serial console, which the shipped ISO does
+          # not use. Adding the console karg to a scratch manifest keeps this to the
+          # single build the matrix already performs, rather than a second one.
+          cp bootc/katsu-iso-bootc.yaml bootc/katsu-iso-bootc-bench.yaml
+          printf '\nkernel_cmdline: "console=ttyS0,115200"\n' >> bootc/katsu-iso-bootc-bench.yaml
+
           start=$(date +%s)
-          katsu -o iso bootc/katsu-iso-bootc.yaml 2>&1
+          katsu -o iso bootc/katsu-iso-bootc-bench.yaml 2>&1
           elapsed=$(( $(date +%s) - start ))
 
           mv out.iso katsu-work/image/katsu.iso
@@ -412,21 +418,29 @@ jobs:
           umount "$mount_dir"
           popd
 
+          # The measurement the settings actually exist for. Read latency on the raw
+          # payload is only a proxy: it cannot see the per-path `--compress-hints`
+          # entries, whose patterns match paths inside the composefs image, and it
+          # ignores decompression spread across boot. Booting the ISO is the only
+          # way to observe the effect a user feels.
+          boot_secs=$("$GITHUB_WORKSPACE/scripts/boot-time-bench" tests/ng/katsu-work/image/katsu.iso)
+
           # This job exists to compare size and build cost across the matrix, so
           # surface both in the summary instead of requiring every artifact to be
           # downloaded and measured by hand.
           {
             echo "### EROFS compression test"
             echo
-            echo "| compression | level | chunk size | fragments | hints | fragdedupe | payload | ISO size | build time | read p50/p90/p99 |"
-            echo "|---|---|---|---|---|---|---|---|---|---|"
-            echo "| \`${{ matrix.compression }}\` | ${{ matrix.level }} | ${{ matrix.pcluster_size }} | \`${{ matrix.fragments }}\` | \`${{ matrix.compress_hints }}\` | ${{ matrix.fragdedupe }} | $payload_human ($payload_bytes bytes) | $human ($bytes bytes) | ${elapsed}s | $read_us |"
+            echo "| compression | level | chunk size | fragments | hints | fragdedupe | payload | ISO size | build time | read p50/p90/p99 | boot time |"
+            echo "|---|---|---|---|---|---|---|---|---|---|---|"
+            echo "| \`${{ matrix.compression }}\` | ${{ matrix.level }} | ${{ matrix.pcluster_size }} | \`${{ matrix.fragments }}\` | \`${{ matrix.compress_hints }}\` | ${{ matrix.fragdedupe }} | $payload_human ($payload_bytes bytes) | $human ($bytes bytes) | ${elapsed}s | $read_us | $boot_secs |"
             echo
             echo "Reads sample the payload's content-addressed objects, so they reflect the"
             echo "cluster size, fragments mode and compression algorithm. They do not cover the"
             echo "per-path \`--compress-hints\` entries, whose patterns match paths inside the"
             echo "composefs image rather than the raw payload: rows differing only in hints are"
-            echo "expected to measure alike."
+            echo "expected to measure alike there. Boot time is measured to userspace on the"
+            echo "serial console and is what those hints are expected to affect."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifacts

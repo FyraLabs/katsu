@@ -31,7 +31,16 @@ image=/run/initramfs/live/LiveOS/rootfs.img
 # The payload is a GPT disk, not a bare filesystem: bootc looks for an ESP among
 # the backing devices of everything it mounts, and only a partitioned disk can
 # expose one. Its root filesystem is partition 3 (ESP, XBOOTLDR, root).
-loop=$(losetup --show -P --find -r "$image") || fail 'Cannot attach live root image'
+#
+# The loop is deliberately *not* attached read-only. bootc's `Storage::new`,
+# which every command including `bootc status` goes through, mounts the ESP with a
+# plain `mount(2)` and no `MS_RDONLY`; the kernel then refuses with `EPERM` if the
+# loop is read-only, and `bootc status` fails with `Mounting /dev/loopNp1:
+# Permission denied`. `mount(8)` hides this by silently downgrading to a
+# read-only mount, but bootc calls the syscall directly. Nothing is written in
+# practice: the backing file lives on the read-only ISO, so writes would be
+# rejected by the medium.
+loop=$(losetup --show -P --find "$image") || fail 'Cannot attach live root image'
 [ -b "${loop}p3" ] || fail "No root partition in $image (expected a GPT payload)"
 mount -o ro "${loop}p3" /run/katsu/ro || fail 'Cannot mount live root partition'
 
