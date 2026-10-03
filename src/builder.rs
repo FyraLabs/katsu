@@ -670,8 +670,16 @@ impl IsoBuilder {
 
 				let arch_args = match manifest.dnf.arch.as_deref().unwrap_or(std::env::consts::ARCH)
 				{
-					// Hybrid mode is only supported on x86_64
-					"x86_64" => vec!["--grub2-mbr", grub2_mbr_hybrid.to_str().unwrap()],
+					// Hybrid BIOS boot needs the staged MBR. `cp_grub` already refused
+					// to continue without it unless `no-grub-hybrid-mbr` was passed, so
+					// its absence here means the opt-out was deliberate.
+					"x86_64" if grub2_mbr_hybrid.is_file() => {
+						vec!["--grub2-mbr", grub2_mbr_hybrid.to_str().unwrap()]
+					},
+					"x86_64" => {
+						warn!("Building without a hybrid MBR: UEFI boot only");
+						vec![]
+					},
 					"aarch64" => vec![],
 					_ => unimplemented!(),
 				};
@@ -993,13 +1001,40 @@ mod test {
 	}
 
 	#[test]
-	fn live_templates_select_ostree_initramfs_only_for_sysroots() {
+	fn boot_payload_live_marker_follows_the_karg() {
+		use crate::backends::bootloader::BootPayload;
+
+		// These strings are what the initramfs services gate on; picking the wrong
+		// one activates the wrong handoff without any error.
+		let ostree = BootPayload {
+			karg: "ostree=/ostree/boot.1/um/checksum/0".into(),
+			..Default::default()
+		};
+		assert_eq!(ostree.live_marker(), "rd.katsu.ostree");
+
+		let composefs = BootPayload { karg: "composefs=abc123".into(), ..Default::default() };
+		assert_eq!(composefs.live_marker(), "rd.katsu.composefs");
+
+		// A plain rootfs has no katsu integration to activate.
+		assert_eq!(BootPayload::default().live_marker(), "");
+	}
+
+	#[test]
+	fn live_templates_emit_the_marker_matching_the_deployment() {
+		// Each layout has its own initramfs service, gated on its own marker, so
+		// emitting the wrong one silently activates the wrong handoff. Cover the
+		// plain, OSTree and composefs cases explicitly.
+		let cases = [
+			("", "", false),
+			("ostree=/ostree/boot.1/um/checksum/0", "rd.katsu.ostree", true),
+			("composefs=abc123", "rd.katsu.composefs", true),
+		];
 		for template in [
 			include_str!("../templates/grub.cfg.tera"),
 			include_str!("../templates/limine.cfg.tera"),
 			include_str!("../templates/refind.cfg.tera"),
 		] {
-			for ostree in ["", "ostree=/ostree/boot.1/um/checksum/0"] {
+			for (karg, marker, is_deployment) in cases {
 				let mut context = tera::Context::new();
 				for key in [
 					"GRUB_PREPEND_COMMENT",
@@ -1013,22 +1048,23 @@ mod test {
 				] {
 					context.insert(key, "test");
 				}
-				context.insert("ostree", ostree);
+				context.insert("ostree", karg);
+				context.insert("marker", marker);
 				let rendered = tera::Tera::one_off(template, &context, false).unwrap();
 				let cmdlines: Vec<_> = rendered
 					.lines()
-					.filter(|line| {
-						line.contains("rd.live.image") || line.contains("rd.katsu.ostree")
-					})
+					.filter(|line| line.contains("rd.live.image") || line.contains("rd.katsu."))
 					.collect();
-				assert!(!cmdlines.is_empty());
+				assert!(!cmdlines.is_empty(), "no cmdline rendered for {karg:?}");
 				for line in cmdlines {
-					assert_eq!(
-						line.contains("rd.katsu.ostree rd.systemd.gpt_auto=0 rd.katsu.label=test"),
-						!ostree.is_empty()
-					);
-					assert_eq!(line.contains("root=live:"), ostree.is_empty());
-					assert!(!line.contains("rd.live.overlay.overlayfs=1"));
+					// A deployment layout gets its marker and no generic root=; a plain
+					// rootfs gets the generic live path and no katsu marker at all.
+					assert_eq!(line.contains(marker) && !marker.is_empty(), is_deployment);
+					assert_eq!(line.contains("root=live:"), !is_deployment);
+					assert_eq!(line.contains("rd.systemd.gpt_auto=0"), is_deployment);
+					if is_deployment {
+						assert!(line.contains(karg), "deployment karg missing from {line}");
+					}
 				}
 			}
 		}

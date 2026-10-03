@@ -5,8 +5,12 @@ use crate::{
 	util::loopdev_with_file,
 };
 use color_eyre::{Result, eyre::bail};
-use std::{fs, os::unix::fs::symlink, path::Path};
-use tracing::{debug, info, info_span, trace, warn};
+use std::{
+	fs,
+	os::unix::fs::symlink,
+	path::{Path, PathBuf},
+};
+use tracing::{debug, info, info_span, warn};
 
 /// The boot parameters a GRUB config needs, grouped so the template writer stays
 /// readable as boot options grow.
@@ -27,16 +31,40 @@ impl Bootloader {
 
 		fs::create_dir_all(&boot_imgs_dir)?;
 		if self.get_arch(manifest) == "x86_64" {
-			info!("Copying GRUB hybrid boot image");
-			let hybrid_img = chroot.join("usr/lib/grub/i386-pc/boot_hybrid.img");
-			trace!(?hybrid_img, "Source hybrid boot image location");
-			let dest = boot_imgs_dir.join("boot_hybrid.img");
-			trace!(?dest, "Destination hybrid boot image location");
-			if !hybrid_img.exists() {
-				warn!("Hybrid boot image not found at expected location");
+			// `boot_hybrid.img` is a 512-byte MBR stub shipped with the GRUB tooling
+			// rather than part of an image's boot payload, so it normally only exists
+			// on the build host, which already provides `grub2-mkimage`/`grub2-mkrescue`
+			// for this phase. Hybrid BIOS boot needs it, so a missing file is an error
+			// unless explicitly opted out.
+			let opt_out = crate::feature_flag_bool!("no-grub-hybrid-mbr");
+			let candidates = [
+				// Build host first: this is where the GRUB tooling lives.
+				PathBuf::from("/usr/lib/grub/i386-pc/boot_hybrid.img"),
+				PathBuf::from("/usr/share/grub/i386-pc/boot_hybrid.img"),
+				// In-image copies, for images that do ship their own GRUB payload.
+				chroot.join("usr/lib/grub/i386-pc/boot_hybrid.img"),
+				chroot.join("boot/grub2/i386-pc/boot_hybrid.img"),
+				chroot.join("usr/lib/ostree-boot/grub2/i386-pc/boot_hybrid.img"),
+			];
+			// Only the presence of the staged file matters downstream: `xorriso`
+			// reads it from `boot_imgs_dir` and omits `--grub2-mbr` when absent.
+			match candidates.iter().find(|path| path.is_file()) {
+				Some(hybrid_img) => {
+					let dest = boot_imgs_dir.join("boot_hybrid.img");
+					fs::copy(hybrid_img, &dest)?;
+					debug!(?hybrid_img, ?dest, "Copied GRUB hybrid boot image");
+				},
+				None if opt_out => warn!(
+					?candidates,
+					"No GRUB hybrid boot image and `no-grub-hybrid-mbr` is set; \
+					 the ISO will boot under UEFI only"
+				),
+				None => bail!(
+					"No GRUB hybrid boot image found in any of {candidates:?}; \
+					 BIOS hybrid boot would be broken. Pass \
+					 `-X no-grub-hybrid-mbr` to build a UEFI-only ISO."
+				),
 			}
-			fs::copy(&hybrid_img, &dest)?;
-			debug!("Successfully copied hybrid boot image");
 		}
 
 		self.create_grub_directories(&iso_tree, &boot_imgs_dir)?;
@@ -191,11 +219,24 @@ impl Bootloader {
 			return Self::copy_dir(&boot_efi, efi_dest);
 		}
 
+		// Fall back to the build host's bootupd component cache. A disk install has
+		// bootupd write the ESP from these components, so an image that never
+		// carried its own EFI payload still leaves them available here, from the
+		// installed shim/grub2-efi packages. Same reasoning as the hybrid MBR above.
+		for host_efi in [Path::new("/usr/lib/efi"), Path::new("/usr/share/efi")] {
+			if host_efi.join("EFI").exists() || Self::usr_efi_has_components(host_efi) {
+				info!(?host_efi, "Copying EFI boot files from the build host");
+				return Self::copy_usr_lib_efi(host_efi, &efi_dest.join("EFI"));
+			}
+		}
+
 		if ostree_boot {
 			bail!(
-				"No EFI payload found: {} has no EFI directory and {} is empty",
+				"No EFI payload found in the image ({}, {}, {}) or on the build host \
+				 (/usr/lib/efi); install shim-x64, grub2-efi-x64 and bootupd",
 				usr_lib_efi.display(),
-				efi_src.display()
+				efi_src.display(),
+				boot_efi.display()
 			);
 		}
 		warn!("No EFI directory found in {}", chroot_boot.display());
@@ -301,7 +342,8 @@ impl Bootloader {
 				vmlinuz: boot.vmlinuz.to_string(),
 				initramfs: boot.initramfs.to_string(),
 				cmd: boot.kernel_cmdline.to_string(),
-				ostree: ostree_karg
+				ostree: ostree_karg,
+				marker: payload.live_marker().to_string()
 			} => iso_tree.join("boot/grub/grub.cfg")
 		);
 
@@ -461,6 +503,25 @@ impl Bootloader {
 		};
 
 		debug!("Generating Grub images");
+		// `grub2-mkimage` needs a full module directory including `moddep.lst`. An
+		// image tree keeps only the modules for its own boot path (under
+		// `boot/grub2/<arch>`) and no `usr/lib/grub` at all, so prefer the build
+		// host's tooling directory, which is where `grub2-mkimage` itself comes from.
+		let grub_module_dirs = [
+			PathBuf::from(format!("/usr/lib/grub/{arch}")),
+			chroot.join(format!("usr/lib/grub/{arch}")),
+			chroot.join(format!("boot/grub2/{arch}")),
+		];
+		let grub_modules = grub_module_dirs
+			.iter()
+			.find(|dir| dir.join("moddep.lst").is_file())
+			.ok_or_else(|| {
+				color_eyre::eyre::eyre!(
+					"No GRUB module directory with moddep.lst in any of {grub_module_dirs:?}; \
+					 install grub2-pc-modules / grub2-tools on the build host"
+				)
+			})?;
+		info!(?grub_modules, "Using GRUB module directory");
 		{
 			use std::process::Command;
 
@@ -468,7 +529,7 @@ impl Bootloader {
 				.arg("-O")
 				.arg(arch_out)
 				.arg("-d")
-				.arg(chroot.join(format!("usr/lib/grub/{}", arch)))
+				.arg(grub_modules)
 				.arg("-o")
 				.arg(iso_tree.join("boot/eltorito.img"))
 				.arg("-p")

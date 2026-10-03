@@ -30,7 +30,7 @@ impl Bootloader {
 		let limine_cfg = root.join("boot/limine.cfg");
 		let ostree_karg = ostree.karg.clone();
 		crate::tpl!(
-			"limine.cfg.tera" => { LIMINE_PREPEND_COMMENT, distro, vmlinuz, initramfs, cmd, volid, ostree: ostree_karg } => &limine_cfg
+			"limine.cfg.tera" => { LIMINE_PREPEND_COMMENT, distro, vmlinuz, initramfs, cmd, volid, ostree: ostree_karg, marker: ostree.live_marker().to_string() } => &limine_cfg
 		);
 
 		let binding = cmd_lib::run_fun!(b2sum $limine_cfg)?;

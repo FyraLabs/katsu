@@ -41,7 +41,7 @@ impl Bootloader {
 		let refind_cfg = iso_tree.join("EFI/BOOT/refind.conf");
 		let ostree_karg = ostree.karg.clone();
 		crate::tpl!(
-			"refind.cfg.tera" => { REFIND_PREPEND_COMMENT, distro, vmlinuz, initramfs, cmd, volid, ostree: ostree_karg } => &refind_cfg
+			"refind.cfg.tera" => { REFIND_PREPEND_COMMENT, distro, vmlinuz, initramfs, cmd, volid, ostree: ostree_karg, marker: ostree.live_marker().to_string() } => &refind_cfg
 		);
 
 		let mut nsh = fs::File::create(iso_tree.join("startup.nsh"))?;

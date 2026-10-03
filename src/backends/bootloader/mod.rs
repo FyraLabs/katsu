@@ -59,6 +59,23 @@ impl BootPayload {
 		}
 		Ok(Self::default())
 	}
+
+	/// The katsu-specific marker that activates the matching live-media
+	/// integration in the initramfs.
+	///
+	/// The two layouts have separate services, each gated on its own marker
+	/// (`rd.katsu.ostree` / `rd.katsu.composefs`), so emitting the wrong one
+	/// silently activates the wrong handoff. Empty for a plain rootfs, which needs
+	/// no katsu integration at all.
+	pub fn live_marker(&self) -> &'static str {
+		if self.karg.starts_with("composefs=") {
+			"rd.katsu.composefs"
+		} else if self.karg.starts_with("ostree=") {
+			"rd.katsu.ostree"
+		} else {
+			""
+		}
+	}
 }
 
 /// Information a bootloader needs for a native composefs deployment.
