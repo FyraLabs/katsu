@@ -35,8 +35,26 @@ RUN --mount=type=cache,target=/var/cache \
     dnf5 \
     setfiles \
     podman \
+    cpio \
+    bootc \
+    fuse-overlayfs \
+    coreutils \
+    psmisc \
+    openssl-devel \
+    pkgconf \
     https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-43.noarch.rpm \
     https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-43.noarch.rpm
+# Notes on the less obvious packages above:
+#   cpio           builds the initramfs integration archive appended to dracut's output.
+#   bootc          the `unified` layout drives `bootc install` at build time.
+#   fuse-overlayfs fallback when the kernel refuses a composefs mount.
+#   coreutils      `numfmt` formats ISO sizes in CI job summaries.
+#   psmisc         process helpers used while polling builds.
+#   openssl-devel, pkgconf
+#                  linking `composefs-rs` pulls in `openssl-sys`, which needs the
+#                  OpenSSL headers at build time and probes for them via pkg-config.
+# Keep this list comment-free inline: a `#` inside a backslash-continued command is
+# not a shell comment, it becomes an argument.
 # TODO: Probably don't add RPMFusion repos to the image, guide users to add GPG keys and repos themselves?
 
 FROM base AS rust-builder
