@@ -1191,6 +1191,12 @@ mod test {
 					assert_eq!(line.contains(marker) && !marker.is_empty(), is_deployment);
 					assert_eq!(line.contains("root=live:"), !is_deployment);
 					assert_eq!(line.contains("rd.systemd.gpt_auto=0"), is_deployment);
+					// livesys-scripts re-checks the cmdline itself, so every live cmdline
+					// needs its marker regardless of the katsu layout.
+					assert!(
+						line.contains("rd.live.image"),
+						"live cmdline missing rd.live.image: {line}"
+					);
 					if is_deployment {
 						assert!(line.contains(karg), "deployment karg missing from {line}");
 					}
