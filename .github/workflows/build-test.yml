@@ -71,12 +71,13 @@ jobs:
           touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
       - name: Upload digest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: digests-${{ steps.prepare.outputs.platform_pair }}
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
           retention-days: 1
+          archive: false
 
   build-environment:
     runs-on: ubuntu-latest
@@ -84,7 +85,7 @@ jobs:
       - build-environment-arch
     steps:
       - name: Download digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: ${{ runner.temp }}/digests
           pattern: digests-*
@@ -148,10 +149,11 @@ jobs:
           popd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: image-arm
           path: tests/ng/katsu-work/image/*.raw.zstd
+          archive: false
 
   bios-x86_64:
     needs: build-environment
@@ -180,10 +182,11 @@ jobs:
           popd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bios-x86_64
           path: tests/ng/katsu-work/image/*.raw.zstd
+          archive: false
 
   image-x86_64:
     needs: build-environment
@@ -211,10 +214,11 @@ jobs:
           popd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: image-x86_64
           path: tests/ng/katsu-work/image/*.raw.zstd
+          archive: false
 
   iso-x86_64:
     needs: build-environment
@@ -242,10 +246,11 @@ jobs:
           popd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: iso-x86_64
           path: tests/ng/katsu-work/image/katsu.iso
+          archive: false
 
   # Native composefs unified storage. The payload holds a bootc-owned
   # containers-storage next to the composefs objects, the system boots via
@@ -296,10 +301,11 @@ jobs:
           popd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: iso-bootc-x86_64
           path: tests/ng/katsu-work/image/katsu.iso
+          archive: false
 
   iso-bootc-x86_64-comptest:
     strategy:
@@ -381,7 +387,7 @@ jobs:
           # We don't need CodeQL in this action
           rm -rf /hostfs/opt/hostedtoolcache/CodeQL
 
-      - name: Run test
+      - name: Build
         # One comma-separated line: clap splits KATSU_FEATURE_FLAGS on `,`, so a
         # folded/multi-line value would leave leading spaces on later flags and
         # they would silently not apply. The compression level is its own flag for
@@ -395,36 +401,46 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
 
-          # The boot benchmark reads the serial console, which the shipped ISO does
-          # not use. Adding the console karg to a scratch manifest keeps this to the
-          # single build the matrix already performs, rather than a second one.
-          cp bootc/katsu-iso-bootc.yaml bootc/katsu-iso-bootc-bench.yaml
-          printf '\nkernel_cmdline: "console=ttyS0,115200"\n' >> bootc/katsu-iso-bootc-bench.yaml
-
           start=$(date +%s)
-          katsu -o iso bootc/katsu-iso-bootc-bench.yaml 2>&1
+          katsu -o iso bootc/katsu-iso-bootc.yaml 2>&1
           elapsed=$(( $(date +%s) - start ))
 
           mv out.iso katsu-work/image/katsu.iso
-          bytes=$(stat -c %s katsu-work/image/katsu.iso)
-          human=$(numfmt --to=iec --suffix=B "$bytes")
-          # The payload dominates the ISO and is what the EROFS settings actually
-          # shape, so report it separately: two configurations can produce the same
-          # ISO size while compressing the payload very differently.
-          payload_bytes=$(stat -c %s katsu-work/iso-tree/LiveOS/rootfs.img)
-          payload_human=$(numfmt --to=iec --suffix=B "$payload_bytes")
+          popd
 
-          # Read latency, so a configuration cannot look good on size alone while
-          # making the live system slow. `scripts/erofs-read-bench` samples the
-          # payload's content-addressed objects with a fixed seed, so every matrix
-          # entry reads exactly the same bytes. It must run as root because
-          # `composefs/` is mode 0700 in the installed image.
-          #
-          # The payload is a GPT disk, not a bare filesystem: mounting the whole
-          # image fails with EINVAL because a partition table is not a filesystem.
-          # Its EROFS root is partition 3 (ESP, XBOOTLDR, root).
+          # Stash the figures the bench step reports, so the two stay independent.
+          {
+            echo "elapsed=$elapsed"
+            echo "iso_bytes=$(stat -c %s tests/ng/katsu-work/image/katsu.iso)"
+            echo "payload_bytes=$(stat -c %s tests/ng/katsu-work/iso-tree/LiveOS/rootfs.img)"
+          } >> "$GITHUB_ENV"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: iso-bootc-comptest-${{ matrix.compression }}-${{ matrix.level }}-${{ matrix.pcluster_size }}-${{ matrix.fragments }}-${{ matrix.compress_hints }}-${{ matrix.fragdedupe }}-dedupe${{ matrix.dedupe }}
+          path: tests/ng/katsu-work/image/katsu.iso
+          # The whole point of this job is measuring size; a silently empty or
+          # truncated upload would invalidate the comparison.
+          if-no-files-found: warn
+          archive: false
+
+      - name: Bench reads
+        # Read latency, so a configuration cannot look good on size alone while
+        # making the live system slow. `scripts/erofs-read-bench` samples the
+        # payload's content-addressed objects with a fixed seed, so every matrix
+        # entry reads exactly the same bytes. It must run as root because
+        # `composefs/` is mode 0700 in the installed image.
+        #
+        # The payload is a GPT disk, not a bare filesystem: mounting the whole
+        # image fails with EINVAL because a partition table is not a filesystem.
+        # Its EROFS root is partition 3 (ESP, XBOOTLDR, root).
+        run: |
+          set -euo pipefail
+          payload_image=tests/ng/katsu-work/iso-tree/LiveOS/rootfs.img
+
           mount_dir=$(mktemp -d)
-          payload=$(losetup --show -P --find katsu-work/iso-tree/LiveOS/rootfs.img)
+          payload=$(losetup --show -P --find "$payload_image")
           mount -o ro "${payload}p3" "$mount_dir"
           sync
           echo 3 > /proc/sys/vm/drop_caches
@@ -434,41 +450,27 @@ jobs:
           read_us=$("$GITHUB_WORKSPACE/scripts/erofs-read-bench" "$mount_dir/composefs/objects")
           umount "$mount_dir"
           losetup -d "$payload"
-          popd
+          echo "read_us=$read_us" >> "$GITHUB_ENV"
 
-          # The measurement the settings actually exist for. Read latency on the raw
-          # payload is only a proxy: it cannot see the per-path `--compress-hints`
-          # entries, whose patterns match paths inside the composefs image, and it
-          # ignores decompression spread across boot. Booting the ISO is the only
-          # way to observe the effect a user feels.
-          boot_secs=$("$GITHUB_WORKSPACE/scripts/boot-time-bench" tests/ng/katsu-work/image/katsu.iso)
-
-          # This job exists to compare size and build cost across the matrix, so
-          # surface both in the summary instead of requiring every artifact to be
-          # downloaded and measured by hand.
+      - name: Summarise
+        run: |
+          human=$(numfmt --to=iec --suffix=B "$iso_bytes")
+          payload_human=$(numfmt --to=iec --suffix=B "$payload_bytes")
           {
             echo "### EROFS compression test"
             echo
-            echo "| compression | level | chunk size | fragments | hints | fragdedupe | dedupe | payload | ISO size | build time | read p50/p90/p99 | boot time |"
-            echo "|---|---|---|---|---|---|---|---|---|---|---|---|"
-            echo "| \`${{ matrix.compression }}\` | ${{ matrix.level }} | ${{ matrix.pcluster_size }} | \`${{ matrix.fragments }}\` | \`${{ matrix.compress_hints }}\` | ${{ matrix.fragdedupe }} | ${{ matrix.dedupe }} | $payload_human ($payload_bytes bytes) | $human ($bytes bytes) | ${elapsed}s | $read_us | $boot_secs |"
+            echo "| compression | level | chunk size | fragments | hints | fragdedupe | dedupe | payload | ISO size | build time | read p50/p90/p99 |"
+            echo "|---|---|---|---|---|---|---|---|---|---|---|"
+            echo "| \`${{ matrix.compression }}\` | ${{ matrix.level }} | ${{ matrix.pcluster_size }} | \`${{ matrix.fragments }}\` | \`${{ matrix.compress_hints }}\` | ${{ matrix.fragdedupe }} | ${{ matrix.dedupe }} | $payload_human ($payload_bytes bytes) | $human ($iso_bytes bytes) | ${elapsed}s | $read_us |"
             echo
             echo "Reads sample the payload's content-addressed objects, so they reflect the"
             echo "cluster size, fragments mode and compression algorithm. They do not cover the"
             echo "per-path \`--compress-hints\` entries, whose patterns match paths inside the"
             echo "composefs image rather than the raw payload: rows differing only in hints are"
-            echo "expected to measure alike there. Boot time is measured to userspace on the"
-            echo "serial console and is what those hints are expected to affect."
+            echo "expected to measure alike."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: iso-bootc-comptest-${{ matrix.compression }}-${{ matrix.level }}-${{ matrix.pcluster_size }}-${{ matrix.fragments }}-${{ matrix.compress_hints }}-${{ matrix.fragdedupe }}-dedupe${{ matrix.dedupe }}
-          path: tests/ng/katsu-work/image/katsu.iso
-          # The whole point of this job is measuring size; a silently empty or
-          # truncated upload would invalidate the comparison.
-          if-no-files-found: error
+
 
 
   iso-refind-x86_64:
@@ -498,10 +500,11 @@ jobs:
           popd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: iso-refind-x86_64
           path: tests/ng/katsu-work/image/katsu.iso
+          archive: false
 
   iso-limine-x86_64:
     needs: build-environment
@@ -530,10 +533,11 @@ jobs:
           popd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: iso-limine-x86_64
           path: tests/ng/katsu-work/image/katsu.iso
+          archive: false
 
   fs-test-x86_64:
     needs: build-environment
@@ -561,7 +565,8 @@ jobs:
           popd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fs-test-x86_64
           path: tests/ng/katsu-work/chroot.tar.xz
+          archive: false
