@@ -144,14 +144,14 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o disk-image katsu-arm.yaml 2>&1
-          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu-arm.raw.zstd
+          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/image-arm.raw.zstd
           popd
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: image-arm
-          path: tests/ng/katsu-work/image/*.raw.zstd
+          path: tests/ng/katsu-work/image/image-arm.raw.zstd
           archive: false
 
   bios-x86_64:
@@ -177,14 +177,14 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o disk-image katsu-bios.yaml 2>&1
-          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu.raw.zstd
+          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/bios-x86_64.raw.zstd
           popd
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: bios-x86_64
-          path: tests/ng/katsu-work/image/*.raw.zstd
+          path: tests/ng/katsu-work/image/bios-x86_64.raw.zstd
           archive: false
 
   image-x86_64:
@@ -209,14 +209,14 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o disk-image katsu.yaml 2>&1
-          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu.raw.zstd
+          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/image-x86_64.raw.zstd
           popd
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: image-x86_64
-          path: tests/ng/katsu-work/image/*.raw.zstd
+          path: tests/ng/katsu-work/image/image-x86_64.raw.zstd
           archive: false
 
   iso-x86_64:
@@ -241,14 +241,14 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o iso katsu-iso.yaml 2>&1
-          mv out.iso katsu-work/image/katsu.iso
+          mv out.iso katsu-work/image/iso-x86_64.iso
           popd
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: iso-x86_64
-          path: tests/ng/katsu-work/image/katsu.iso
+          path: tests/ng/katsu-work/image/iso-x86_64.iso
           archive: false
 
   # Native composefs unified storage. The payload holds a bootc-owned
@@ -296,14 +296,14 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o iso bootc/katsu-iso-bootc.yaml 2>&1
-          mv out.iso katsu-work/image/katsu.iso
+          mv out.iso katsu-work/image/iso-bootc-x86_64.iso
           popd
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: iso-bootc-x86_64
-          path: tests/ng/katsu-work/image/katsu.iso
+          path: tests/ng/katsu-work/image/iso-bootc-x86_64.iso
           archive: false
 
   iso-bootc-x86_64-comptest:
@@ -404,13 +404,13 @@ jobs:
           katsu -o iso bootc/katsu-iso-bootc.yaml 2>&1
           elapsed=$(( $(date +%s) - start ))
 
-          mv out.iso katsu-work/image/katsu.iso
+          mv out.iso "katsu-work/image/iso-bootc-comptest-${{ matrix.compression }}-${{ matrix.level }}-${{ matrix.pcluster_size }}-${{ matrix.fragments }}-${{ matrix.compress_hints }}-${{ matrix.fragdedupe }}-dedupe${{ matrix.dedupe }}.iso"
           popd
 
           # Stash the figures the bench step reports, so the two stay independent.
           {
             echo "elapsed=$elapsed"
-            echo "iso_bytes=$(stat -c %s tests/ng/katsu-work/image/katsu.iso)"
+            echo "iso_bytes=$(stat -c %s tests/ng/katsu-work/image/iso-bootc-comptest-${{ matrix.compression }}-${{ matrix.level }}-${{ matrix.pcluster_size }}-${{ matrix.fragments }}-${{ matrix.compress_hints }}-${{ matrix.fragdedupe }}-dedupe${{ matrix.dedupe }}.iso)"
             echo "payload_bytes=$(stat -c %s tests/ng/katsu-work/iso-tree/LiveOS/rootfs.img)"
           } >> "$GITHUB_ENV"
 
@@ -418,7 +418,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: iso-bootc-comptest-${{ matrix.compression }}-${{ matrix.level }}-${{ matrix.pcluster_size }}-${{ matrix.fragments }}-${{ matrix.compress_hints }}-${{ matrix.fragdedupe }}-dedupe${{ matrix.dedupe }}
-          path: tests/ng/katsu-work/image/katsu.iso
+          path: tests/ng/katsu-work/image/iso-bootc-comptest-${{ matrix.compression }}-${{ matrix.level }}-${{ matrix.pcluster_size }}-${{ matrix.fragments }}-${{ matrix.compress_hints }}-${{ matrix.fragdedupe }}-dedupe${{ matrix.dedupe }}.iso
           # The whole point of this job is measuring size; a silently empty or
           # truncated upload would invalidate the comparison.
           if-no-files-found: warn
@@ -495,14 +495,14 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o iso katsu-iso-refind.yaml 2>&1
-          mv out.iso katsu-work/image/katsu.iso
+          mv out.iso katsu-work/image/iso-refind-x86_64.iso
           popd
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: iso-refind-x86_64
-          path: tests/ng/katsu-work/image/katsu.iso
+          path: tests/ng/katsu-work/image/iso-refind-x86_64.iso
           archive: false
 
   iso-limine-x86_64:
@@ -528,14 +528,14 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o iso katsu-iso-limine.yaml 2>&1
-          mv out.iso katsu-work/image/katsu.iso
+          mv out.iso katsu-work/image/iso-limine-x86_64.iso
           popd
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: iso-limine-x86_64
-          path: tests/ng/katsu-work/image/katsu.iso
+          path: tests/ng/katsu-work/image/iso-limine-x86_64.iso
           archive: false
 
   fs-test-x86_64:
@@ -560,12 +560,12 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o folder katsu-script-test.yaml 2>&1
-          tar -cJf katsu-work/chroot.tar.xz katsu-work/chroot
+          tar -cJf katsu-work/fs-test-x86_64.tar.xz katsu-work/chroot
           popd
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: fs-test-x86_64
-          path: tests/ng/katsu-work/chroot.tar.xz
+          path: tests/ng/katsu-work/fs-test-x86_64.tar.xz
           archive: false
