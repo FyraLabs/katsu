@@ -414,7 +414,7 @@ impl IsoBuilder {
 				{
 					// Hybrid mode is only supported on x86_64
 					"x86_64" => vec!["--grub2-mbr", grub2_mbr_hybrid.to_str().unwrap()],
-					"aarch64" => vec![],
+					"aarch64" | "riscv64" => vec![],
 					_ => unimplemented!(),
 				};
 

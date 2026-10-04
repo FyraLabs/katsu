@@ -49,8 +49,9 @@ jobs:
         platform:
           - linux/amd64
           - linux/arm64
+          - linux/riscv64
 
-    runs-on: ${{ matrix.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    runs-on: ${{ matrix.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || endsWith(matrix.platform, '-riscv64') && 'ubuntu-24.04-riscv' || 'ubuntu-24.04' }}
     permissions:
       packages: write
     steps:
@@ -70,6 +71,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=pr
+            type=sha,format=long
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
@@ -93,6 +95,8 @@ jobs:
         with:
           context: .
           file: Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: BASE_IMAGE=${{ matrix.platform == 'linux/riscv64' && 'fedorariscv/base:43' || 'ghcr.io/terrapkg/builder:f43' }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -143,6 +147,7 @@ jobs:
             type=ref,event=branch
             type=ref,event=tag
             type=ref,event=pr
+            type=sha,format=long
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
@@ -160,7 +165,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-24.04-arm
     container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu:sha-${{ github.sha }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -187,11 +192,38 @@ jobs:
           name: image-arm
           path: tests/ng/katsu-work/image/*.raw.zstd
 
+  image-riscv64:
+    needs: build-environment
+    runs-on: ubuntu-24.04-riscv
+    container:
+      image: ghcr.io/fyralabs/katsu:sha-${{ github.sha }}
+      options: --privileged -v /dev:/dev
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run test
+        run: |
+          export PATH=$HOME/.cargo/bin:$PATH
+          export KATSU_KEEP_CHROOT=1
+          pushd tests/ng
+          echo "COLORBT_SHOW_HIDDEN=1" >> .env
+          echo "KATSU_LOG=trace" >> .env
+          katsu -o disk-image katsu-riscv.yaml 2>&1
+          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu-riscv64.raw.zstd
+          popd
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-riscv64
+          path: tests/ng/katsu-work/image/*.raw.zstd
+
   bios-x86_64:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu:sha-${{ github.sha }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -223,7 +255,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu:sha-${{ github.sha }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -254,7 +286,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu:sha-${{ github.sha }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -285,7 +317,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu:sha-${{ github.sha }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -330,7 +362,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu:sha-${{ github.sha }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -362,7 +394,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu:sha-${{ github.sha }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
@@ -394,7 +426,7 @@ jobs:
     needs: build-environment
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+      image: ghcr.io/fyralabs/katsu:sha-${{ github.sha }}
       # Pass /dev from host to container
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,

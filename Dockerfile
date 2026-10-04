@@ -1,4 +1,5 @@
-FROM ghcr.io/terrapkg/builder:f43 AS base
+ARG BASE_IMAGE=ghcr.io/terrapkg/builder:f43
+FROM ${BASE_IMAGE} AS base
 
 RUN --mount=type=cache,target=/var/cache \
     dnf install -y \

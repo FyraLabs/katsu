@@ -664,6 +664,8 @@ pub enum PartitionType {
 	Root,
 	/// Root partition for ARM64
 	RootArm64,
+	/// Root partition for RISC-V 64-bit
+	RootRiscv64,
 	/// Root partition for x86_64
 	RootX86_64,
 	/// Efi system partition
@@ -690,10 +692,12 @@ impl PartitionType {
 				return match target_arch {
 					"x86_64" => PartitionType::RootX86_64.uuid(target_arch),
 					"aarch64" => PartitionType::RootArm64.uuid(target_arch),
+					"riscv64" => PartitionType::RootRiscv64.uuid(target_arch),
 					_ => unimplemented!(),
 				};
 			},
 			PartitionType::RootArm64 => "b921b045-1df0-41c3-af44-4c6f280d3fae",
+			PartitionType::RootRiscv64 => "72ec70a6-cf74-40e6-bd49-4bda08e8f224",
 			PartitionType::RootX86_64 => "4f68bce3-e8cd-4db1-96e7-fbcaf984b709",
 			PartitionType::Esp => "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
 			PartitionType::Xbootldr => "bc13c2ff-59e6-4262-a352-b275fd6f7172",
@@ -704,6 +708,12 @@ impl PartitionType {
 		}
 		.to_string()
 	}
+}
+
+#[test]
+fn riscv64_root_partition_type() {
+	assert_eq!(PartitionType::Root.uuid("riscv64"), "72ec70a6-cf74-40e6-bd49-4bda08e8f224");
+	assert_eq!(PartitionType::RootRiscv64.uuid("riscv64"), "72ec70a6-cf74-40e6-bd49-4bda08e8f224");
 }
 
 /// Represents GPT partition attrbite flags which can be used, from https://uapi-group.org/specifications/specs/discoverable_partitions_specification/#partition-attribute-flags.

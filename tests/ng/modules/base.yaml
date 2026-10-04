@@ -69,6 +69,8 @@ dnf:
       - bcm283x-firmware
       - bcm283x-overlays
       - "@arm-tools"
+    riscv64:
+      - grub2-efi-riscv64
     x86_64:
       - grub2-efi-x64
       - grub2-efi-x64-modules
