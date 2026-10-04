@@ -306,170 +306,171 @@ jobs:
           path: tests/ng/katsu-work/image/iso-bootc-x86_64.iso
           archive: false
 
-  iso-bootc-x86_64-comptest:
-    strategy:
-      fail-fast: false
-      matrix:
-        compression:
-          - zstd
-        level:
-          - "6"
-        # The shipped defaults favour read latency over size, so the sweep covers
-        # both sides of that tradeoff rather than only the size-maximising point.
-        pcluster_size:
-          - 1048576
-          - 131072
-        fragments:
-          - fragments
-          - all-fragments
-        compress_hints:
-          - live
-          - none
-        # `fragdedupe` accepts only `inode` or `full`; there is no `all` value.
-        # `full` compares every fragment's content and is known to OOM a large
-        # tree, so it is a single extra entry rather than a full dimension.
-        fragdedupe:
-          - inode
-        # Global dedup is off by default: it is single-threaded and index-based, so
-        # it dominated build time and memory while `fragdedupe=inode` already
-        # caught the repeated files. Keeping it on one axis row records that
-        # tradeoff instead of leaving it to folklore.
-        dedupe:
-          - "0"
-          - "1"
-        include:
-          - compression: zstd
-            level: "6"
-            pcluster_size: 131072
-            fragments: fragments
-            compress_hints: live
-            fragdedupe: full
-            dedupe: "0"
-          # The remaining compressor at the shipped defaults.
-          - compression: lzma
-            level: "6"
-            pcluster_size: 131072
-            fragments: fragments
-            compress_hints: live
-            fragdedupe: inode
-            dedupe: "0"
+# the experiment is done!
 
-    needs: build-environment
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
-      # Pass /dev from host to container
-      # Very hacky, but it works
-      # Microsoft/Github, if you're reading this,
-      # I'm sorry.
-      #
-      # `bootc install` mirrors /dev, /var/lib/containers, /var/tmp and /run/udev
-      # from the host and compares each against /proc/1/root/<path>, so all four
-      # must exist at the same path inside the container. Without /run/udev in
-      # particular it fails with "Comparing filesystems at /run/udev ...".
-      options: --privileged --security-opt seccomp=unconfined -v /dev:/dev -v /run/udev:/run/udev -v /var/tmp:/var/tmp -v /var/lib/containers:/var/lib/containers -v /usr:/hostusr -v /:/hostfs
-
-    steps:
-      - uses: actions/checkout@v4
-      - name: Clean up space before build
-        run: |
-          df -h
-          # Wipe stuff in our host /usr to make some space
-
-          # We don't need the android SDK
-          rm -rf /hostusr/local/lib/android
-          # We're a Rust shop, not a Haskell shop
-          rm -rf /hostusr/local/.ghcup
-          rm -rf /hostfs/opt/ghc
-          # We don't even use .NET
-          rm -rf /hostusr/share/dotnet
-          # We don't need CodeQL in this action
-          rm -rf /hostfs/opt/hostedtoolcache/CodeQL
-
-      - name: Build
-        # One comma-separated line: clap splits KATSU_FEATURE_FLAGS on `,`, so a
-        # folded/multi-line value would leave leading spaces on later flags and
-        # they would silently not apply. The compression level is its own flag for
-        # the same reason: `zstd,level=6` would be split and the level dropped.
-        env:
-          KATSU_FEATURE_FLAGS: erofs-compression=${{ matrix.compression }},erofs-compression-level=${{ matrix.level }},erofs-chunk-size=${{ matrix.pcluster_size }},erofs-fragments=${{ matrix.fragments }},erofs-compress-hints=${{ matrix.compress_hints }},erofs-fragdedupe=${{ matrix.fragdedupe }}${{ matrix.dedupe == '1' && ',erofs-dedupe' || '' }}
-        run: |
-          export PATH=$HOME/.cargo/bin:$PATH
-          export KATSU_KEEP_CHROOT=1
-          pushd tests/ng
-          echo "COLORBT_SHOW_HIDDEN=1" >> .env
-          echo "KATSU_LOG=trace" >> .env
-
-          start=$(date +%s)
-          katsu -o iso bootc/katsu-iso-bootc.yaml 2>&1
-          elapsed=$(( $(date +%s) - start ))
-
-          mv out.iso "katsu-work/image/iso-bootc-comptest-${{ matrix.compression }}-${{ matrix.level }}-${{ matrix.pcluster_size }}-${{ matrix.fragments }}-${{ matrix.compress_hints }}-${{ matrix.fragdedupe }}-dedupe${{ matrix.dedupe }}.iso"
-          popd
-
-          # Stash the figures the bench step reports, so the two stay independent.
-          {
-            echo "elapsed=$elapsed"
-            echo "iso_bytes=$(stat -c %s tests/ng/katsu-work/image/iso-bootc-comptest-${{ matrix.compression }}-${{ matrix.level }}-${{ matrix.pcluster_size }}-${{ matrix.fragments }}-${{ matrix.compress_hints }}-${{ matrix.fragdedupe }}-dedupe${{ matrix.dedupe }}.iso)"
-            echo "payload_bytes=$(stat -c %s tests/ng/katsu-work/iso-tree/LiveOS/rootfs.img)"
-          } >> "$GITHUB_ENV"
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: iso-bootc-comptest-${{ matrix.compression }}-${{ matrix.level }}-${{ matrix.pcluster_size }}-${{ matrix.fragments }}-${{ matrix.compress_hints }}-${{ matrix.fragdedupe }}-dedupe${{ matrix.dedupe }}
-          path: tests/ng/katsu-work/image/iso-bootc-comptest-${{ matrix.compression }}-${{ matrix.level }}-${{ matrix.pcluster_size }}-${{ matrix.fragments }}-${{ matrix.compress_hints }}-${{ matrix.fragdedupe }}-dedupe${{ matrix.dedupe }}.iso
-          # The whole point of this job is measuring size; a silently empty or
-          # truncated upload would invalidate the comparison.
-          if-no-files-found: warn
-          archive: false
-
-      - name: Bench reads
-        # Read latency, so a configuration cannot look good on size alone while
-        # making the live system slow. `scripts/erofs-read-bench` samples the
-        # payload's content-addressed objects with a fixed seed, so every matrix
-        # entry reads exactly the same bytes. It must run as root because
-        # `composefs/` is mode 0700 in the installed image.
-        #
-        # The payload is a GPT disk, not a bare filesystem: mounting the whole
-        # image fails with EINVAL because a partition table is not a filesystem.
-        # Its EROFS root is partition 3 (ESP, XBOOTLDR, root).
-        run: |
-          set -euo pipefail
-          payload_image=tests/ng/katsu-work/iso-tree/LiveOS/rootfs.img
-
-          mount_dir=$(mktemp -d)
-          payload=$(losetup --show -P --find "$payload_image")
-          mount -o ro "${payload}p3" "$mount_dir"
-          sync
-          echo 3 > /proc/sys/vm/drop_caches
-          # Cheap invariant check first: the offset arithmetic is what broke this
-          # job, and it is silent when subtly wrong (it samples nothing useful).
-          "$GITHUB_WORKSPACE/scripts/erofs-read-bench" --self-test
-          read_us=$("$GITHUB_WORKSPACE/scripts/erofs-read-bench" "$mount_dir/composefs/objects")
-          umount "$mount_dir"
-          losetup -d "$payload"
-          echo "read_us=$read_us" >> "$GITHUB_ENV"
-
-      - name: Summarise
-        run: |
-          human=$(numfmt --to=iec --suffix=B "$iso_bytes")
-          payload_human=$(numfmt --to=iec --suffix=B "$payload_bytes")
-          {
-            echo "### EROFS compression test"
-            echo
-            echo "| compression | level | chunk size | fragments | hints | fragdedupe | dedupe | payload | ISO size | build time | read p50/p90/p99 |"
-            echo "|---|---|---|---|---|---|---|---|---|---|---|"
-            echo "| \`${{ matrix.compression }}\` | ${{ matrix.level }} | ${{ matrix.pcluster_size }} | \`${{ matrix.fragments }}\` | \`${{ matrix.compress_hints }}\` | ${{ matrix.fragdedupe }} | ${{ matrix.dedupe }} | $payload_human ($payload_bytes bytes) | $human ($iso_bytes bytes) | ${elapsed}s | $read_us |"
-            echo
-            echo "Reads sample the payload's content-addressed objects, so they reflect the"
-            echo "cluster size, fragments mode and compression algorithm. They do not cover the"
-            echo "per-path \`--compress-hints\` entries, whose patterns match paths inside the"
-            echo "composefs image rather than the raw payload: rows differing only in hints are"
-            echo "expected to measure alike."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-
+#   iso-bootc-x86_64-comptest:
+#     strategy:
+#       fail-fast: false
+#       matrix:
+#         compression:
+#           - zstd
+#         level:
+#           - "6"
+#         # The shipped defaults favour read latency over size, so the sweep covers
+#         # both sides of that tradeoff rather than only the size-maximising point.
+#         pcluster_size:
+#           - 1048576
+#           - 131072
+#         fragments:
+#           - fragments
+#           - all-fragments
+#         compress_hints:
+#           - live
+#           - none
+#         # `fragdedupe` accepts only `inode` or `full`; there is no `all` value.
+#         # `full` compares every fragment's content and is known to OOM a large
+#         # tree, so it is a single extra entry rather than a full dimension.
+#         fragdedupe:
+#           - inode
+#         # Global dedup is off by default: it is single-threaded and index-based, so
+#         # it dominated build time and memory while `fragdedupe=inode` already
+#         # caught the repeated files. Keeping it on one axis row records that
+#         # tradeoff instead of leaving it to folklore.
+#         dedupe:
+#           - "0"
+#           - "1"
+#         include:
+#           - compression: zstd
+#             level: "6"
+#             pcluster_size: 131072
+#             fragments: fragments
+#             compress_hints: live
+#             fragdedupe: full
+#             dedupe: "0"
+#           # The remaining compressor at the shipped defaults.
+#           - compression: lzma
+#             level: "6"
+#             pcluster_size: 131072
+#             fragments: fragments
+#             compress_hints: live
+#             fragdedupe: inode
+#             dedupe: "0"
+# 
+#     needs: build-environment
+#     runs-on: ubuntu-latest
+#     container:
+#       image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+#       # Pass /dev from host to container
+#       # Very hacky, but it works
+#       # Microsoft/Github, if you're reading this,
+#       # I'm sorry.
+#       #
+#       # `bootc install` mirrors /dev, /var/lib/containers, /var/tmp and /run/udev
+#       # from the host and compares each against /proc/1/root/<path>, so all four
+#       # must exist at the same path inside the container. Without /run/udev in
+#       # particular it fails with "Comparing filesystems at /run/udev ...".
+#       options: --privileged --security-opt seccomp=unconfined -v /dev:/dev -v /run/udev:/run/udev -v /var/tmp:/var/tmp -v /var/lib/containers:/var/lib/containers -v /usr:/hostusr -v /:/hostfs
+# 
+#     steps:
+#       - uses: actions/checkout@v4
+#       - name: Clean up space before build
+#         run: |
+#           df -h
+#           # Wipe stuff in our host /usr to make some space
+# 
+#           # We don't need the android SDK
+#           rm -rf /hostusr/local/lib/android
+#           # We're a Rust shop, not a Haskell shop
+#           rm -rf /hostusr/local/.ghcup
+#           rm -rf /hostfs/opt/ghc
+#           # We don't even use .NET
+#           rm -rf /hostusr/share/dotnet
+#           # We don't need CodeQL in this action
+#           rm -rf /hostfs/opt/hostedtoolcache/CodeQL
+# 
+#       - name: Build
+#         # One comma-separated line: clap splits KATSU_FEATURE_FLAGS on `,`, so a
+#         # folded/multi-line value would leave leading spaces on later flags and
+#         # they would silently not apply. The compression level is its own flag for
+#         # the same reason: `zstd,level=6` would be split and the level dropped.
+#         env:
+#           KATSU_FEATURE_FLAGS: erofs-compression=${{ matrix.compression }},erofs-compression-level=${{ matrix.level }},erofs-chunk-size=${{ matrix.pcluster_size }},erofs-fragments=${{ matrix.fragments }},erofs-compress-hints=${{ matrix.compress_hints }},erofs-fragdedupe=${{ matrix.fragdedupe }}${{ matrix.dedupe == '1' && ',erofs-dedupe' || '' }}
+#         run: |
+#           export PATH=$HOME/.cargo/bin:$PATH
+#           export KATSU_KEEP_CHROOT=1
+#           pushd tests/ng
+#           echo "COLORBT_SHOW_HIDDEN=1" >> .env
+#           echo "KATSU_LOG=trace" >> .env
+# 
+#           start=$(date +%s)
+#           katsu -o iso bootc/katsu-iso-bootc.yaml 2>&1
+#           elapsed=$(( $(date +%s) - start ))
+# 
+#           mv out.iso "katsu-work/image/iso-bootc-comptest-${{ matrix.compression }}-${{ matrix.level }}-${{ matrix.pcluster_size }}-${{ matrix.fragments }}-${{ matrix.compress_hints }}-${{ matrix.fragdedupe }}-dedupe${{ matrix.dedupe }}.iso"
+#           popd
+# 
+#           # Stash the figures the bench step reports, so the two stay independent.
+#           {
+#             echo "elapsed=$elapsed"
+#             echo "iso_bytes=$(stat -c %s tests/ng/katsu-work/image/iso-bootc-comptest-${{ matrix.compression }}-${{ matrix.level }}-${{ matrix.pcluster_size }}-${{ matrix.fragments }}-${{ matrix.compress_hints }}-${{ matrix.fragdedupe }}-dedupe${{ matrix.dedupe }}.iso)"
+#             echo "payload_bytes=$(stat -c %s tests/ng/katsu-work/iso-tree/LiveOS/rootfs.img)"
+#           } >> "$GITHUB_ENV"
+# 
+#       - name: Upload artifacts
+#         uses: actions/upload-artifact@v7
+#         with:
+#           name: iso-bootc-comptest-${{ matrix.compression }}-${{ matrix.level }}-${{ matrix.pcluster_size }}-${{ matrix.fragments }}-${{ matrix.compress_hints }}-${{ matrix.fragdedupe }}-dedupe${{ matrix.dedupe }}
+#           path: tests/ng/katsu-work/image/iso-bootc-comptest-${{ matrix.compression }}-${{ matrix.level }}-${{ matrix.pcluster_size }}-${{ matrix.fragments }}-${{ matrix.compress_hints }}-${{ matrix.fragdedupe }}-dedupe${{ matrix.dedupe }}.iso
+#           # The whole point of this job is measuring size; a silently empty or
+#           # truncated upload would invalidate the comparison.
+#           if-no-files-found: warn
+#           archive: false
+# 
+#       - name: Bench reads
+#         # Read latency, so a configuration cannot look good on size alone while
+#         # making the live system slow. `scripts/erofs-read-bench` samples the
+#         # payload's content-addressed objects with a fixed seed, so every matrix
+#         # entry reads exactly the same bytes. It must run as root because
+#         # `composefs/` is mode 0700 in the installed image.
+#         #
+#         # The payload is a GPT disk, not a bare filesystem: mounting the whole
+#         # image fails with EINVAL because a partition table is not a filesystem.
+#         # Its EROFS root is partition 3 (ESP, XBOOTLDR, root).
+#         run: |
+#           set -euo pipefail
+#           payload_image=tests/ng/katsu-work/iso-tree/LiveOS/rootfs.img
+# 
+#           mount_dir=$(mktemp -d)
+#           payload=$(losetup --show -P --find "$payload_image")
+#           mount -o ro "${payload}p3" "$mount_dir"
+#           sync
+#           echo 3 > /proc/sys/vm/drop_caches
+#           # Cheap invariant check first: the offset arithmetic is what broke this
+#           # job, and it is silent when subtly wrong (it samples nothing useful).
+#           "$GITHUB_WORKSPACE/scripts/erofs-read-bench" --self-test
+#           read_us=$("$GITHUB_WORKSPACE/scripts/erofs-read-bench" "$mount_dir/composefs/objects")
+#           umount "$mount_dir"
+#           losetup -d "$payload"
+#           echo "read_us=$read_us" >> "$GITHUB_ENV"
+# 
+#       - name: Summarise
+#         run: |
+#           human=$(numfmt --to=iec --suffix=B "$iso_bytes")
+#           payload_human=$(numfmt --to=iec --suffix=B "$payload_bytes")
+#           {
+#             echo "### EROFS compression test"
+#             echo
+#             echo "| compression | level | chunk size | fragments | hints | fragdedupe | dedupe | payload | ISO size | build time | read p50/p90/p99 |"
+#             echo "|---|---|---|---|---|---|---|---|---|---|---|"
+#             echo "| \`${{ matrix.compression }}\` | ${{ matrix.level }} | ${{ matrix.pcluster_size }} | \`${{ matrix.fragments }}\` | \`${{ matrix.compress_hints }}\` | ${{ matrix.fragdedupe }} | ${{ matrix.dedupe }} | $payload_human ($payload_bytes bytes) | $human ($iso_bytes bytes) | ${elapsed}s | $read_us |"
+#             echo
+#             echo "Reads sample the payload's content-addressed objects, so they reflect the"
+#             echo "cluster size, fragments mode and compression algorithm. They do not cover the"
+#             echo "per-path \`--compress-hints\` entries, whose patterns match paths inside the"
+#             echo "composefs image rather than the raw payload: rows differing only in hints are"
+#             echo "expected to measure alike."
+#           } >> "$GITHUB_STEP_SUMMARY"
+# 
 
 
   iso-refind-x86_64:
