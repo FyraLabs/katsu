@@ -3,5 +3,28 @@ builder: bootc
 distro: Ultramarine Atomic
 
 bootc:
-  image: ghcr.io/ultramarine-linux/plasma-bootc:main
+  image: ghcr.io/ultramarine-linux/plasma-bootc:44
+
+  # Optional derivation, built with `podman build --build-arg DERIVE_FROM=<image>`.
+  # Left disabled by default so the fixture tests the base image as-is; uncomment
+  # along with `context` to exercise the derivation path.
   # derivation: bootc/Containerfile
+  # context: .
+
+  # Layout of the image on the produced media.
+  #
+  # `unified` builds bootc's native composefs layout: the payload holds a
+  # bootc-owned containers-storage next to the composefs objects, the system
+  # boots via `composefs=`, and that store doubles as an offline install source.
+  # `ostree` instead commits the rootfs to an OSTree repo and boots it via
+  # `ostree=`; `nested` embeds the OCI image inside itself (legacy).
+  layout: unified
+  stateroot: um
+
+  # Size of the staging disk image used to build the `unified` layout.
+  # The install writes the composefs objects and the imported image store
+  # separately before dedup, so the staging filesystem must hold both. Size it
+  # from the image; the file is sparse but must fit once populated.
+  # staging_disk_size: 24G
+  # ref_ defaults to "<stateroot>/<VERSION_ID from the image>/<arch>",
+  # i.e. "um/44/x86_64" for this image.

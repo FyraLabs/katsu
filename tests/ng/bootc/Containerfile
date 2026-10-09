@@ -1,41 +1,36 @@
 ARG DERIVE_FROM
-FROM registry.fedoraproject.org/fedora:43 AS bootloader_base
-# HACK: We copy GRUB2 and shim from Fedora, because CentOS' GRUB2 is kinda wonky
 
-# todo: aarch64 hack
-RUN --mount=type=cache,target=/var/cache \
-    dnf install -y grub2 grub2-efi grub2-tools grub2-tools-extra xorriso shim dosfstools grub2-efi-x64-modules grub2-efi-x64-cdboot grub2-efi-x64
+# Build a bootc derivation for a Katsu live ISO.
+#
+# This Containerfile is referenced from the manifest via `bootc.derivation`
+# (see katsu-iso-bootc.yaml). Katsu runs it as:
+#
+#   podman build -t <image>:katsu_deriv --build-arg DERIVE_FROM=<image> \
+#     -f bootc/Containerfile <context>
+#
+# so anything added here lands in the rootfs that gets committed to the ISO's
+# OSTree repository.
 
 FROM ${DERIVE_FROM}
 
-# Install the necessary packages
+# kernel + dracut: needed so the deployment has a kernel and initramfs for
+# `ostree admin deploy` to extract into the sysroot.
+#
+# Note: no fuse-overlayfs. That was only required by the old `nested` layout,
+# which embedded the OCI image inside its own containers-storage and therefore
+# needed to nest overlayfs. The `ostree` layout exports the rootfs directly.
 RUN --mount=type=cache,target=/var/cache \
-    dnf install -y kernel dracut dracut-live grub2-tools grub2-common grub2-pc-modules grub2-efi-x64 shim-x64 fuse-overlayfs
+    dnf install -y kernel dracut dracut-live
 
-# install fuse-overlayfs so we can nest overlayfs inside overlayfs with FUSE magic
-# this is needed for the bootable ISO to work
-
+# Uncomment to add a test user.
 # password 'password' for testuser
-# 
-RUN useradd -G wheel testuser && \
-    usermod -p '$y$j9T$Ot5YNY7Q/GMEV6aWRuWUP/$oVWQ7UoTd0f518jhezB.RMhrWreChe4W3H2kES1Zx/6' testuser
+# RUN useradd -G wheel testuser && \
+#     usermod -p '$y$j9T$Ot5YNY7Q/GMEV6aWRuWUP/$oVWQ7UoTd0f518jhezB.RMhrWreChe4W3H2kES1Zx/6' testuser
 
-# This is a podman/dracut implementation detail
-
-# RUN curl -fSsLo "/usr/bin/fuse-overlayfs" "https://github.com/containers/fuse-overlayfs/releases/download/v1.14/fuse-overlayfs-$(arch)" && \
-#     chmod +x "/usr/bin/fuse-overlayfs"
-
-# HACK: Make /var/tmp be a tmpfs by symlinking to /tmp,
-# in order to make bootc work at runtime.
-# This is a bootc implementation detail
-# todo: consider if we have to do this inside katsu itself
+# HACK: Make /var/tmp a symlink to /tmp, as bootc expects at runtime.
+# This is a bootc implementation detail; consider whether katsu should handle it.
 RUN rm -rf /var/tmp && \
     ln -sr /tmp /var/tmp
 
-# convenience: write the bootc image tag to /etc/bootc-image
+# convenience: record the source image tag
 RUN echo "${DERIVE_FROM}" > /etc/bootc-image
-
-COPY --from=bootloader_base /boot/efi /boot/efi
-COPY --from=bootloader_base /boot/grub2 /boot/grub2
-
-# yeah thats pretty much it

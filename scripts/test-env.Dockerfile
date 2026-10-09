@@ -19,7 +19,6 @@ RUN --mount=type=cache,target=/var/cache/dnf \
     uboot-images-armv8 \
     uboot-tools \
     rustc \
-    qemu-user-static-aarch64 \
     qemu-user-binfmt \
     qemu-kvm \
     qemu-img \
@@ -37,6 +36,17 @@ RUN --mount=type=cache,target=/var/cache/dnf \
     isomd5sum \
     dnf5 \
     podman
+
+# Architecture-scoped packages: kept out of the shared list above so an ARM build
+# does not try to resolve x86_64-exclusive names such as `qemu-user-static-aarch64`.
+ARG TARGETARCH
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+      amd64) arch_pkgs="qemu-user-static-aarch64" ;; \
+      arm64) arch_pkgs="qemu-user-static" ;; \
+      *) echo >&2 "Unsupported TARGETARCH: ${TARGETARCH}"; exit 1 ;; \
+    esac; \
+    dnf install -y --setopt=install_weak_deps=False ${arch_pkgs}
 
 FROM base AS rust-builder
 
