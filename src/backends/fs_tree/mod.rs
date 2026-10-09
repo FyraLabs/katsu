@@ -167,26 +167,18 @@ impl TreeOutput {
 
 		let staging = workspace.join("unified-root");
 		std::fs::create_dir_all(&staging)?;
-		cmd_lib::run_cmd!(mount -o ro $part $staging;)?;
-		let lower = staging.display();
+		cmd_lib::run_cmd!(mount $part $staging;)?;
 
-		let upper = workspace.join("unified-overlay");
-		for dir in ["upper", "work"] {
-			std::fs::create_dir_all(upper.join(dir))?;
-		}
 		let sysroot = workspace.join("bootc-sysroot");
 		std::fs::create_dir_all(&sysroot)?;
-		let upp = upper.join("upper");
-		let work = upper.join("work");
+		let staging_arg = staging.display();
 		let target = sysroot.display();
-		cmd_lib::run_cmd!(
-			mount -t overlay overlay -o lowerdir=$lower,upperdir=$upp,workdir=$work $target;
-		)?;
+		cmd_lib::run_cmd!(mount --bind $staging_arg $target;)?;
 
 		// A reused image must still look like a finished install; otherwise the later
 		// phases fail obscurely. The mounts are already live, so a bail here would leak
 		// them, hence the guard is built first.
-		let mounts = vec![StagedRoot::new(staging)];
+		let mounts = vec![StagedRoot::new(sysroot.clone()), StagedRoot::new(staging)];
 		let output = Self::UnifiedSysroot {
 			sysroot,
 			staging_image: disk.clone(),

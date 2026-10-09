@@ -205,15 +205,8 @@ pub fn erofs_mkfs(
 	cmd.arg(source);
 
 	tracing::info!("Creating EROFS image: {:?}", cmd);
-	let output = cmd.status().map_err(|e| {
-		if e.kind() == std::io::ErrorKind::NotFound {
-			color_eyre::eyre::eyre!(
-				"mkfs.erofs not found; install erofs-utils (e.g. `dnf install erofs-utils`)"
-			)
-		} else {
-			color_eyre::eyre::eyre!("Running mkfs.erofs: {e}")
-		}
-	})?;
+	let output =
+		cmd.status().map_err(|e| crate::util::tool_error("mkfs.erofs", "erofs-utils", e))?;
 	if !output.success() {
 		return Err(color_eyre::eyre::eyre!(
 			"mkfs.erofs failed with exit code: {}",

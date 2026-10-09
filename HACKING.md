@@ -121,6 +121,11 @@ The existing payload is renamed from `squashfs.img` to `rootfs.img` if needed,
 without copying it. Do not skip `dracut` when changing the initramfs integration;
 `cpio` must be installed on the build host.
 
+To build from an image that is already in local storage instead of pulling it
+from a registry, pass `-X no-image-pull` (or
+`KATSU_FEATURE_FLAGS=no-image-pull`). The build then fails with a clear error if
+the image is not present, rather than reaching for the network.
+
 Boot the result under UEFI/OVMF with `-serial mon:stdio -no-reboot`. For serial
 debugging use `console=ttyS0,115200 rd.debug rd.shell panic=0`; do not use
 `rd.emergency=reboot`, which reboots instead of giving a shell.

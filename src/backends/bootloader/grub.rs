@@ -2,7 +2,7 @@ use super::{BootPayload, Bootloader, GRUB_PREPEND_COMMENT};
 use crate::{
 	builder::{BOOTIMGS, ISO_TREE},
 	config::Manifest,
-	util::loopdev_with_file,
+	util::{loopdev_with_file, tool_error},
 };
 use color_eyre::{Result, eyre::bail};
 use std::{
@@ -536,7 +536,8 @@ impl Bootloader {
 				.arg("/boot/grub")
 				.arg("iso9660")
 				.args(&arch_modules)
-				.status()?;
+				.status()
+				.map_err(|e| tool_error("grub2-mkimage", "grub2-tools", e))?;
 
 			if !grub_mkimage_status.success() {
 				bail!("grub2-mkimage command failed with status: {:?}", grub_mkimage_status);
@@ -545,7 +546,8 @@ impl Bootloader {
 			let grub_mkrescue_status = Command::new("grub2-mkrescue")
 				.arg("-o")
 				.arg(iso_tree.join("../efiboot.img"))
-				.status()?;
+				.status()
+				.map_err(|e| tool_error("grub2-mkrescue", "grub2-tools-extra", e))?;
 
 			if !grub_mkrescue_status.success() {
 				bail!("grub2-mkrescue command failed with status: {:?}", grub_mkrescue_status);

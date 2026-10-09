@@ -5,7 +5,7 @@ use crate::{
 	config::{Manifest, Script},
 	feature_flag_bool, feature_flag_str,
 	rootimg::erofs::{CompressHints, MkfsErofsOptions, erofs_mkfs},
-	util::{just_write, loopdev_with_file},
+	util::{just_write, loopdev_with_file, tool_error},
 };
 use color_eyre::{Result, eyre::bail};
 use indexmap::IndexMap;
@@ -186,7 +186,7 @@ impl ImageBuilder for DiskImageBuilder {
 				.arg(format!("--boot-directory={}", chroot.join("boot").display()))
 				.arg(ldp)
 				.output()
-				.map_err(|e| color_eyre::eyre::eyre!("Failed to execute grub2-install: {}", e))?;
+				.map_err(|e| tool_error("grub2-install", "grub2-tools", e))?;
 		}
 
 		disk.unmount_from_chroot(chroot)?;
@@ -480,7 +480,7 @@ impl IsoBuilder {
 		if dracut_outside_chroot {
 			info!("Dracut run outside chroot, generating to iso-tree");
 			cmd.arg(&pending_initramfs_path);
-			let status = cmd.status()?;
+			let status = cmd.status().map_err(|e| tool_error("dracut", "dracut", e))?;
 			debug!(?status, "Dracut command finished");
 			if !status.success() {
 				bail!("Dracut failed with exit code: {}", status);
@@ -507,7 +507,7 @@ impl IsoBuilder {
 			crate::util::enter_chroot_run(root, || -> Result<()> {
 				cmd.arg(format!("/boot/initramfs-{}.img", kver));
 
-				let status = cmd.status()?;
+				let status = cmd.status().map_err(|e| tool_error("dracut", "dracut", e))?;
 				debug!(?status, "Dracut command finished");
 				if !status.success() {
 					bail!("Dracut failed with exit code: {}", status);
@@ -558,7 +558,8 @@ impl IsoBuilder {
 			.args(["-b", "1048576", "-noappend", "-e", "/dev/", "-e", "/proc/", "-e", "/sys/"])
 			.args(["-p", "/dev 755 0 0", "-p", "/proc 755 0 0", "-p", "/sys 755 0 0"])
 			.args(shellish_parse::parse(&extra_args, false).unwrap())
-			.status()?;
+			.status()
+			.map_err(|e| tool_error("mksquashfs", "squashfs-tools", e))?;
 
 		Ok(())
 	}
@@ -823,7 +824,8 @@ impl IsoBuilder {
 					.arg(&tree)
 					.arg("-o")
 					.arg(image)
-					.status()?;
+					.status()
+					.map_err(|e| tool_error("xorrisofs", "xorriso", e))?;
 			},
 			Bootloader::REFInd => {
 				std::process::Command::new("xorriso")
@@ -849,7 +851,8 @@ impl IsoBuilder {
 					.arg("-o")
 					.arg(image)
 					.arg(&tree)
-					.status()?;
+					.status()
+					.map_err(|e| tool_error("xorriso", "xorriso", e))?;
 			},
 			_ => {
 				debug!(
@@ -880,7 +883,8 @@ impl IsoBuilder {
 					.arg(volid)
 					.arg("-o")
 					.arg(image)
-					.status()?;
+					.status()
+					.map_err(|e| tool_error("xorriso", "xorriso", e))?;
 			},
 		}
 
@@ -890,7 +894,8 @@ impl IsoBuilder {
 			.arg("--force")
 			.arg("--supported-iso")
 			.arg(image)
-			.status()?;
+			.status()
+			.map_err(|e| tool_error("implantisomd5", "isomd5sum", e))?;
 		Ok(())
 	}
 }

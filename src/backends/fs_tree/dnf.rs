@@ -160,7 +160,8 @@ impl RootBuilder for DnfRootBuilder {
 				std::process::Command::new("grub2-mkconfig")
 					.arg("-o")
 					.arg("/boot/grub2/grub.cfg")
-					.status()?;
+					.status()
+					.map_err(|e| crate::util::tool_error("grub2-mkconfig", "grub2-tools", e))?;
 				Ok(())
 			});
 

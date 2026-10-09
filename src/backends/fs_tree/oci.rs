@@ -1,7 +1,9 @@
 use crate::backends::fs_tree::StagedRoot;
 use crate::backends::fs_tree::TreeOutput;
 use crate::builder::default_true;
-use crate::{backends::fs_tree::RootBuilder, config::Manifest, feature_flag_str};
+use crate::{
+	backends::fs_tree::RootBuilder, config::Manifest, feature_flag_bool, feature_flag_str,
+};
 use bytesize::ByteSize;
 use color_eyre::{Result, eyre::bail};
 use serde::{Deserialize, Serialize};
@@ -182,10 +184,29 @@ mount_program = "/usr/bin/fuse-overlayfs"
 	/// Pull the base image, building a derivation first if one is configured.
 	/// Returns the image reference to use for the rest of the build.
 	fn resolve_image(&self, image: &str) -> Result<String> {
-		info!(?image, "Pulling base image");
-		cmd_lib::run_cmd!(podman pull $image 2>&1;)?;
+		// `no-image-pull` builds from an image that is already in local storage, so a
+		// build host with a pre-seeded (or air-gapped) store does not need the registry.
+		let no_pull = feature_flag_bool!("no-image-pull");
+		if no_pull {
+			let present = std::process::Command::new("podman")
+				.args(["image", "exists", image])
+				.status()
+				.map(|s| s.success())
+				.unwrap_or(false);
+			if !present {
+				bail!("`no-image-pull` is set but {image} is not in local container storage");
+			}
+			info!(?image, "Using local base image without pulling");
+		} else {
+			info!(?image, "Pulling base image");
+			cmd_lib::run_cmd!(podman pull $image 2>&1;)?;
+		}
 
 		for extra in &self.embed_extra_images {
+			if no_pull {
+				info!(?extra, "Using local extra image without pulling");
+				continue;
+			}
 			info!(?extra, "Pulling extra image to embed");
 			cmd_lib::run_cmd!(podman pull $extra 2>&1;)?;
 		}
@@ -381,7 +402,8 @@ mount_program = "/usr/bin/fuse-overlayfs"
 			.arg(digestfile)
 			.arg(repo)
 			.arg(&source)
-			.status()?;
+			.status()
+			.map_err(|e| crate::util::tool_error("ostree", "ostree", e))?;
 		if !status.success() {
 			bail!(
 				"Container import failed ({status}); the build host needs an ostree CLI with `container image pull` support and access to the rootful containers-storage image"
@@ -623,7 +645,8 @@ impl BootcRootBuilder {
 			.args(["--filesystem=btrfs", "--generic-image", "--skip-fetch-check"])
 			.arg(format!("--target-imgref={image}"))
 			.arg(&host_disk)
-			.status()?;
+			.status()
+			.map_err(|e| crate::util::tool_error("podman", "podman", e))?;
 		if !status.success() {
 			bail!("bootc unified-storage install failed ({status})");
 		}
@@ -646,7 +669,7 @@ impl BootcRootBuilder {
 			std::fs::remove_dir_all(&staging)?;
 		}
 		std::fs::create_dir_all(&staging)?;
-		cmd_lib::run_cmd!(mount -o ro $part $staging;)?;
+		cmd_lib::run_cmd!(mount $part $staging;)?;
 
 		// Verify the layout is what we expect before handing it to the ISO phases,
 		// so a partial install fails here rather than during squash.
@@ -654,37 +677,26 @@ impl BootcRootBuilder {
 			bail!("Unified install produced no composefs in {}", staging.display());
 		}
 
-		// Expose the installed tree through an overlayfs rather than copying it: the
-		// staging root is the read-only lower layer and an upper absorbs any
-		// build-time mutation, so nothing is written back to the image and no ~13G
-		// copy is needed. This matches how the system will run live, and the upper
-		// layer is discarded with the mount.
-		let upper = workspace.join("unified-overlay");
-		for dir in ["upper", "work"] {
-			let path = upper.join(dir);
-			if path.exists() {
-				std::fs::remove_dir_all(&path)?;
-			}
-			std::fs::create_dir_all(&path)?;
-		}
+		// Expose the installed tree at `bootc-sysroot` with a bind mount, not an
+		// overlayfs. The payload carries a containers-storage graphroot, which records
+		// a deleted file as a `0:0` character-device whiteout. overlayfs reinterprets
+		// any such device as one of *its own* whiteouts and hides it: a reader sees the
+		// name via readdir but gets ENOENT from lstat, which is fatal to the xattr pass
+		// `mkfs.erofs -x1` runs before it writes anything. A bind mount presents the
+		// tree verbatim, so the store's whiteouts survive and stay meaningful.
 		std::fs::create_dir_all(&sysroot)?;
-		let lower = staging.display();
-		let upp = upper.join("upper");
-		let work = upper.join("work");
+		let staging_arg = staging.display();
 		let target = sysroot.display();
-		let overlay = sysroot.clone();
-		cmd_lib::run_cmd!(
-			mount -t overlay overlay -o lowerdir=$lower,upperdir=$upp,workdir=$work $target;
-		)?;
+		cmd_lib::run_cmd!(mount --bind $staging_arg $target;)?;
 
 		// The mounts and loop device must outlive this function, so they travel with
 		// the returned output and are released when the build drops it.
-		info!(?sysroot, "Unified composefs layout ready (overlay, no copy)");
+		info!(?sysroot, "Unified composefs layout ready (bind mount, no copy)");
 		Ok(TreeOutput::UnifiedSysroot {
-			sysroot,
+			sysroot: sysroot.clone(),
 			staging_image: workspace.join(crate::backends::fs_tree::UNIFIED_STAGING_IMAGE),
 			_loop: loop_hdl,
-			_mounts: vec![StagedRoot::new(staging), StagedRoot::new(overlay)],
+			_mounts: vec![StagedRoot::new(sysroot), StagedRoot::new(staging)],
 		})
 	}
 }

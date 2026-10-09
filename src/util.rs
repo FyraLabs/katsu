@@ -401,6 +401,21 @@ pub fn lookup_feature_flag(flags: &[String], key: &str) -> Option<String> {
 	flags.iter().find_map(|flag| flag.strip_prefix(&needle)).map(str::to_string)
 }
 
+/// Turn a failed attempt to spawn an external tool into an actionable error.
+///
+/// `Command::new` does not resolve the binary itself: a program missing from
+/// `PATH` fails in `execve` with [`std::io::ErrorKind::NotFound`] and the bare OS
+/// message "No such file or directory", which never says *which* tool is absent.
+/// Routing every external invocation through this names the tool and its package
+/// so a missing build dependency is obvious instead of cryptic.
+pub fn tool_error(tool: &str, package: &str, err: std::io::Error) -> color_eyre::Report {
+	if err.kind() == std::io::ErrorKind::NotFound {
+		color_eyre::eyre::eyre!("{tool} not found on PATH; install {package} on the build host")
+	} else {
+		color_eyre::eyre::eyre!("Running {tool}: {err}")
+	}
+}
+
 /// Create an empty sparse file with given size
 pub fn create_sparse(path: &Path, size: u64) -> Result<File> {
 	use std::io::{Seek, SeekFrom, Write};
@@ -491,5 +506,27 @@ mod tests {
 		assert_eq!(lookup_feature_flag(&f, "erofs-dedupe"), None);
 		assert_eq!(lookup_feature_flag(&f, "erofs-chunk-size").as_deref(), Some("131072"));
 		assert_eq!(lookup_feature_flag(&f, "absent"), None);
+	}
+
+	#[test]
+	fn tool_error_names_a_binary_missing_from_path() {
+		// A missing tool surfaces as `NotFound` with the bare OS message, which never
+		// says which program is absent; the helper has to add both the tool and the
+		// package that provides it.
+		let err = std::io::Error::from(std::io::ErrorKind::NotFound);
+		let message = super::tool_error("grub2-mkrescue", "grub2-tools-extra", err).to_string();
+		assert!(message.contains("grub2-mkrescue"), "{message}");
+		assert!(message.contains("grub2-tools-extra"), "{message}");
+	}
+
+	#[test]
+	fn tool_error_reports_other_failures_verbatim() {
+		// Anything that is not a missing binary keeps the OS detail rather than
+		// suggesting an install that would not help.
+		let err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+		let message = super::tool_error("xorriso", "xorriso", err).to_string();
+		assert!(message.contains("xorriso"), "{message}");
+		assert!(message.contains("denied"), "{message}");
+		assert!(!message.contains("install"), "{message}");
 	}
 }
