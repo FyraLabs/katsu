@@ -47,7 +47,11 @@ pub struct KatsuCli {
 	/// Override output file location
 	output_file: Option<PathBuf>,
 
-	/// Katsu feature flags, comma separated
+	/// Katsu feature flags, comma separated as `key=value` pairs.
+	///
+	/// Values must not contain commas: this list is comma-separated, so a comma in
+	/// a value is indistinguishable from the start of the next flag. Compression
+	/// level travels in its own flag for exactly that reason.
 	#[arg(
 		long,
 		short = 'X',
@@ -131,4 +135,25 @@ pub fn parse(cli: KatsuCli) -> Result<()> {
 	builder.build()?;
 
 	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn compression_algorithm_and_level_are_separate_flags() {
+		// The flag list is comma-separated, so a level cannot ride along inside the
+		// compression value: `zstd,level=6` would split into a stray `level=6`
+		// that no flag matches, silently dropping the level.
+		let args = vec![
+			"katsu".to_string(),
+			"-o".to_string(),
+			"iso".to_string(),
+			"-X".to_string(),
+			"erofs-compression=zstd,erofs-compression-level=6".to_string(),
+		];
+		let cli = KatsuCli::try_parse_from(args).unwrap();
+		assert_eq!(cli.feature_flags, vec!["erofs-compression=zstd", "erofs-compression-level=6"]);
+	}
 }

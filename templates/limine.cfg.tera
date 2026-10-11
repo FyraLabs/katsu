@@ -7,16 +7,16 @@ TIMEOUT=60
 	PROTOCOL=linux
 	KERNEL_PATH=boot:///boot/{{ vmlinuz }}
 	MODULE_PATH=boot:///boot/{{ initramfs }}
-	CMDLINE=root=live:LABEL={{ volid }} rd.live.image enforcing=0 {{ cmd }}
+	CMDLINE={% if ostree != "" %}{{ marker }} rd.live.image rd.systemd.gpt_auto=0 rd.katsu.label={{ volid }} {{ ostree }}{% else %}root=live:LABEL={{ volid }} rd.live.image{% endif %} enforcing=0 {{ cmd }}
 
 :{{ distro }} (Check Image)
 	PROTOCOL=linux
 	KERNEL_PATH=boot:///boot/{{ vmlinuz }}
 	MODULE_PATH=boot:///boot/{{ initramfs }}
-	CMDLINE=root=live:LABEL={{ volid }} rd.live.image rd.live.check enforcing=0 {{ cmd }}
+	CMDLINE={% if ostree != "" %}{{ marker }} rd.live.image rd.systemd.gpt_auto=0 rd.katsu.label={{ volid }} {{ ostree }}{% else %}root=live:LABEL={{ volid }} rd.live.image{% endif %} rd.live.check enforcing=0 {{ cmd }}
 
 :{{ distro }} (nomodeset)
 	PROTOCOL=linux
 	KERNEL_PATH=boot:///boot/{{ vmlinuz }}
 	MODULE_PATH=boot:///boot/{{ initramfs }}
-	CMDLINE=root=live:LABEL={{ volid }} rd.live.image enforcing=0 nomodeset {{ cmd }}
+	CMDLINE={% if ostree != "" %}{{ marker }} rd.live.image rd.systemd.gpt_auto=0 rd.katsu.label={{ volid }} {{ ostree }}{% else %}root=live:LABEL={{ volid }} rd.live.image{% endif %} enforcing=0 nomodeset {{ cmd }}
