@@ -3,7 +3,7 @@ builder: bootc
 distro: Ultramarine Atomic
 
 bootc:
-  image: ghcr.io/ultramarine-linux/plasma-bootc:44
+  image: ghcr.io/ultramarine-linux/plasma-bootc:main-surface
 
   # Optional derivation, built with `podman build --build-arg DERIVE_FROM=<image>`.
   # Left disabled by default so the fixture tests the base image as-is; uncomment
