@@ -440,16 +440,8 @@ impl IsoBuilder {
 			cmd.arg("--add-drivers").arg("erofs squashfs overlay loop iso9660");
 			cmd.arg("--no-hostonly-cmdline");
 		}
-		// `-r` rebases *units and files* onto the sysroot, but dracut still reads
-		// kernel modules from the build host's `/lib/modules`. On a machine whose
-		// kernel matches the image's that silently works; anywhere else (CI) every
-		// module probe fails, and an optional module whose `check()` returns 1 —
-		// `iscsi` is the usual one — aborts the build with
-		// `Module 'iscsi' cannot be installed.` Point dracut at the image's own
-		// modules instead, which for a composefs layout live inside the mounted
-		// image rather than in the tree.
 		let kmoddir = root.join("usr/lib/modules").join(&kver);
-		if kmoddir.is_dir() {
+		if dracut_outside_chroot && kmoddir.is_dir() {
 			// Resolve so dracut does not interpret the path relative to whatever
 			// working directory it happens to change into.
 			let kmoddir = kmoddir.canonicalize()?;
@@ -992,16 +984,7 @@ impl ImageBuilder for IsoBuilder {
 
 		// For a plain rootfs this is the tree itself; for an OSTree sysroot it is
 		// the whole sysroot, so that `/ostree/repo` and therefore the deployment
-		// ship on the media and the system can boot without any runtime install.
-		//
-		// SELinux contexts are read from the deployment root (`tree_root`), which
-		// for a sysroot is *inside* the squashed tree rather than at its top.
-		//
-		// The unified layout additionally wraps the payload in a GPT disk image:
-		// bootc looks for an ESP among the backing devices of whatever it booted
-		// from, and a bare EROFS loop provides none, so every bootc command —
-		// including `bootc status` — would fail. Building the EROFS to a temporary
-		// path leaves the final one free for the wrapper.
+		// ship on the media and the system can boot without any runtime install
 		let needs_gpt = tree_output.staging_image().is_some() && !feature_flag_bool!("no-erofs");
 		let payload = if needs_gpt {
 			let mut scratch = root_image.as_os_str().to_os_string();
