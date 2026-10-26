@@ -785,9 +785,9 @@ impl IsoBuilder {
 					image = image.display()
 				);
 				std::process::Command::new("xorriso")
-					.args(["-iso-level", "3"])
 					.arg("-as")
 					.arg("mkisofs")
+					.args(["-iso-level", "3"])
 					.arg("-R")
 					.arg("--efi-boot")
 					.arg(uefi_bin)
