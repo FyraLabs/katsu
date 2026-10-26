@@ -24,7 +24,7 @@ impl Bootloader {
 		)?;
 		std::fs::copy("/usr/share/limine/limine-bios.sys", root.join("boot/limine-bios.sys"))?;
 
-		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &root, false)?;
+		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &root)?;
 		let volid = manifest.get_volid();
 
 		let limine_cfg = root.join("boot/limine.cfg");

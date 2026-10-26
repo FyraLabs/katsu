@@ -6,7 +6,7 @@ use crate::{
 use bytesize::ByteSize;
 use color_eyre::{
 	Result,
-	eyre::{WrapErr, bail},
+	eyre::{WrapErr, bail, eyre},
 };
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -332,26 +332,24 @@ mount_program = "/usr/bin/fuse-overlayfs"
 
 	/// Read `VERSION_ID` from the image's os-release.
 	fn image_releasever(rootfs: &Path) -> Result<String> {
-		for rel in ["usr/etc/os-release", "etc/os-release", "usr/lib/os-release"] {
-			let path = rootfs.join(rel);
-			let Ok(contents) = fs::read_to_string(&path) else {
-				continue;
-			};
-			for line in contents.lines() {
-				if let Some(value) = line.strip_prefix("VERSION_ID=") {
-					let value = value.trim().trim_matches('"');
-					if !value.is_empty() {
-						debug!(?path, releasever = value, "Read release version from image");
-						return Ok(value.to_string());
-					}
-				}
-			}
-		}
-
-		bail!(
-			"Could not determine the image's release version from os-release; \
-			 set `bootc.ref_` explicitly to choose an ostree ref"
-		)
+		let releasever = ["usr/etc/os-release", "etc/os-release", "usr/lib/os-release"]
+			.iter()
+			.filter_map(|rel| fs::read_to_string(rootfs.join(rel)).ok())
+			.find_map(|contents| {
+				contents
+					.lines()
+					.find_map(|line| line.strip_prefix("VERSION_ID="))
+					.map(|value| value.trim().trim_matches('"').to_string())
+					.filter(|value| !value.is_empty())
+			})
+			.ok_or_else(|| {
+				eyre!(
+					"Could not determine the image's release version from os-release; \
+					 set `bootc.ref_` explicitly to choose an ostree ref"
+				)
+			})?;
+		debug!(%releasever, "Read release version from image");
+		Ok(releasever)
 	}
 
 	/// Build the image into an OSTree sysroot that can be booted directly.
@@ -410,7 +408,7 @@ impl BootcRootBuilder {
 		let disk_size = feature_flag_str!("staging-disk-size")
 			.map(|size| {
 				size.parse::<ByteSize>()
-					.map_err(|e| color_eyre::eyre::eyre!("invalid staging-disk-size {size:?}: {e}"))
+					.map_err(|e| eyre!("invalid staging-disk-size {size:?}: {e}"))
 			})
 			.transpose()?
 			.unwrap_or(self.staging_disk_size);

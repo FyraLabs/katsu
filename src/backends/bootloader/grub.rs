@@ -109,7 +109,7 @@ impl Bootloader {
 				"vmlinuz".to_string()
 			},
 			None => {
-				let (vmlinuz, _) = self.cp_vmlinuz_initramfs(chroot, boot_imgs_dir, true)?;
+				let (vmlinuz, _) = self.cp_vmlinuz_initramfs(chroot, boot_imgs_dir)?;
 				vmlinuz
 			},
 		};
@@ -166,19 +166,12 @@ impl Bootloader {
 		if iso_boot.join("initramfs.img").exists() {
 			debug!("Keeping the initramfs produced by the dracut phase");
 		} else {
-			let staged = match payload.initramfs.as_deref() {
-				Some(path) => {
-					debug!(?path, "Staging composefs initramfs from the BLS entry");
-					let dest = boot_imgs_dir.join("boot").join("initramfs.img");
-					fs::copy(path, &dest)?;
-					dest
-				},
-				None => {
-					let (_, initramfs) = self.cp_vmlinuz_initramfs(chroot, boot_imgs_dir, true)?;
-					boot_imgs_dir.join("boot").join(initramfs)
-				},
+			let source = match payload.initramfs.as_deref() {
+				Some(path) => path.to_path_buf(),
+				None => self.find_initramfs(chroot)?,
 			};
-			fs::copy(staged, iso_boot.join("initramfs.img"))?;
+			debug!(?source, "Staging initramfs");
+			fs::copy(source, iso_boot.join("initramfs.img"))?;
 		}
 
 		Ok((vmlinuz, "initramfs.img".to_string()))

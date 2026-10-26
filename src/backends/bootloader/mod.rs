@@ -159,7 +159,7 @@ impl OstreeDeployment {
 			return Ok(None);
 		};
 
-		let Some(karg) = Self::find_karg(&sysroot, &stateroot, &csum)? else {
+		let Some(karg) = Self::find_ostree_karg(&sysroot, &stateroot, &csum)? else {
 			warn!(
 				?sysroot,
 				"Found an OSTree deployment but no boot linkage; \
@@ -203,18 +203,18 @@ impl OstreeDeployment {
 		None
 	}
 
-	/// Read the `ostree=` karg from ostree's BLS entry. Entries are matched by the
-	/// `<stateroot>-` kernel path prefix, which uses the boot checksum, not the commit's.
-	fn find_karg(sysroot: &Path, stateroot: &str, csum: &str) -> Result<Option<String>> {
-		let Some(entries_dir) = Self::find_loader_entries_dir(&sysroot.join("boot")) else {
+	/// Read the `ostree=` karg whose boot-linkage symlink points at this deployment.
+	fn find_ostree_karg(sysroot: &Path, stateroot: &str, csum: &str) -> Result<Option<String>> {
+		let Some(entries_dir) = find_loader_entries_dir(&sysroot.join("boot")) else {
 			debug!(?sysroot, "No boot loader entries directory found");
 			return Ok(None);
 		};
-
-		// The `.N` suffix of the deployment dir is matched against the karg's last component.
-		let boot_version = csum.rsplit_once('.').map(|(_, v)| v).unwrap_or("0");
-		let kernel_prefix = format!("/ostree/{stateroot}-");
-		let karg_suffix = format!("/{boot_version}");
+		let deployment = sysroot
+			.join("ostree/deploy")
+			.join(stateroot)
+			.join("deploy")
+			.join(csum)
+			.canonicalize()?;
 
 		for entry in fs::read_dir(&entries_dir)?.flatten() {
 			let path = entry.path();
@@ -225,54 +225,39 @@ impl OstreeDeployment {
 				continue;
 			};
 
-			// Match the entry to this stateroot via the kernel/initrd path prefix.
-			let belongs = contents
-				.lines()
-				.filter(|l| l.starts_with("linux ") || l.starts_with("initrd "))
-				.any(|l| l.contains(&kernel_prefix));
-			if !belongs {
-				continue;
-			}
-
-			let karg = contents
+			let Some(karg) = contents
 				.lines()
 				.find_map(|line| line.strip_prefix("options "))
 				.and_then(|opts| opts.split_whitespace().find(|w| w.starts_with("ostree=")))
-				.map(|s| s.to_string());
-
-			let Some(karg) = karg else {
+			else {
 				warn!(?path, "BLS entry has no ostree= option");
 				continue;
 			};
 
-			// If several deployments share a stateroot the boot version disambiguates.
-			if karg.ends_with(&karg_suffix) {
+			let linkage = sysroot.join(karg.trim_start_matches("ostree=/"));
+			if linkage.canonicalize().is_ok_and(|target| target == deployment) {
 				debug!(?path, %karg, "Read ostree karg from BLS entry");
-				return Ok(Some(karg));
+				return Ok(Some(karg.to_string()));
 			}
 		}
 
 		Ok(None)
 	}
+}
 
-	/// Locate the `loader.<n>/entries` directory ostree wrote boot entries into.
-	///
-	/// ostree versions this directory (`loader.1`, `loader.2`, ...), and also
-	/// maintains a `loader` symlink to the active one, so prefer the symlink when
-	/// it resolves.
-	fn find_loader_entries_dir(boot_dir: &Path) -> Option<PathBuf> {
-		let linked = boot_dir.join("loader/entries");
-		if linked.is_dir() {
-			return Some(linked);
-		}
-
-		fs::read_dir(boot_dir)
-			.ok()?
-			.flatten()
-			.filter(|e| e.file_name().to_string_lossy().starts_with("loader."))
-			.map(|e| e.path().join("entries"))
-			.find(|p| p.is_dir())
+/// Locate ostree's active `loader/entries` (or the first `loader.<n>/entries`) under `boot_dir`.
+pub(crate) fn find_loader_entries_dir(boot_dir: &Path) -> Option<PathBuf> {
+	let linked = boot_dir.join("loader/entries");
+	if linked.is_dir() {
+		return Some(linked);
 	}
+
+	fs::read_dir(boot_dir)
+		.ok()?
+		.flatten()
+		.filter(|e| e.file_name().to_string_lossy().starts_with("loader."))
+		.map(|e| e.path().join("entries"))
+		.find(|p| p.is_dir())
 }
 
 crate::prepend_comment!(GRUB_PREPEND_COMMENT: "/boot/grub/grub.cfg", "Grub configurations", katsu::builder::Bootloader::cp_grub);
@@ -363,13 +348,7 @@ impl Bootloader {
 			Self::REFInd => ("boot/efi/EFI/refind/refind_x64.efi", ""),
 		}
 	}
-	/// Copies vmlinuz (and optionally initramfs) from /usr/lib/modules to destination
-	///
-	/// This helper method locates the kernel (vmlinuz) file in /usr/lib/modules
-	/// and copies it to the destination directory. When requested, it will also
-	/// copy the initramfs image from the chroot's `/boot` into the destination,
-	/// normalising the name to `initramfs.img` so the rest of the ISO generation
-	/// pipeline can rely on a consistent filename.
+	/// Copies vmlinuz from /usr/lib/modules to `dest/boot/vmlinuz`.
 	///
 	/// # Arguments
 	///
@@ -379,9 +358,7 @@ impl Bootloader {
 	/// # Returns
 	///
 	/// * `Result<String>` - Success with kernel filename or failure with error details
-	fn cp_vmlinuz_initramfs(
-		&self, chroot: &Path, dest: &Path, copy_initramfs: bool,
-	) -> Result<(String, String)> {
+	fn cp_vmlinuz_initramfs(&self, chroot: &Path, dest: &Path) -> Result<(String, String)> {
 		trace!("Finding vmlinuz in /usr/lib/modules");
 
 		// Prepare required directories
@@ -406,28 +383,6 @@ impl Bootloader {
 		}
 
 		fs::copy(&vmlinuz_src, &vmlinuz_dest)?;
-
-		if copy_initramfs {
-			let initramfs_dest = dest.join("boot").join("initramfs.img");
-
-			// The image's initramfs is built for disk installs and cannot mount
-			// `root=live:`, so never let it clobber the dracut phase's live one.
-			if initramfs_dest.exists() {
-				info!(
-					?initramfs_dest,
-					"Initramfs already present (from the dracut phase), not overwriting"
-				);
-			} else {
-				let initramfs_src = self.find_initramfs(chroot)?;
-				trace!(?initramfs_src, ?initramfs_dest, "Copying initramfs to destination");
-
-				if !initramfs_src.exists() {
-					bail!("Source initramfs not found at {}", initramfs_src.display());
-				}
-
-				fs::copy(&initramfs_src, &initramfs_dest)?;
-			}
-		}
 
 		Ok(("vmlinuz".to_string(), "initramfs.img".to_string()))
 	}
@@ -644,7 +599,7 @@ impl Bootloader {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use std::fs;
+	use std::{fs, os::unix::fs::symlink};
 
 	const CSUM: &str = "0123456789abcdef";
 	const BOOTCSUM: &str = "deadbeefcafe";
@@ -711,7 +666,10 @@ mod tests {
 		fs::write(deploy.join(format!("{CSUM}.0.origin")), b"[origin]\nrefspec=um/44/x86_64\n")
 			.unwrap();
 
-		fs::create_dir_all(sysroot.join("ostree").join(format!("boot.1.1/um/{BOOTCSUM}"))).unwrap();
+		let linkage = sysroot.join("ostree").join(format!("boot.1.1/um/{BOOTCSUM}"));
+		fs::create_dir_all(&linkage).unwrap();
+		symlink("boot.1.1", sysroot.join("ostree/boot.1")).unwrap();
+		symlink(format!("../../../deploy/um/deploy/{CSUM}.0"), linkage.join("0")).unwrap();
 
 		let entries = sysroot.join("boot/loader.1/entries");
 		fs::create_dir_all(&entries).unwrap();
@@ -755,6 +713,26 @@ mod tests {
 			let deployment = OstreeDeployment::resolve(tree).unwrap().expect("should resolve");
 			assert_eq!(deployment.karg, expected);
 		}
+	}
+
+	#[test]
+	fn matches_the_ostree_karg_by_linkage_not_serial() {
+		let sysroot = make_sysroot("katsu-ostree-karg-serial");
+		let other = sysroot.join("ostree/deploy/um/deploy/othercommit.0");
+		fs::create_dir_all(&other).unwrap();
+		symlink(
+			"../../../deploy/um/deploy/othercommit.0",
+			sysroot.join(format!("ostree/boot.1.1/um/{BOOTCSUM}/1")),
+		)
+		.unwrap();
+		fs::write(
+			sysroot.join("boot/loader.1/entries/ostree-2.conf"),
+			format!("options ostree=/ostree/boot.1/um/{BOOTCSUM}/1\n"),
+		)
+		.unwrap();
+
+		let deployment = OstreeDeployment::resolve(&other).unwrap().expect("should resolve");
+		assert_eq!(deployment.karg, format!("ostree=/ostree/boot.1/um/{BOOTCSUM}/1"));
 	}
 
 	/// Bootc images leave /boot empty and ship the initramfs under /usr/lib/modules.

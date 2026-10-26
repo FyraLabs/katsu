@@ -35,7 +35,7 @@ impl Bootloader {
 			cp -rv /usr/share/rEFInd/refind/icons/. $iso_tree/EFI/BOOT/icons/ 2>&1;
 		)?;
 
-		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &iso_tree, false)?;
+		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &iso_tree)?;
 		let volid = manifest.get_volid();
 
 		let refind_cfg = iso_tree.join("EFI/BOOT/refind.conf");

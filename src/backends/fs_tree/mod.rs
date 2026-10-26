@@ -54,11 +54,6 @@ pub enum TreeOutput {
 
 impl TreeOutput {
 	/// The path that should be treated as the root filesystem for this output.
-	///
-	/// For a plain directory this is the directory itself. For a sysroot this is
-	/// the *deployment* root, so that callers which only need to read or modify
-	/// files (bootloader copying, dracut, inspection) do not have to know about
-	/// the ostree layout.
 	pub fn rootfs(&self) -> Result<PathBuf> {
 		match self {
 			Self::Directory(path) => Ok(path.clone()),
@@ -76,10 +71,6 @@ impl TreeOutput {
 	}
 
 	/// The directory that should be squashed into the live image.
-	///
-	/// This is deliberately *not* the same as [`Self::rootfs`]: for a sysroot the
-	/// whole sysroot must ship, because the repository it contains is what makes
-	/// the deployment bootable.
 	pub fn squash_root(&self) -> PathBuf {
 		match self {
 			Self::Directory(path)
@@ -108,9 +99,7 @@ impl TreeOutput {
 	/// Reconstruct a `TreeOutput` from a workspace left by a previous build, so the
 	/// `root` phase can be skipped when iterating on later phases.
 	///
-	/// Returns `None` unless the tree looks complete: a build killed during
-	/// `ostree commit` leaves a repo with no deployments, and reusing that would
-	/// only fail much later.
+	/// Returns `None` unless the tree looks complete so deploys are kinda "atomic"
 	pub fn from_existing(workspace: &Path) -> Result<Option<Self>> {
 		// A unified tree is a mount over the staging image, so rebuild it from the image.
 		if workspace.join(UNIFIED_STAGING_IMAGE).is_file() {
@@ -154,7 +143,7 @@ impl TreeOutput {
 			.wrap_err_with(|| format!("mounting {} at {}", part.display(), staging.display()))?;
 		let staging_guard = StagedRoot::new(staging.clone());
 
-		// Bind-mount, not overlay: overlayfs treats the graphroot's 0:0 char-device
+		// overlayfs treats the graphroot's 0:0 char-device
 		// whiteouts as its own and hides them, which breaks `mkfs.erofs`'s xattr pass.
 		let sysroot = workspace.join("bootc-sysroot");
 		fs::create_dir_all(&sysroot)?;
@@ -212,21 +201,13 @@ impl TreeOutput {
 		Ok(None)
 	}
 
-	/// Whether the sysroot has any BLS entries under `boot/loader.<n>/entries`.
+	/// Whether the sysroot's active loader directory has any BLS entries.
 	fn has_boot_entries(sysroot: &Path) -> bool {
-		let boot = sysroot.join("boot");
-		let candidates = std::iter::once(boot.join("loader/entries")).chain(
-			fs::read_dir(&boot)
-				.into_iter()
-				.flatten()
-				.flatten()
-				.filter(|e| e.file_name().to_string_lossy().starts_with("loader."))
-				.map(|e| e.path().join("entries")),
-		);
-
-		candidates.filter_map(|dir| fs::read_dir(dir).ok()).any(|entries| {
-			entries.flatten().any(|e| e.path().extension().is_some_and(|x| x == "conf"))
-		})
+		crate::backends::bootloader::find_loader_entries_dir(&sysroot.join("boot"))
+			.and_then(|dir| fs::read_dir(dir).ok())
+			.is_some_and(|mut entries| {
+				entries.any(|e| e.is_ok_and(|e| e.path().extension().is_some_and(|x| x == "conf")))
+			})
 	}
 }
 
