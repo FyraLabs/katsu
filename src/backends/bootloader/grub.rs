@@ -4,7 +4,10 @@ use crate::{
 	config::Manifest,
 	util::{loopdev_with_file, tool_error},
 };
-use color_eyre::{Result, eyre::bail};
+use color_eyre::{
+	Result,
+	eyre::{bail, eyre},
+};
 use std::{
 	fs,
 	os::unix::fs::symlink,
@@ -12,8 +15,6 @@ use std::{
 };
 use tracing::{debug, info, info_span, warn};
 
-/// The boot parameters a GRUB config needs, grouped so the template writer stays
-/// readable as boot options grow.
 struct GrubBootParams<'a> {
 	volid: &'a str,
 	distro: &'a str,
@@ -24,21 +25,17 @@ struct GrubBootParams<'a> {
 
 impl Bootloader {
 	pub(super) fn cp_grub(
-		&self, manifest: &Manifest, chroot: &Path, workspace: &Path, ostree: &BootPayload,
+		&self, manifest: &Manifest, chroot: &Path, workspace: &Path, payload: &BootPayload,
 	) -> Result<()> {
 		let iso_tree = workspace.join(ISO_TREE);
 		let boot_imgs_dir = workspace.join(BOOTIMGS);
 
 		fs::create_dir_all(&boot_imgs_dir)?;
 		if self.get_arch(manifest) == "x86_64" {
-			// `boot_hybrid.img` is a 512-byte MBR stub shipped with the GRUB tooling
-			// rather than part of an image's boot payload, so it normally only exists
-			// on the build host, which already provides `grub2-mkimage`/`grub2-mkrescue`
-			// for this phase. Hybrid BIOS boot needs it, so a missing file is an error
-			// unless explicitly opted out.
+			// boot_hybrid.img ships with the GRUB tooling, not the image, so look on
+			// the build host first.
 			let opt_out = crate::feature_flag_bool!("no-grub-hybrid-mbr");
 			let candidates = [
-				// Build host first: this is where the GRUB tooling lives.
 				PathBuf::from("/usr/lib/grub/i386-pc/boot_hybrid.img"),
 				PathBuf::from("/usr/share/grub/i386-pc/boot_hybrid.img"),
 				// In-image copies, for images that do ship their own GRUB payload.
@@ -46,8 +43,7 @@ impl Bootloader {
 				chroot.join("boot/grub2/i386-pc/boot_hybrid.img"),
 				chroot.join("usr/lib/ostree-boot/grub2/i386-pc/boot_hybrid.img"),
 			];
-			// Only the presence of the staged file matters downstream: `xorriso`
-			// reads it from `boot_imgs_dir` and omits `--grub2-mbr` when absent.
+			// xorriso omits --grub2-mbr when this file is not staged.
 			match candidates.iter().find(|path| path.is_file()) {
 				Some(hybrid_img) => {
 					let dest = boot_imgs_dir.join("boot_hybrid.img");
@@ -74,7 +70,7 @@ impl Bootloader {
 		let distro = manifest.distro.as_deref().unwrap_or("Linux");
 
 		let (vmlinuz, initramfs) =
-			self.copy_kernel_and_initramfs(chroot, &boot_imgs_dir, &iso_tree, ostree)?;
+			self.copy_kernel_and_initramfs(chroot, &boot_imgs_dir, &iso_tree, payload)?;
 
 		self.generate_grub_config(
 			&iso_tree,
@@ -85,7 +81,7 @@ impl Bootloader {
 				initramfs: &initramfs,
 				kernel_cmdline,
 			},
-			ostree,
+			payload,
 		)?;
 		self.setup_efi_boot_files(manifest, &iso_tree)?;
 		self.generate_grub_images(chroot, &iso_tree, manifest)?;
@@ -103,15 +99,13 @@ impl Bootloader {
 	fn copy_kernel_and_initramfs(
 		&self, chroot: &Path, boot_imgs_dir: &Path, iso_tree: &Path, payload: &BootPayload,
 	) -> Result<(String, String)> {
-		// A composefs layout keeps its kernel and initramfs under
-		// `boot/bootc_composefs-<D>/` rather than `/boot` or `/usr/lib/modules`,
-		// and the BLS entry is the authoritative source for those paths.
+		// composefs keeps kernel/initrd under boot/bootc_composefs-<D>/, per its BLS entry.
 		let vmlinuz = match payload.vmlinuz.as_deref() {
 			Some(path) => {
 				debug!(?path, "Staging composefs kernel from the BLS entry");
-				let dest = boot_imgs_dir.join("boot").join("vmlinuz");
-				fs::create_dir_all(dest.parent().unwrap())?;
-				fs::copy(path, &dest)?;
+				let boot_dir = boot_imgs_dir.join("boot");
+				fs::create_dir_all(&boot_dir)?;
+				fs::copy(path, boot_dir.join("vmlinuz"))?;
 				"vmlinuz".to_string()
 			},
 			None => {
@@ -168,13 +162,10 @@ impl Bootloader {
 
 		fs::copy(boot_imgs_dir.join("boot").join(&vmlinuz), iso_boot.join(&vmlinuz))?;
 
-		// The dracut phase writes the live-capable initramfs straight into the ISO
-		// tree, so only fall back to the staged copy when nothing is there yet.
+		// Prefer the live initramfs the dracut phase already wrote here.
 		if iso_boot.join("initramfs.img").exists() {
 			debug!("Keeping the initramfs produced by the dracut phase");
 		} else {
-			// Prefer the BLS-declared initramfs for a composefs layout; otherwise use
-			// whatever the standard discovery found.
 			let staged = match payload.initramfs.as_deref() {
 				Some(path) => {
 					debug!(?path, "Staging composefs initramfs from the BLS entry");
@@ -219,10 +210,7 @@ impl Bootloader {
 			return Self::copy_dir(&boot_efi, efi_dest);
 		}
 
-		// Fall back to the build host's bootupd component cache. A disk install has
-		// bootupd write the ESP from these components, so an image that never
-		// carried its own EFI payload still leaves them available here, from the
-		// installed shim/grub2-efi packages. Same reasoning as the hybrid MBR above.
+		// Fall back to the build host's bootupd components (from shim/grub2-efi).
 		for host_efi in [Path::new("/usr/lib/efi"), Path::new("/usr/share/efi")] {
 			if host_efi.join("EFI").exists() || Self::usr_efi_has_components(host_efi) {
 				info!(?host_efi, "Copying EFI boot files from the build host");
@@ -233,7 +221,7 @@ impl Bootloader {
 		if ostree_boot {
 			bail!(
 				"No EFI payload found in the image ({}, {}, {}) or on the build host \
-				 (/usr/lib/efi); install shim-x64, grub2-efi-x64 and bootupd",
+				 (/usr/lib/efi, /usr/share/efi); install shim-x64, grub2-efi-x64 and bootupd",
 				usr_lib_efi.display(),
 				efi_src.display(),
 				boot_efi.display()
@@ -327,23 +315,16 @@ impl Bootloader {
 	fn generate_grub_config(
 		&self, iso_tree: &Path, boot: &GrubBootParams<'_>, payload: &BootPayload,
 	) -> Result<()> {
-		// When booting a deployment the initramfs needs to be told where the root
-		// lives; without this it cannot find the root filesystem.
-		let ostree_karg = payload.karg.clone();
-		if !ostree_karg.is_empty() {
-			info!(karg = %ostree_karg, "Booting a deployment");
-		}
-
 		crate::tpl!(
 			"grub.cfg.tera" => {
 				GRUB_PREPEND_COMMENT,
-				volid: boot.volid.to_string(),
-				distro: boot.distro.to_string(),
-				vmlinuz: boot.vmlinuz.to_string(),
-				initramfs: boot.initramfs.to_string(),
-				cmd: boot.kernel_cmdline.to_string(),
-				ostree: ostree_karg,
-				marker: payload.live_marker().to_string()
+				volid: boot.volid,
+				distro: boot.distro,
+				vmlinuz: boot.vmlinuz,
+				initramfs: boot.initramfs,
+				cmd: boot.kernel_cmdline,
+				ostree: &payload.karg,
+				marker: payload.live_marker()
 			} => iso_tree.join("boot/grub/grub.cfg")
 		);
 
@@ -352,7 +333,8 @@ impl Bootloader {
 
 	/// Preserve the EFI vendor layout, including fallback CSVs and GRUB configs.
 	fn setup_efi_boot_files(&self, manifest: &Manifest, iso_tree: &Path) -> Result<()> {
-		let arch_short_upper = self.get_arch_short(manifest).to_uppercase();
+		let arch_short = self.get_arch_short(manifest);
+		let arch_short_upper = arch_short.to_uppercase();
 
 		let efi_root = iso_tree.join("boot/efi/EFI");
 		let boot_out = iso_tree.join("EFI/BOOT");
@@ -390,12 +372,8 @@ impl Bootloader {
 		}
 
 		// shim's DEFAULT_LOADER, which it resolves next to itself.
-		let expected_second_stage = match arch_short_upper.as_str() {
-			"X64" => "grubx64.efi",
-			"AA64" => "grubaa64.efi",
-			other => bail!("Unsupported EFI architecture {other}"),
-		};
-		if !Self::find_file_recursive(&iso_tree.join("EFI"), expected_second_stage)? {
+		let expected_second_stage = format!("grub{arch_short}.efi");
+		if !Self::find_file_recursive(&iso_tree.join("EFI"), &expected_second_stage)? {
 			bail!(
 				"No {expected_second_stage} in the EFI tree; shim has nothing to chainload, \
 				 which the firmware will report as a failed boot"
@@ -405,13 +383,16 @@ impl Bootloader {
 		// Conventional for removable media; shim's package already provides one.
 		let boot_alias = boot_out.join(format!("BOOT{arch_short_upper}.EFI"));
 		if !boot_alias.exists() {
-			let shim = efi_root.join(format!("fedora/shim{}.efi", self.get_arch_short(manifest)));
-			if shim.is_file() {
-				debug!(?shim, ?boot_alias, "Aliasing shim as the removable-media loader");
-				fs::copy(&shim, &boot_alias)?;
-			} else {
-				bail!("No removable-media loader (BOOTX64.EFI) and no shim at {}", shim.display());
+			let shim = efi_root.join(format!("fedora/shim{arch_short}.efi"));
+			if !shim.is_file() {
+				bail!(
+					"No removable-media loader ({}) and no shim at {}",
+					boot_alias.display(),
+					shim.display()
+				);
 			}
+			debug!(?shim, ?boot_alias, "Aliasing shim as the removable-media loader");
+			fs::copy(&shim, &boot_alias)?;
 		}
 
 		// GRUB's own config and fonts, next to the second stage.
@@ -503,10 +484,8 @@ impl Bootloader {
 		};
 
 		debug!("Generating Grub images");
-		// `grub2-mkimage` needs a full module directory including `moddep.lst`. An
-		// image tree keeps only the modules for its own boot path (under
-		// `boot/grub2/<arch>`) and no `usr/lib/grub` at all, so prefer the build
-		// host's tooling directory, which is where `grub2-mkimage` itself comes from.
+		// grub2-mkimage needs a full module dir with moddep.lst; images usually ship
+		// only a partial one, so prefer the host's.
 		let grub_module_dirs = [
 			PathBuf::from(format!("/usr/lib/grub/{arch}")),
 			chroot.join(format!("usr/lib/grub/{arch}")),
@@ -516,7 +495,7 @@ impl Bootloader {
 			.iter()
 			.find(|dir| dir.join("moddep.lst").is_file())
 			.ok_or_else(|| {
-				color_eyre::eyre::eyre!(
+				eyre!(
 					"No GRUB module directory with moddep.lst in any of {grub_module_dirs:?}; \
 					 install grub2-pc-modules / grub2-tools on the build host"
 				)

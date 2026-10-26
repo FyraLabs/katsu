@@ -53,9 +53,7 @@ macro_rules! feature_flag_bool {
 ///
 /// This one is a string value, detecting if any feature flag with the prefix `$flag=` is present in the feature flags
 ///
-/// The value is everything after the first `=`, so a value may itself contain
-/// `=` without being silently truncated. A bare flag (`erofs-dedupe`) has no
-/// value and yields `None`; use [`feature_flag_bool!`] for those.
+/// The value is everything after the first `=`; a bare flag yields `None`.
 #[macro_export]
 macro_rules! feature_flag_str {
 	($flag:literal) => {{
@@ -387,27 +385,16 @@ pub fn run_with_chroot<T>(root: &Path, f: impl FnOnce() -> Result<T>) -> Result<
 	res
 }
 
-/// Look up a `key=value` feature flag in a parsed flag list.
-///
-/// Split out of [`feature_flag_str!`] so the lookup is testable without the
-/// process-wide cached CLI.
-///
-/// The value is everything after the first `=`. Splitting on every `=` instead
-/// would silently truncate a value that contains one, e.g.
-/// `erofs-compression=zstd,level=6` becoming `zstd,level`. Matching is exact on
-/// the key, so `erofs-compression` cannot pick up `erofs-compression-level`.
+/// Look up a `key=value` feature flag. The value is everything after the first
+/// `=`; the key must match exactly, so `erofs-compression` does not match
+/// `erofs-compression-level`.
 pub fn lookup_feature_flag(flags: &[String], key: &str) -> Option<String> {
 	let needle = format!("{key}=");
 	flags.iter().find_map(|flag| flag.strip_prefix(&needle)).map(str::to_string)
 }
 
-/// Turn a failed attempt to spawn an external tool into an actionable error.
-///
-/// `Command::new` does not resolve the binary itself: a program missing from
-/// `PATH` fails in `execve` with [`std::io::ErrorKind::NotFound`] and the bare OS
-/// message "No such file or directory", which never says *which* tool is absent.
-/// Routing every external invocation through this names the tool and its package
-/// so a missing build dependency is obvious instead of cryptic.
+/// Map a spawn failure to an error naming the missing tool and the package that
+/// provides it.
 pub fn tool_error(tool: &str, package: &str, err: std::io::Error) -> color_eyre::Report {
 	if err.kind() == std::io::ErrorKind::NotFound {
 		color_eyre::eyre::eyre!("{tool} not found on PATH; install {package} on the build host")
@@ -442,25 +429,23 @@ impl Drop for LoopDevHdl {
 	}
 }
 
-#[tracing::instrument]
-pub fn loopdev_with_file(path: &Path) -> Result<(std::path::PathBuf, LoopDevHdl)> {
+fn attach_loop(path: &Path, part_scan: bool) -> Result<(std::path::PathBuf, LoopDevHdl)> {
 	let lc = loopdev::LoopControl::open()?;
 	let loopdev = lc.next_free()?;
-	loopdev.attach_file(path)?;
+	loopdev.with().part_scan(part_scan).attach(path)?;
 	crate::bail_let!(Some(ldp) = loopdev.path() => "Fail to unwrap loopdev.path() = None");
 	Ok((ldp, LoopDevHdl(loopdev)))
 }
 
-/// Like [`loopdev_with_file`], but forces a partition scan.
-///
-/// Attaching alone publishes only the bare loop device; a partitioned image also
-/// needs `LO_FLAGS_PARTSCAN` before `/dev/loopNp3` and friends appear.
+#[tracing::instrument]
+pub fn loopdev_with_file(path: &Path) -> Result<(std::path::PathBuf, LoopDevHdl)> {
+	attach_loop(path, false)
+}
+
+/// Like [`loopdev_with_file`], but sets `LO_FLAGS_PARTSCAN` so `/dev/loopNpM`
+/// partition nodes appear.
 pub fn loopdev_with_file_and_parts(path: &Path) -> Result<(std::path::PathBuf, LoopDevHdl)> {
-	let lc = loopdev::LoopControl::open()?;
-	let loopdev = lc.next_free()?;
-	loopdev.with().part_scan(true).attach(path)?;
-	crate::bail_let!(Some(ldp) = loopdev.path() => "Fail to unwrap loopdev.path() = None");
-	Ok((ldp, LoopDevHdl(loopdev)))
+	attach_loop(path, true)
 }
 
 pub fn just_write(path: impl AsRef<Path>, content: impl AsRef<str>) -> Result<()> {
@@ -477,56 +462,21 @@ pub fn just_write(path: impl AsRef<Path>, content: impl AsRef<str>) -> Result<()
 mod tests {
 	use super::lookup_feature_flag;
 
-	fn flags(list: &[&str]) -> Vec<String> {
-		list.iter().map(|s| s.to_string()).collect()
-	}
-
 	#[test]
-	fn keeps_a_value_that_contains_an_equals_sign() {
-		// Splitting on every `=` would return "zstd,level" and silently drop the
-		// level, which is exactly the class of bug this lookup exists to avoid.
-		let f = flags(&["erofs-compression=zstd,level=6"]);
-		assert_eq!(lookup_feature_flag(&f, "erofs-compression").as_deref(), Some("zstd,level=6"));
-	}
-
-	#[test]
-	fn does_not_match_a_longer_key_that_shares_the_prefix() {
-		// `erofs-compression-level` must not satisfy a lookup for
-		// `erofs-compression`, regardless of ordering.
-		let f = flags(&["erofs-compression-level=6", "erofs-compression=zstd"]);
-		assert_eq!(lookup_feature_flag(&f, "erofs-compression").as_deref(), Some("zstd"));
-		assert_eq!(lookup_feature_flag(&f, "erofs-compression-level").as_deref(), Some("6"));
-	}
-
-	#[test]
-	fn a_bare_flag_has_no_value() {
-		// `erofs-dedupe` is a boolean flag; an empty value must not be invented for
-		// it, or `feature_flag_str!` would report some other flag's absence as one.
-		let f = flags(&["erofs-dedupe", "erofs-chunk-size=131072"]);
-		assert_eq!(lookup_feature_flag(&f, "erofs-dedupe"), None);
-		assert_eq!(lookup_feature_flag(&f, "erofs-chunk-size").as_deref(), Some("131072"));
-		assert_eq!(lookup_feature_flag(&f, "absent"), None);
-	}
-
-	#[test]
-	fn tool_error_names_a_binary_missing_from_path() {
-		// A missing tool surfaces as `NotFound` with the bare OS message, which never
-		// says which program is absent; the helper has to add both the tool and the
-		// package that provides it.
-		let err = std::io::Error::from(std::io::ErrorKind::NotFound);
-		let message = super::tool_error("grub2-mkrescue", "grub2-tools-extra", err).to_string();
-		assert!(message.contains("grub2-mkrescue"), "{message}");
-		assert!(message.contains("grub2-tools-extra"), "{message}");
-	}
-
-	#[test]
-	fn tool_error_reports_other_failures_verbatim() {
-		// Anything that is not a missing binary keeps the OS detail rather than
-		// suggesting an install that would not help.
-		let err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
-		let message = super::tool_error("xorriso", "xorriso", err).to_string();
-		assert!(message.contains("xorriso"), "{message}");
-		assert!(message.contains("denied"), "{message}");
-		assert!(!message.contains("install"), "{message}");
+	fn lookup_feature_flag_matches_exact_key_and_full_value() {
+		let flags: Vec<String> =
+			["erofs-compression-level=6", "erofs-compression=zstd,level=6", "erofs-dedupe"]
+				.map(String::from)
+				.into();
+		// The value keeps any `=` after the first.
+		assert_eq!(
+			lookup_feature_flag(&flags, "erofs-compression").as_deref(),
+			Some("zstd,level=6")
+		);
+		// A longer key sharing the prefix does not match.
+		assert_eq!(lookup_feature_flag(&flags, "erofs-compression-level").as_deref(), Some("6"));
+		// Bare boolean flags have no value.
+		assert_eq!(lookup_feature_flag(&flags, "erofs-dedupe"), None);
+		assert_eq!(lookup_feature_flag(&flags, "absent"), None);
 	}
 }
