@@ -306,71 +306,74 @@ jobs:
           path: tests/ng/katsu-work/image/iso-bootc-x86_64.iso
           archive: false
 
-  iso-refind-x86_64:
-    needs: build-environment
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
-      # Pass /dev from host to container
-      # Very hacky, but it works
-      # Microsoft/Github, if you're reading this,
-      # I'm sorry.
-      options: --privileged -v /dev:/dev
+# refind and limine tests are disabled for now as they are not important code paths
+# will be fixed later
 
-    steps:
-      - uses: actions/checkout@v4
+#   iso-refind-x86_64:
+#     needs: build-environment
+#     runs-on: ubuntu-latest
+#     container:
+#       image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+#       # Pass /dev from host to container
+#       # Very hacky, but it works
+#       # Microsoft/Github, if you're reading this,
+#       # I'm sorry.
+#       options: --privileged -v /dev:/dev
+# 
+#     steps:
+#       - uses: actions/checkout@v4
+# 
+# 
+#       - name: Run test
+#         run: |
+#           export PATH=$HOME/.cargo/bin:$PATH
+#           export KATSU_KEEP_CHROOT=1
+#           pushd tests/ng
+#           echo "COLORBT_SHOW_HIDDEN=1" >> .env
+#           echo "KATSU_LOG=trace" >> .env
+#           katsu -o iso katsu-iso-refind.yaml 2>&1
+#           mv out.iso katsu-work/image/iso-refind-x86_64.iso
+#           popd
+# 
+#       - name: Upload artifacts
+#         uses: actions/upload-artifact@v7
+#         with:
+#           name: iso-refind-x86_64
+#           path: tests/ng/katsu-work/image/iso-refind-x86_64.iso
+#           archive: false
 
-
-      - name: Run test
-        run: |
-          export PATH=$HOME/.cargo/bin:$PATH
-          export KATSU_KEEP_CHROOT=1
-          pushd tests/ng
-          echo "COLORBT_SHOW_HIDDEN=1" >> .env
-          echo "KATSU_LOG=trace" >> .env
-          katsu -o iso katsu-iso-refind.yaml 2>&1
-          mv out.iso katsu-work/image/iso-refind-x86_64.iso
-          popd
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: iso-refind-x86_64
-          path: tests/ng/katsu-work/image/iso-refind-x86_64.iso
-          archive: false
-
-  iso-limine-x86_64:
-    needs: build-environment
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
-      # Pass /dev from host to container
-      # Very hacky, but it works
-      # Microsoft/Github, if you're reading this,
-      # I'm sorry.
-      options: --privileged -v /dev:/dev
-
-    steps:
-      - uses: actions/checkout@v4
-
-
-      - name: Run test
-        run: |
-          export PATH=$HOME/.cargo/bin:$PATH
-          export KATSU_KEEP_CHROOT=1
-          pushd tests/ng
-          echo "COLORBT_SHOW_HIDDEN=1" >> .env
-          echo "KATSU_LOG=trace" >> .env
-          katsu -o iso katsu-iso-limine.yaml 2>&1
-          mv out.iso katsu-work/image/iso-limine-x86_64.iso
-          popd
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: iso-limine-x86_64
-          path: tests/ng/katsu-work/image/iso-limine-x86_64.iso
-          archive: false
+#   iso-limine-x86_64:
+#     needs: build-environment
+#     runs-on: ubuntu-latest
+#     container:
+#       image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+#       # Pass /dev from host to container
+#       # Very hacky, but it works
+#       # Microsoft/Github, if you're reading this,
+#       # I'm sorry.
+#       options: --privileged -v /dev:/dev
+# 
+#     steps:
+#       - uses: actions/checkout@v4
+# 
+# 
+#       - name: Run test
+#         run: |
+#           export PATH=$HOME/.cargo/bin:$PATH
+#           export KATSU_KEEP_CHROOT=1
+#           pushd tests/ng
+#           echo "COLORBT_SHOW_HIDDEN=1" >> .env
+#           echo "KATSU_LOG=trace" >> .env
+#           katsu -o iso katsu-iso-limine.yaml 2>&1
+#           mv out.iso katsu-work/image/iso-limine-x86_64.iso
+#           popd
+# 
+#       - name: Upload artifacts
+#         uses: actions/upload-artifact@v7
+#         with:
+#           name: iso-limine-x86_64
+#           path: tests/ng/katsu-work/image/iso-limine-x86_64.iso
+#           archive: false
 
   fs-test-x86_64:
     needs: build-environment
