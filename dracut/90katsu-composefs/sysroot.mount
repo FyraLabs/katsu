@@ -1,0 +1,15 @@
+# A bind, not an overlay: the kernel rejects (ENOTBLK) an EROFS backed by overlayfs.
+[Unit]
+Description=Katsu composefs live sysroot
+DefaultDependencies=no
+Requires=katsu-composefs-live.service
+After=katsu-composefs-live.service
+Before=initrd-root-fs.target
+OnFailure=emergency.target
+OnFailureJobMode=isolate
+
+[Mount]
+What=/run/katsu/ro
+Where=/sysroot
+Type=none
+Options=bind

@@ -118,8 +118,18 @@ sudo env KATSU_LOG=info target/debug/katsu -o iso \
 ```
 
 The existing payload is renamed from `squashfs.img` to `rootfs.img` if needed,
-without copying it. Do not skip `dracut` when changing the initramfs integration;
-`cpio` must be installed on the build host.
+without copying it. Do not skip `dracut` when changing the initramfs integration.
+
+The live-boot initramfs integration lives in `dracut/` as two dracut modules,
+`katsu-ostree` and `katsu-composefs`. They must be installed in the image under
+`/usr/lib/dracut/modules.d/`: katsu runs dracut against the image's own tree and
+requests the module with `-a`, so the build fails if the image does not ship it.
+Both modules are opt-in (`check` returns 255) and never enter a normal initramfs.
+
+For images that do not ship the module yet, pass `-X dracut-host-modules` to use
+the build host's copy from `/usr/lib/dracut/modules.d/` instead. It is overlaid
+read-only onto the image's `modules.d` for the dracut run only, and the image's
+own copy always takes precedence.
 
 To build from an image that is already in local storage instead of pulling it
 from a registry, pass `-X no-image-pull` (or

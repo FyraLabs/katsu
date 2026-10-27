@@ -1,0 +1,14 @@
+[Unit]
+Description=Katsu writable OSTree live sysroot
+DefaultDependencies=no
+Requires=katsu-ostree-live.service
+After=katsu-ostree-live.service
+Before=initrd-root-fs.target
+OnFailure=emergency.target
+OnFailureJobMode=isolate
+
+[Mount]
+What=overlay
+Where=/sysroot
+Type=overlay
+Options=lowerdir=/run/katsu/ro,upperdir=/run/katsu/writable/upper,workdir=/run/katsu/writable/work

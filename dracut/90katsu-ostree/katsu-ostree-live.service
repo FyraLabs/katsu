@@ -1,0 +1,17 @@
+[Unit]
+Description=Prepare Katsu OSTree live media
+DefaultDependencies=no
+ConditionKernelCommandLine=rd.katsu.ostree
+IgnoreOnIsolate=yes
+Wants=systemd-udev-trigger.service
+After=systemd-udev-trigger.service dracut-pre-mount.service
+Before=sysroot.mount
+OnFailure=emergency.target
+OnFailureJobMode=isolate
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/katsu-ostree-live
+RemainAfterExit=yes
+StandardOutput=journal+console
+StandardError=journal+console

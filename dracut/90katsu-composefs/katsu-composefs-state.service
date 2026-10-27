@@ -1,0 +1,15 @@
+[Unit]
+Description=Katsu writable composefs live state
+DefaultDependencies=no
+Requires=sysroot.mount
+After=sysroot.mount
+Before=bootc-root-setup.service initrd-root-fs.target
+OnFailure=emergency.target
+OnFailureJobMode=isolate
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/katsu-composefs-state
+StandardOutput=journal+console
+StandardError=journal+console
