@@ -52,17 +52,14 @@ macro_rules! feature_flag_bool {
 /// This makes use of the new CLI option `-X` (Feature Flags)
 ///
 /// This one is a string value, detecting if any feature flag with the prefix `$flag=` is present in the feature flags
+///
+/// The value is everything after the first `=`; a bare flag yields `None`.
 #[macro_export]
 macro_rules! feature_flag_str {
 	($flag:literal) => {{
 		{
 			let parsed_cli = $crate::cli::KatsuCli::p_parse();
-			let feature_flags = parsed_cli.feature_flags.clone();
-			feature_flags
-				.iter()
-				.find(|x| x.starts_with(&format!("{}=", $flag)))
-				.and_then(|x| x.split('=').nth(1))
-				.map(|s| s.to_string()) // Convert &str to owned String
+			$crate::util::lookup_feature_flag(&parsed_cli.feature_flags, $flag)
 		}
 	}};
 }
@@ -388,6 +385,24 @@ pub fn run_with_chroot<T>(root: &Path, f: impl FnOnce() -> Result<T>) -> Result<
 	res
 }
 
+/// Look up a `key=value` feature flag. The value is everything after the first
+/// `=`; the key must match exactly, so `erofs-compression` does not match
+/// `erofs-compression-level`.
+pub fn lookup_feature_flag(flags: &[String], key: &str) -> Option<String> {
+	let needle = format!("{key}=");
+	flags.iter().find_map(|flag| flag.strip_prefix(&needle)).map(str::to_string)
+}
+
+/// Map a spawn failure to an error naming the missing tool and the package that
+/// provides it.
+pub fn tool_error(tool: &str, package: &str, err: std::io::Error) -> color_eyre::Report {
+	if err.kind() == std::io::ErrorKind::NotFound {
+		color_eyre::eyre::eyre!("{tool} not found on PATH; install {package} on the build host")
+	} else {
+		color_eyre::eyre::eyre!("Running {tool}: {err}")
+	}
+}
+
 /// Create an empty sparse file with given size
 pub fn create_sparse(path: &Path, size: u64) -> Result<File> {
 	use std::io::{Seek, SeekFrom, Write};
@@ -401,6 +416,12 @@ pub fn create_sparse(path: &Path, size: u64) -> Result<File> {
 
 pub struct LoopDevHdl(loopdev::LoopDevice);
 
+impl std::fmt::Debug for LoopDevHdl {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_tuple("LoopDevHdl").field(&self.0.path()).finish()
+	}
+}
+
 impl Drop for LoopDevHdl {
 	fn drop(&mut self) {
 		let Err(e) = self.0.detach() else { return };
@@ -408,13 +429,23 @@ impl Drop for LoopDevHdl {
 	}
 }
 
-#[tracing::instrument]
-pub fn loopdev_with_file(path: &Path) -> Result<(std::path::PathBuf, LoopDevHdl)> {
+fn attach_loop(path: &Path, part_scan: bool) -> Result<(std::path::PathBuf, LoopDevHdl)> {
 	let lc = loopdev::LoopControl::open()?;
 	let loopdev = lc.next_free()?;
-	loopdev.attach_file(path)?;
+	loopdev.with().part_scan(part_scan).attach(path)?;
 	crate::bail_let!(Some(ldp) = loopdev.path() => "Fail to unwrap loopdev.path() = None");
 	Ok((ldp, LoopDevHdl(loopdev)))
+}
+
+#[tracing::instrument]
+pub fn loopdev_with_file(path: &Path) -> Result<(std::path::PathBuf, LoopDevHdl)> {
+	attach_loop(path, false)
+}
+
+/// Like [`loopdev_with_file`], but sets `LO_FLAGS_PARTSCAN` so `/dev/loopNpM`
+/// partition nodes appear.
+pub fn loopdev_with_file_and_parts(path: &Path) -> Result<(std::path::PathBuf, LoopDevHdl)> {
+	attach_loop(path, true)
 }
 
 pub fn just_write(path: impl AsRef<Path>, content: impl AsRef<str>) -> Result<()> {
@@ -425,4 +456,27 @@ pub fn just_write(path: impl AsRef<Path>, content: impl AsRef<str>) -> Result<()
 	let _ = std::fs::create_dir_all(parent);
 	File::create(path)?.write_all(content.as_bytes())?;
 	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::lookup_feature_flag;
+
+	#[test]
+	fn lookup_feature_flag_matches_exact_key_and_full_value() {
+		let flags: Vec<String> =
+			["erofs-compression-level=6", "erofs-compression=zstd,level=6", "erofs-dedupe"]
+				.map(String::from)
+				.into();
+		// The value keeps any `=` after the first.
+		assert_eq!(
+			lookup_feature_flag(&flags, "erofs-compression").as_deref(),
+			Some("zstd,level=6")
+		);
+		// A longer key sharing the prefix does not match.
+		assert_eq!(lookup_feature_flag(&flags, "erofs-compression-level").as_deref(), Some("6"));
+		// Bare boolean flags have no value.
+		assert_eq!(lookup_feature_flag(&flags, "erofs-dedupe"), None);
+		assert_eq!(lookup_feature_flag(&flags, "absent"), None);
+	}
 }

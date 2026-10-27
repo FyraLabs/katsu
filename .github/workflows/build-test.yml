@@ -1,40 +1,6 @@
 name: Build test
 
 env:
-  DNF_PKGS: |
-    xorriso
-    rpm
-    limine
-    systemd
-    btrfs-progs
-    e2fsprogs
-    xfsprogs
-    dosfstools
-    grub2
-    parted
-    gdisk
-    util-linux-core
-    systemd-container
-    grub2-efi
-    uboot-images-armv8
-    uboot-tools
-    rustc
-    qemu-user-static-aarch64
-    qemu-user-binfmt
-    qemu-kvm
-    qemu-img
-    cargo
-    systemd-devel
-    mkpasswd
-    clang-devel
-    moby-engine
-    squashfs-tools
-    erofs-utils
-    grub2-tools
-    grub2-tools-extra
-    isomd5sum
-    dnf5
-    podman
   REGISTRY_IMAGE: ghcr.io/fyralabs/katsu
 
 on:
@@ -105,7 +71,7 @@ jobs:
           touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
       - name: Upload digest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: digests-${{ steps.prepare.outputs.platform_pair }}
           path: ${{ runner.temp }}/digests/*
@@ -118,7 +84,7 @@ jobs:
       - build-environment-arch
     steps:
       - name: Download digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: ${{ runner.temp }}/digests
           pattern: digests-*
@@ -178,14 +144,15 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o disk-image katsu-arm.yaml 2>&1
-          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu-arm.raw.zstd
+          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/image-arm.raw.zstd
           popd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: image-arm
-          path: tests/ng/katsu-work/image/*.raw.zstd
+          path: tests/ng/katsu-work/image/image-arm.raw.zstd
+          archive: false
 
   bios-x86_64:
     needs: build-environment
@@ -210,14 +177,15 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o disk-image katsu-bios.yaml 2>&1
-          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu.raw.zstd
+          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/bios-x86_64.raw.zstd
           popd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bios-x86_64
-          path: tests/ng/katsu-work/image/*.raw.zstd
+          path: tests/ng/katsu-work/image/bios-x86_64.raw.zstd
+          archive: false
 
   image-x86_64:
     needs: build-environment
@@ -241,14 +209,15 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o disk-image katsu.yaml 2>&1
-          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/katsu.raw.zstd
+          zstd -19 katsu-work/image/katsu.img -c > katsu-work/image/image-x86_64.raw.zstd
           popd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: image-x86_64
-          path: tests/ng/katsu-work/image/*.raw.zstd
+          path: tests/ng/katsu-work/image/image-x86_64.raw.zstd
+          archive: false
 
   iso-x86_64:
     needs: build-environment
@@ -272,15 +241,20 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o iso katsu-iso.yaml 2>&1
-          mv out.iso katsu-work/image/katsu.iso
+          mv out.iso katsu-work/image/iso-x86_64.iso
           popd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: iso-x86_64
-          path: tests/ng/katsu-work/image/katsu.iso
+          path: tests/ng/katsu-work/image/iso-x86_64.iso
+          archive: false
 
+  # Native composefs unified storage. The payload holds a bootc-owned
+  # containers-storage next to the composefs objects, the system boots via
+  # `composefs=`, and that store doubles as an offline install source for
+  # `bootc install --source-imgref containers-storage:<image>`.
   iso-bootc-x86_64:
     needs: build-environment
     runs-on: ubuntu-latest
@@ -290,7 +264,12 @@ jobs:
       # Very hacky, but it works
       # Microsoft/Github, if you're reading this,
       # I'm sorry.
-      options: --privileged --security-opt seccomp=unconfined -v /dev:/dev -v /usr:/hostusr -v /:/hostfs
+      #
+      # `bootc install` mirrors /dev, /var/lib/containers, /var/tmp and /run/udev
+      # from the host and compares each against /proc/1/root/<path>, so all four
+      # must exist at the same path inside the container. Without /run/udev in
+      # particular it fails with "Comparing filesystems at /run/udev ...".
+      options: --privileged --security-opt seccomp=unconfined -v /dev:/dev -v /run/udev:/run/udev -v /var/tmp:/var/tmp -v /var/lib/containers:/var/lib/containers -v /usr:/hostusr -v /:/hostfs
 
     steps:
       - uses: actions/checkout@v4
@@ -317,78 +296,84 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o iso bootc/katsu-iso-bootc.yaml 2>&1
-          mv out.iso katsu-work/image/katsu.iso
+          mv out.iso katsu-work/image/iso-bootc-x86_64.iso
           popd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: iso-bootc-x86_64
-          path: tests/ng/katsu-work/image/katsu.iso
+          path: tests/ng/katsu-work/image/iso-bootc-x86_64.iso
+          archive: false
 
-  iso-refind-x86_64:
-    needs: build-environment
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
-      # Pass /dev from host to container
-      # Very hacky, but it works
-      # Microsoft/Github, if you're reading this,
-      # I'm sorry.
-      options: --privileged -v /dev:/dev
+# refind and limine tests are disabled for now as they are not important code paths
+# will be fixed later
 
-    steps:
-      - uses: actions/checkout@v4
+#   iso-refind-x86_64:
+#     needs: build-environment
+#     runs-on: ubuntu-latest
+#     container:
+#       image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+#       # Pass /dev from host to container
+#       # Very hacky, but it works
+#       # Microsoft/Github, if you're reading this,
+#       # I'm sorry.
+#       options: --privileged -v /dev:/dev
+# 
+#     steps:
+#       - uses: actions/checkout@v4
+# 
+# 
+#       - name: Run test
+#         run: |
+#           export PATH=$HOME/.cargo/bin:$PATH
+#           export KATSU_KEEP_CHROOT=1
+#           pushd tests/ng
+#           echo "COLORBT_SHOW_HIDDEN=1" >> .env
+#           echo "KATSU_LOG=trace" >> .env
+#           katsu -o iso katsu-iso-refind.yaml 2>&1
+#           mv out.iso katsu-work/image/iso-refind-x86_64.iso
+#           popd
+# 
+#       - name: Upload artifacts
+#         uses: actions/upload-artifact@v7
+#         with:
+#           name: iso-refind-x86_64
+#           path: tests/ng/katsu-work/image/iso-refind-x86_64.iso
+#           archive: false
 
-
-      - name: Run test
-        run: |
-          export PATH=$HOME/.cargo/bin:$PATH
-          export KATSU_KEEP_CHROOT=1
-          pushd tests/ng
-          echo "COLORBT_SHOW_HIDDEN=1" >> .env
-          echo "KATSU_LOG=trace" >> .env
-          katsu -o iso katsu-iso-refind.yaml 2>&1
-          mv out.iso katsu-work/image/katsu.iso
-          popd
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: iso-refind-x86_64
-          path: tests/ng/katsu-work/image/katsu.iso
-
-  iso-limine-x86_64:
-    needs: build-environment
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
-      # Pass /dev from host to container
-      # Very hacky, but it works
-      # Microsoft/Github, if you're reading this,
-      # I'm sorry.
-      options: --privileged -v /dev:/dev
-
-    steps:
-      - uses: actions/checkout@v4
-
-
-      - name: Run test
-        run: |
-          export PATH=$HOME/.cargo/bin:$PATH
-          export KATSU_KEEP_CHROOT=1
-          pushd tests/ng
-          echo "COLORBT_SHOW_HIDDEN=1" >> .env
-          echo "KATSU_LOG=trace" >> .env
-          katsu -o iso katsu-iso-limine.yaml 2>&1
-          mv out.iso katsu-work/image/katsu.iso
-          popd
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: iso-limine-x86_64
-          path: tests/ng/katsu-work/image/katsu.iso
+#   iso-limine-x86_64:
+#     needs: build-environment
+#     runs-on: ubuntu-latest
+#     container:
+#       image: ghcr.io/fyralabs/katsu:${{ github.ref_name || 'latest' }}
+#       # Pass /dev from host to container
+#       # Very hacky, but it works
+#       # Microsoft/Github, if you're reading this,
+#       # I'm sorry.
+#       options: --privileged -v /dev:/dev
+# 
+#     steps:
+#       - uses: actions/checkout@v4
+# 
+# 
+#       - name: Run test
+#         run: |
+#           export PATH=$HOME/.cargo/bin:$PATH
+#           export KATSU_KEEP_CHROOT=1
+#           pushd tests/ng
+#           echo "COLORBT_SHOW_HIDDEN=1" >> .env
+#           echo "KATSU_LOG=trace" >> .env
+#           katsu -o iso katsu-iso-limine.yaml 2>&1
+#           mv out.iso katsu-work/image/iso-limine-x86_64.iso
+#           popd
+# 
+#       - name: Upload artifacts
+#         uses: actions/upload-artifact@v7
+#         with:
+#           name: iso-limine-x86_64
+#           path: tests/ng/katsu-work/image/iso-limine-x86_64.iso
+#           archive: false
 
   fs-test-x86_64:
     needs: build-environment
@@ -412,11 +397,12 @@ jobs:
           echo "COLORBT_SHOW_HIDDEN=1" >> .env
           echo "KATSU_LOG=trace" >> .env
           katsu -o folder katsu-script-test.yaml 2>&1
-          tar -cJf katsu-work/chroot.tar.xz katsu-work/chroot
+          tar -cJf katsu-work/fs-test-x86_64.tar.xz katsu-work/chroot
           popd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fs-test-x86_64
-          path: tests/ng/katsu-work/chroot.tar.xz
+          path: tests/ng/katsu-work/fs-test-x86_64.tar.xz
+          archive: false

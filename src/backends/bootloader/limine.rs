@@ -1,4 +1,4 @@
-use super::{Bootloader, LIMINE_PREPEND_COMMENT};
+use super::{BootPayload, Bootloader, LIMINE_PREPEND_COMMENT};
 use crate::{builder::ISO_TREE, config::Manifest};
 use color_eyre::Result;
 use std::path::Path;
@@ -6,7 +6,7 @@ use tracing::info;
 
 impl Bootloader {
 	pub(super) fn cp_limine(
-		&self, manifest: &Manifest, chroot: &Path, workspace: &Path,
+		&self, manifest: &Manifest, chroot: &Path, workspace: &Path, payload: &BootPayload,
 	) -> Result<()> {
 		info!("Copying Limine files");
 		let distro = manifest.distro.as_deref().unwrap_or("Linux");
@@ -24,12 +24,12 @@ impl Bootloader {
 		)?;
 		std::fs::copy("/usr/share/limine/limine-bios.sys", root.join("boot/limine-bios.sys"))?;
 
-		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &root, false)?;
+		let (vmlinuz, initramfs) = self.cp_vmlinuz_initramfs(chroot, &root)?;
 		let volid = manifest.get_volid();
 
 		let limine_cfg = root.join("boot/limine.cfg");
 		crate::tpl!(
-			"limine.cfg.tera" => { LIMINE_PREPEND_COMMENT, distro, vmlinuz, initramfs, cmd, volid } => &limine_cfg
+			"limine.cfg.tera" => { LIMINE_PREPEND_COMMENT, distro, vmlinuz, initramfs, cmd, volid, ostree: &payload.karg, marker: payload.live_marker() } => &limine_cfg
 		);
 
 		let binding = cmd_lib::run_fun!(b2sum $limine_cfg)?;

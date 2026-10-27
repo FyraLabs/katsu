@@ -47,7 +47,7 @@ pub struct KatsuCli {
 	/// Override output file location
 	output_file: Option<PathBuf>,
 
-	/// Katsu feature flags, comma separated
+	/// Katsu feature flags, comma separated `key=value` pairs (values cannot contain commas)
 	#[arg(
 		long,
 		short = 'X',

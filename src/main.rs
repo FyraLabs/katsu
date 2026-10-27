@@ -2,6 +2,7 @@ mod backends;
 mod builder;
 mod cli;
 mod config;
+mod initramfs;
 mod rootimg;
 mod util;
 
