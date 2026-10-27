@@ -341,7 +341,7 @@ impl IsoBuilder {
 	}
 
 	/// check image for dracut module
-	/// 
+	///
 	/// fails if image doesnt come with module
 	fn ensure_dracut_module(
 		root: &Path, workspace: &Path, module: &str,
