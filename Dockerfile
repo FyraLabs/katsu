@@ -36,7 +36,6 @@ RUN --mount=type=cache,target=/var/cache \
     dnf5 \
     setfiles \
     podman \
-    cpio \
     bootc \
     fuse-overlayfs \
     coreutils \
@@ -46,7 +45,6 @@ RUN --mount=type=cache,target=/var/cache \
     https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-44.noarch.rpm \
     https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-44.noarch.rpm
 # Notes on the less obvious packages above:
-#   cpio           builds the initramfs integration archive appended to dracut's output.
 #   bootc          the `unified` layout drives `bootc install` at build time.
 #   fuse-overlayfs fallback when the kernel refuses a composefs mount.
 #   coreutils      `numfmt` formats ISO sizes in CI job summaries.

@@ -1,7 +1,7 @@
 use crate::{
 	backends::{
 		bootloader::Bootloader,
-		fs_tree::{RootBuilder, TreeOutput},
+		fs_tree::{RootBuilder, StagedRoot, TreeOutput},
 	},
 	bail_let,
 	cli::OutputFormat,
@@ -21,7 +21,7 @@ use tracing::{debug, info, trace, warn};
 /// Which live-media integration the initramfs should carry.
 ///
 /// The three layouts boot through different mechanisms, so the kernel arguments
-/// and units appended to the initramfs differ even though the media payload is
+/// and dracut modules in the initramfs differ even though the media payload is
 /// the same shape in all cases.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LiveLayout {
@@ -265,6 +265,7 @@ const DR_MODS: &str =
 	"livenet dmsquash-live dmsquash-live-autooverlay convertfs pollcdrom qemu qemu-net systemd";
 const DR_OMIT: &str = "";
 const DR_ARGS: &str = "-vv --xz --reproducible";
+const DRACUT_MODULES_DIR: &str = "usr/lib/dracut/modules.d";
 
 impl IsoBuilder {
 	/// Rewrite `fragdedupe=inode` to the content-comparing `fragdedupe=full`.
@@ -320,6 +321,81 @@ impl IsoBuilder {
 			}
 		}
 		Ok(root_image)
+	}
+
+	/// Find a dracut module directory (`NN<module>`) under `modules_dir`.
+	fn find_dracut_module(modules_dir: &Path, module: &str) -> Result<Option<PathBuf>> {
+		if !modules_dir.is_dir() {
+			return Ok(None);
+		}
+		for entry in fs::read_dir(modules_dir)? {
+			let entry = entry?;
+			let name = entry.file_name();
+			let name = name.to_string_lossy();
+			let unnumbered = name.trim_start_matches(|c: char| c.is_ascii_digit());
+			if unnumbered.len() + 2 == name.len() && unnumbered == module {
+				return Ok(Some(entry.path()));
+			}
+		}
+		Ok(None)
+	}
+
+	/// check image for dracut module
+	/// 
+	/// fails if image doesnt come with module
+	fn ensure_dracut_module(
+		root: &Path, workspace: &Path, module: &str,
+	) -> Result<Option<StagedRoot>> {
+		let image_modules = root.join(DRACUT_MODULES_DIR);
+		if let Some(path) = Self::find_dracut_module(&image_modules, module)? {
+			debug!(?path, "Using the image's dracut module");
+			return Ok(None);
+		}
+		if !feature_flag_bool!("dracut-host-modules") {
+			bail!(
+				"The image does not ship the `{module}` dracut module. Install katsu's dracut \
+				 modules (`dracut/`) in the image, or pass `-X dracut-host-modules` to use the \
+				 build host's copy"
+			);
+		}
+		let host_modules = Path::new("/").join(DRACUT_MODULES_DIR);
+		let Some(host_module) = Self::find_dracut_module(&host_modules, module)? else {
+			bail!(
+				"dracut-host-modules is set, but the build host has no `{module}` dracut module in {}",
+				host_modules.display()
+			);
+		};
+		warn!(?host_module, "Overlaying the build host's dracut module onto the image");
+
+		let stage = workspace.join("dracut-host-modules");
+		if stage.exists() {
+			fs::remove_dir_all(&stage)?;
+		}
+		let staged_module = stage.join(host_module.file_name().unwrap());
+		fs::create_dir_all(&staged_module)?;
+		for entry in fs::read_dir(&host_module)? {
+			let entry = entry?;
+			fs::copy(entry.path(), staged_module.join(entry.file_name()))?;
+		}
+
+		// The image root may be read-only (a composefs mount), so stack rather than copy.
+		let image_modules = image_modules.canonicalize()?;
+		let options =
+			format!("lowerdir={}:{}", stage.canonicalize()?.display(), image_modules.display());
+		nix::mount::mount(
+			Some("overlay"),
+			&image_modules,
+			Some("overlay"),
+			nix::mount::MsFlags::MS_RDONLY,
+			Some(options.as_str()),
+		)
+		.map_err(|e| {
+			color_eyre::eyre::eyre!(
+				"Cannot overlay dracut modules onto {}: {e}",
+				image_modules.display()
+			)
+		})?;
+		Ok(Some(StagedRoot::new(image_modules)))
 	}
 
 	/// Run dracut against `source_root`, writing the live initramfs into the ISO tree.
@@ -400,11 +476,19 @@ impl IsoBuilder {
 			cmd.arg(root.canonicalize()?);
 		}
 
-		if !matches!(live, LiveLayout::Plain) {
-			cmd.arg("--install").arg("mount mkdir realpath touch ln systemd-escape checkisomd5");
-			cmd.arg("--add-drivers").arg("erofs squashfs overlay loop iso9660");
-			cmd.arg("--no-hostonly-cmdline");
-		}
+		// The live integration ships in the image as a dracut module, see `dracut/`.
+		let katsu_module = match live {
+			LiveLayout::Plain => None,
+			LiveLayout::Ostree => Some("katsu-ostree"),
+			LiveLayout::Composefs => Some("katsu-composefs"),
+		};
+		let _host_module = match katsu_module {
+			Some(module) => {
+				cmd.args(["-a", module, "--no-hostonly-cmdline"]);
+				Self::ensure_dracut_module(root, workspace, module)?
+			},
+			None => None,
+		};
 		let kmoddir = root.join("usr/lib/modules").join(&kver);
 		if dracut_outside_chroot && kmoddir.is_dir() {
 			// Resolve so dracut does not interpret the path relative to whatever
@@ -442,15 +526,6 @@ impl IsoBuilder {
 			}
 			if !pending_initramfs_path.is_file() {
 				bail!("Dracut succeeded but did not write {}", pending_initramfs_path.display());
-			}
-			match live {
-				LiveLayout::Ostree => {
-					crate::initramfs::append_ostree_live(&pending_initramfs_path, workspace)?
-				},
-				LiveLayout::Composefs => {
-					crate::initramfs::append_composefs_live(&pending_initramfs_path, workspace)?
-				},
-				LiveLayout::Plain => {},
 			}
 			fs::rename(&pending_initramfs_path, &final_initramfs_path)?;
 		} else {
